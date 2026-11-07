@@ -24,3 +24,15 @@ export function preliminary(pr){
  if(matches.length!==1||matches[0]!==line)return 'missing or stale exact-SHA handoff';
  return null;
 }
+
+export function checksGreen(result, required) {
+ if(!Array.isArray(result?.check_runs) || result.total_count >= 100) return false;
+ // Ignore ONLY the current guarded merger's own job, which is necessarily
+ // in progress while performing this check. Other security/CI jobs still gate.
+ const relevant = result.check_runs.filter(x =>
+  !(x.name === 'integrate' && x.app?.slug === 'github-actions'));
+ if(relevant.some(x => x.status !== 'completed' ||
+   !['success','neutral','skipped'].includes(x.conclusion))) return false;
+ return required.every(name =>
+  relevant.some(x => x.name === name && x.status === 'completed' && x.conclusion === 'success'));
+}
