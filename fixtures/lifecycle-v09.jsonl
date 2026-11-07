@@ -1,0 +1,5 @@
+{"version":"v0.9","createSurface":{"surfaceId":"replay","catalogId":"__BASIC_CATALOG__"}}
+{"version":"v0.9","updateComponents":{"surfaceId":"replay","components":[{"id":"root","component":"Column","children":["greeting","detail"]},{"id":"greeting","component":"Text","text":{"path":"/title"}},{"id":"detail","component":"Text","text":{"path":"/body"}}]}}
+{"version":"v0.9","updateDataModel":{"surfaceId":"replay","path":"/","value":{"title":"Hello","body":"First"}}}
+{"version":"v0.9","updateDataModel":{"surfaceId":"replay","path":"/title","value":"Updated"}}
+{"version":"v0.9","deleteSurface":{"surfaceId":"replay"}}

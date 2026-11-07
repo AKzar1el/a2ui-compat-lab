@@ -13,12 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - name: Install pinned JS dependencies without lifecycle scripts
@@ -27,15 +29,79 @@ jobs:
         run: python -m pip install --disable-pip-version-check a2ui-core==0.5.0
       - name: Node unit and differential tests
         run: npm test
+      - name: Generate deterministic UTF-8 byte-chunk replay evidence
+        run: npm run replay:demo
+      - name: Replay pinned SDK against bundled local JSONL capture
+        run: node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl --out out/capture-replay.json
       - name: Generate pinned TypeScript/Ajv parity report
         run: node src/cli.mjs scan --strict --out out/differential.json
+      - name: Verify published A2UI lifecycle rejection and recovery trace
+        run: npm run replay:recovery
       - name: Cross-check with real Python A2UI SDK
         run: python scripts/python_parity.py --ts out/differential.json --out out/python.json
       - name: Upload comparison results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: a2ui-compat-results
           path: out/*.json
           if-no-files-found: ignore
           retention-days: 7
+
+  react-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: renderer-react/package-lock.json
+      - name: Install strict peer-compatible React release pair
+        working-directory: renderer-react
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Playwright Chromium runtime
+        working-directory: renderer-react
+        run: npx playwright install --with-deps chromium
+      - name: Real React DOM, pointer, keyboard, and deletion regression
+        working-directory: renderer-react
+        run: npm test
+      - name: Verify standalone browser harness build
+        working-directory: renderer-react
+        run: npm run build
+      - name: Upload browser trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2ui-react-browser-trace
+          path: renderer-react/out/react-browser-*
+          if-no-files-found: ignore
+          retention-days: 7
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned SDK dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install pinned React harness dependencies
+        working-directory: renderer-react
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Fail closed on new vulnerabilities; disclose known Zod 3 exposure
+        run: node scripts/security-audit.mjs --strict --out out/security.json
+      - name: Publish full dependency security report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: a2ui-dependency-security
+          path: out/security.json
+          retention-days: 7
+          if-no-files-found: ignore

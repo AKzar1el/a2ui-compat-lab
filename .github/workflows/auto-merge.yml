@@ -1,0 +1,36 @@
+name: A2UI Guarded PR Integration
+on:
+  schedule:
+    - cron: '17,37,57 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Inspect without merging'
+        type: boolean
+        default: true
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: write
+concurrency:
+  group: a2ui-guarded-merger
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.repository == 'AKzar1el/a2ui-compat-lab'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Review at most one SHA-bound worker PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          A2UI_AUTO_MERGE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        run: node scripts/guarded-merge.mjs
