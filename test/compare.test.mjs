@@ -71,6 +71,7 @@ test('changing the reference validator configuration is not silently treated as 
 test('scan baseline fails if SDK installation disagrees with the pinned version', () => {
   const report = evaluate();
   assert.equal(report.implementations.webCore, '0.15.0');
+  assert.match(report.implementations.reference, /^Ajv 8\.17\.1 \/ JSON Schema Draft 2020-12, format assertions off$/);
   const mismatched = structuredClone(report);
   mismatched.implementations.webCore = '0.16.0';
   const check = checkBaseline(mismatched);

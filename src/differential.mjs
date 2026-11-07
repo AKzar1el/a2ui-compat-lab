@@ -7,21 +7,21 @@ import {Catalog} from '@a2ui/web_core/catalog';
 const fixturesPath = new URL('../fixtures/catalog-cases.json', import.meta.url);
 const baselinePath = new URL('../baselines/expected.json', import.meta.url);
 
-function installedWebCoreVersion() {
-  // Resolve the imported public API first: package.json is not a public export.
-  let dir = dirname(fileURLToPath(import.meta.resolve('@a2ui/web_core/catalog')));
+function installedPackageVersion(entrypoint, name) {
+  // Resolve public code first: packages may not export package.json directly.
+  let dir = dirname(fileURLToPath(import.meta.resolve(entrypoint)));
   for (let i = 0; i < 12; i++) {
     const path = join(dir, 'package.json');
     if (existsSync(path)) {
       const manifest = JSON.parse(readFileSync(path, 'utf8'));
-      if (manifest.name === '@a2ui/web_core' && typeof manifest.version === 'string')
+      if (manifest.name === name && typeof manifest.version === 'string')
         return manifest.version;
     }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error('Cannot identify the installed @a2ui/web_core version');
+  throw new Error('Cannot identify the installed ' + name + ' version');
 }
 
 export function getCases() {
@@ -72,7 +72,8 @@ export function evaluate(cases = getCases()) {
   const divergences = rows.filter(row => row.divergent).map(row => row.id).sort();
   return {
     reportVersion: 1,
-    implementations: {webCore: installedWebCoreVersion(), reference: 'Ajv 8.17.1 / JSON Schema Draft 2020-12, format assertions off'},
+    implementations: {webCore: installedPackageVersion('@a2ui/web_core/catalog', '@a2ui/web_core'),
+      reference: 'Ajv ' + installedPackageVersion('ajv/dist/2020.js', 'ajv') + ' / JSON Schema Draft 2020-12, format assertions off'},
     fixtureCount: rows.length,
     divergenceCount: divergences.length,
     divergenceIds: divergences,
