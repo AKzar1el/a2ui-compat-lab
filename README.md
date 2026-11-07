@@ -12,6 +12,8 @@
 
 **3. Published release compatibility:** A clean npm project is generated in OS temp for each pinned React + web_core combination. Using `npm install --package-lock-only --strict-peer-deps --ignore-scripts`, the previous 0.14.0 pair resolves; the 0.15.0 pair currently fails `ERESOLVE` because `@a2ui/markdown-it@0.2.2` requires `web_core ^0.14.0`. A rejected install is reported as a compatibility finding, not hidden as a green install.
 
+**4. Real browser replay (isolated compatible pair):** `renderer-react/` strictly installs `@a2ui/react@0.14.0`, `@a2ui/web_core@0.14.0`, and React 19.2.0 independently of the root 0.15 parity experiments. Playwright Chromium mounts a real `A2uiSurface`, clicks a Button with pointer input, verifies the emitted action, applies a simulated agent update and checks changed DOM text, uses keyboard Enter for a second action, then deletes the surface and checks that no stale action fires. It writes a JSON trace and screenshot.
+
 ## Start here
 
 Requires **Node.js 22+** and npm; Python 3.10+ is optional.
@@ -41,7 +43,7 @@ node src/cli.mjs releases --strict --json --out out/releases.json
 
 ## Non-goals and scope
 
-This first milestone **does not** implement actual browser-based A2UI event replay, prove a business model, certify conformance, or claim that the six additional cases are unknown to all other A2UI contributors. See [Evidence](docs/EVIDENCE.md) and [Roadmap](docs/ROADMAP.md).
+The browser harness is a **narrow React v0.14 integration regression**, not proof of a novel upstream bug. It does not test incompatible React 0.15, other renderers, arbitrary agent output, complete failure recovery, commercial demand, or official A2UI conformance. See [Evidence](docs/EVIDENCE.md) and [Roadmap](docs/ROADMAP.md).
 
 The next differentiating features are real-session replay, event/action trace checking, cross-renderer behavior comparisons and published-version smoke tests. The official A2UI project already has extensive protocol conformance tests; we aim to test *downstream integrated application behavior and released dependencies* rather than duplicate their suite.
 
@@ -57,3 +59,15 @@ Maintainer: [AKzar1el](https://github.com/AKzar1el).
 
 ## First headless lifecycle replay
 The project also exercises the actual published A2UI v0.9 MessageProcessor with a five-event lifecycle (create surface, add components, initialize data, update data, delete surface). JSONL boundary fuzzing at 1/7/57 characters produces identical snapshots; malformed/incomplete lines fail closed. Run `npm run replay:demo` for a JSON trace in `out/replay.json`. This is not a browser or screenshot test.
+
+## Published React renderer browser regression
+
+```bash
+cd renderer-react
+npm ci --ignore-scripts --no-audit --no-fund
+npx playwright install chromium
+npm test
+npm run build
+```
+
+The test runs Vite on loopback with deterministic fixture data, drives real headless Chromium pointer and keyboard input, and closes both the browser and server afterward. Inspect `renderer-react/out/react-browser-trace.json` and `renderer-react/out/react-browser.png`. No LLM, credentials, or external HTTP endpoint is involved after dependency and Chromium installation; GitHub CI installs the browser and uploads both artifacts.

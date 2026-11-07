@@ -39,3 +39,34 @@ jobs:
           path: out/*.json
           if-no-files-found: ignore
           retention-days: 7
+
+  react-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: renderer-react/package-lock.json
+      - name: Install strict peer-compatible React release pair
+        working-directory: renderer-react
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Playwright Chromium runtime
+        working-directory: renderer-react
+        run: npx playwright install --with-deps chromium
+      - name: Real React DOM, pointer, keyboard, and deletion regression
+        working-directory: renderer-react
+        run: npm test
+      - name: Verify standalone browser harness build
+        working-directory: renderer-react
+        run: npm run build
+      - name: Upload browser trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2ui-react-browser-trace
+          path: renderer-react/out/react-browser-*
+          if-no-files-found: ignore
+          retention-days: 7
