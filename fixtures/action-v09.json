@@ -1,0 +1,103 @@
+[
+  {
+    "message": {
+      "version": "v0.9",
+      "createSurface": {
+        "surfaceId": "action-replay",
+        "catalogId": "__BASIC_CATALOG__"
+      }
+    }
+  },
+  {
+    "message": {
+      "version": "v0.9",
+      "updateComponents": {
+        "surfaceId": "action-replay",
+        "components": [
+          {
+            "id": "root",
+            "component": "Column",
+            "children": [
+              "status",
+              "submit"
+            ]
+          },
+          {
+            "id": "status",
+            "component": "Text",
+            "text": {
+              "path": "/selection"
+            }
+          },
+          {
+            "id": "submit",
+            "component": "Button",
+            "child": "label",
+            "variant": "primary",
+            "action": {
+              "event": {
+                "name": "confirm-choice",
+                "context": {
+                  "selection": {
+                    "path": "/selection"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "label",
+            "component": "Text",
+            "text": "Confirm"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "message": {
+      "version": "v0.9",
+      "updateDataModel": {
+        "surfaceId": "action-replay",
+        "path": "/",
+        "value": {
+          "selection": "alpha",
+          "confirmed": false
+        }
+      }
+    }
+  },
+  {
+    "tap": {
+      "surfaceId": "action-replay",
+      "componentId": "submit"
+    }
+  },
+  {
+    "message": {
+      "version": "v0.9",
+      "updateDataModel": {
+        "surfaceId": "action-replay",
+        "path": "/",
+        "value": {
+          "selection": "beta",
+          "confirmed": true
+        }
+      }
+    }
+  },
+  {
+    "tap": {
+      "surfaceId": "action-replay",
+      "componentId": "submit"
+    }
+  },
+  {
+    "message": {
+      "version": "v0.9",
+      "deleteSurface": {
+        "surfaceId": "action-replay"
+      }
+    }
+  }
+]
