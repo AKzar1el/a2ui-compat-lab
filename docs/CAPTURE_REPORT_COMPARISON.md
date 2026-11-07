@@ -10,7 +10,7 @@ node src/replay-file.mjs --input capture.jsonl --out before.json
 node src/capture-compare-cli.mjs --before before.json --after after.json --strict --json
 ```
 
-The comparison requires matching SHA-256, byte length, protocol and event count. It rejects mismatched captures rather than mislabeling input differences as SDK regressions. For each event it checks the observable surface ID, existence, component ID list/order, data model and emitted-action count. It reports **only step indices and changed field names**, never data values or action payloads. Differences exit with status 1 when \`--strict\` is set; malformed or unrelated reports exit 2; matches exit 0.
+The comparison requires matching SHA-256, byte length, protocol and event count. It rejects mismatched captures rather than mislabeling input differences as SDK regressions. For each event it checks the observable surface ID, existence, component ID list/order, data model and emitted-action count. It reports **only step indices and changed field names**, never data values or action payloads. Differences exit with status 1 when `--strict` is set; malformed or unrelated reports exit 2; matches exit 0.
 
 The raw input capture and per-SDK replay reports **can contain confidential data**. Keep them local, private, and out of public CI artifacts. The comparison output is intentionally much narrower, but still includes the input SHA-256, implementation names and event count. It does not prove two SDKs accept the same set of *different* inputs or that their browser DOM output matches.
 
