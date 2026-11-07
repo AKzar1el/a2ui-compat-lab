@@ -1,10 +1,28 @@
-import {readFileSync} from 'node:fs';
+import {readFileSync, existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
+import {dirname, join} from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
 import {Catalog} from '@a2ui/web_core/catalog';
 
 const fixturesPath = new URL('../fixtures/catalog-cases.json', import.meta.url);
 const baselinePath = new URL('../baselines/expected.json', import.meta.url);
+
+function installedWebCoreVersion() {
+  // Resolve the imported public API first: package.json is not a public export.
+  let dir = dirname(fileURLToPath(import.meta.resolve('@a2ui/web_core/catalog')));
+  for (let i = 0; i < 12; i++) {
+    const path = join(dir, 'package.json');
+    if (existsSync(path)) {
+      const manifest = JSON.parse(readFileSync(path, 'utf8'));
+      if (manifest.name === '@a2ui/web_core' && typeof manifest.version === 'string')
+        return manifest.version;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('Cannot identify the installed @a2ui/web_core version');
+}
 
 export function getCases() {
   const cases = JSON.parse(readFileSync(fixturesPath, 'utf8'));
@@ -54,7 +72,7 @@ export function evaluate(cases = getCases()) {
   const divergences = rows.filter(row => row.divergent).map(row => row.id).sort();
   return {
     reportVersion: 1,
-    implementations: {webCore: baseline.webCoreVersion, reference: 'Ajv 8.17.1 / JSON Schema Draft 2020-12, format assertions off'},
+    implementations: {webCore: installedWebCoreVersion(), reference: 'Ajv 8.17.1 / JSON Schema Draft 2020-12, format assertions off'},
     fixtureCount: rows.length,
     divergenceCount: divergences.length,
     divergenceIds: divergences,
@@ -65,9 +83,13 @@ export function evaluate(cases = getCases()) {
 export function checkBaseline(report, baseline = getBaseline()) {
   const expected = [...baseline.knownUpstreamDisagreements, ...baseline.additionalDisagreements].sort();
   const actual = [...report.divergenceIds].sort();
-  const ok = report.fixtureCount === baseline.cases && JSON.stringify(actual) === JSON.stringify(expected);
+  const observedWebCoreVersion = report.implementations?.webCore ?? null;
+  const ok = report.fixtureCount === baseline.cases && JSON.stringify(actual) === JSON.stringify(expected) &&
+    observedWebCoreVersion === baseline.webCoreVersion;
   return {
     ok,
+    expectedWebCoreVersion: baseline.webCoreVersion,
+    observedWebCoreVersion,
     expectedCount: baseline.cases,
     observedCount: report.fixtureCount,
     expectedDiscrepancies: expected,
