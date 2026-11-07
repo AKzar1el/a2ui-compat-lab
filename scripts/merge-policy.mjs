@@ -36,3 +36,37 @@ export function checksGreen(result, required) {
  return required.every(name =>
   relevant.some(x => x.name === name && x.status === 'completed' && x.conclusion === 'success'));
 }
+
+/**
+ * A source-branch creation can start then cancel CI at the *same commit SHA*
+ * as main. Find the latest CI run explicitly executed for main instead of
+ * treating unrelated historical branch check-runs as current main failures.
+ */
+export function latestMainCiRun(result, mainSha) {
+ if(!/^[a-f0-9]{40}$/.test(mainSha)||!Array.isArray(result?.workflow_runs)||
+    !Number.isSafeInteger(result.total_count)||result.total_count>=100||
+    result.workflow_runs.length!==result.total_count)return null;
+ return result.workflow_runs.filter(run=>
+   run.head_sha===mainSha&&run.head_branch==='main'&&
+   ['push','workflow_dispatch'].includes(run.event)&&Number.isSafeInteger(run.id)&&
+   typeof run.created_at==='string'&&!Number.isNaN(Date.parse(run.created_at)))
+  .sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)||b.id-a.id)[0]??null;
+}
+
+/**
+ * Required GitHub Actions jobs are proven by an exact-main workflow run.
+ * Still fail closed on every unrelated check, including third-party security.
+ */
+export function mainChecksGreen(checks, jobs, required) {
+ if(!Array.isArray(checks?.check_runs)||!Number.isSafeInteger(checks.total_count)||
+    checks.total_count>=100||checks.check_runs.length!==checks.total_count||
+    !Array.isArray(jobs?.jobs)||!Number.isSafeInteger(jobs.total_count)||
+    jobs.total_count>=100||jobs.jobs.length!==jobs.total_count)return false;
+ const unrelated=checks.check_runs.filter(check=>
+  !(check.app?.slug==='github-actions'&&
+    (required.includes(check.name)||check.name==='integrate')));
+ if(unrelated.some(check=>check.status!=='completed'||
+    !['success','neutral','skipped'].includes(check.conclusion)))return false;
+ if(jobs.jobs.some(job=>job.status!=='completed'||job.conclusion!=='success'))return false;
+ return required.every(name=>jobs.jobs.some(job=>job.name===name));
+}
