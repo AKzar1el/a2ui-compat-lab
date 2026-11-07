@@ -65,3 +65,22 @@ test('UTF-8 byte parser rejects invalid sequences, truncation and excess resourc
   assert.throws(() => parseJsonLinesBytes([line, line], {maxMessages: 1}), /count exceeds limit/);
   assert.deepEqual(parseJsonLinesBytes([Buffer.from('\r\n  \r\n{"ok":true}\r\n')]), [{ok: true}]);
 });
+
+test('text JSONL enforces untrimmed line byte limits before parsing', () => {
+  const padded = '{"ok":true}' + ' '.repeat(2048) + '\n';
+  assert.throws(() => parseJsonLines([padded], {maxLineBytes: 32}), /exceeds byte limit/);
+  assert.throws(() => parseJsonLines([padded.slice(0, 32), padded.slice(32)], {maxLineBytes: 32}), /exceeds byte limit/);
+  assert.throws(() => parseJsonLines([' '.repeat(100) + '\n'], {maxLineBytes: 32}), /exceeds byte limit/);
+  assert.throws(() => parseJsonLines(['{"ok":true}\r\n'], {maxLineBytes: 11}), /exceeds byte limit/);
+  assert.deepEqual(parseJsonLines(['{"ok":true}\r\n'], {maxLineBytes: 12}), [{ok: true}]);
+});
+
+test('text JSONL bounds message counts and preserves split UTF-16 surrogate pairs', () => {
+  const line = JSON.stringify({label: 'Čebelica 🌍'}) + '\n';
+  const bytes = Buffer.byteLength(line.slice(0, -1), 'utf8');
+  assert.deepEqual(parseJsonLines(line.split(''), {maxLineBytes: bytes}), [{label: 'Čebelica 🌍'}]);
+  assert.throws(() => parseJsonLines(line.split(''), {maxLineBytes: bytes - 1}), /exceeds byte limit/);
+  assert.throws(() => parseJsonLines(['{}\n{}\n'], {maxMessages: 1}), /message count exceeds limit/);
+  assert.throws(() => parseJsonLines(['{}\n'], {maxMessages: 0}), /Invalid message limit/);
+  assert.throws(() => parseJsonLines(['{}\n'], {maxLineBytes: Number.MAX_SAFE_INTEGER + 1}), /Invalid line limit/);
+});
