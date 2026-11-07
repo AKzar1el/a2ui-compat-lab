@@ -1,0 +1,23 @@
+{
+    "name":  "a2ui-compat-lab",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "Local-first A2UI cross-SDK and published-release compatibility regression lab",
+    "type":  "module",
+    "engines":  {
+                    "node":  "\u003e=22"
+                },
+    "scripts":  {
+                    "test":  "node --test test/*.test.mjs",
+                    "scan":  "node src/cli.mjs scan",
+                    "scan:check":  "node src/cli.mjs scan --strict",
+                    "parity:python":  "python scripts/python_parity.py --ts out/differential.json",
+                    "probe:releases":  "node src/cli.mjs releases --strict",
+                    "ci":  "npm test \u0026\u0026 npm run scan:check",
+                    "replay:demo":  "node src/replay-report.mjs --out out/replay.json"
+                },
+    "dependencies":  {
+                         "@a2ui/web_core":  "0.15.0",
+                         "ajv":  "8.17.1"
+                     }
+}

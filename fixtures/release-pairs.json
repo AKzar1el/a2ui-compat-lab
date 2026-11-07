@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "a2ui-react-webcore-0.14",
+      "packages": {
+        "@a2ui/react": "0.14.0",
+        "@a2ui/web_core": "0.14.0",
+        "react": "19.2.0",
+        "react-dom": "19.2.0"
+      },
+      "expected": "resolves"
+    },
+    {
+      "id": "a2ui-react-webcore-0.15",
+      "packages": {
+        "@a2ui/react": "0.15.0",
+        "@a2ui/web_core": "0.15.0",
+        "react": "19.2.0",
+        "react-dom": "19.2.0"
+      },
+      "expected": "ERESOLVE"
+    }
+  ]
+}

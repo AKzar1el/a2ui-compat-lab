@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "webCoreVersion": "0.15.0",
+  "pythonCoreVersion": "0.5.0",
+  "reference": "JSON Schema Draft 2020-12 (assertion-only; format disabled)",
+  "cases": 25,
+  "knownUpstreamDisagreements": [
+    "documented_maxProperties",
+    "documented_minProperties",
+    "documented_top_not"
+  ],
+  "additionalDisagreements": [
+    "new_contains",
+    "new_dependentRequired",
+    "new_dependentSchemas",
+    "new_ifThenElse",
+    "new_patternProperties_valid",
+    "new_propertyNames"
+  ],
+  "formatDependentExcluded": [
+    "new_format_email",
+    "new_format_uuid"
+  ],
+  "referenceCases": 25,
+  "description": "A pinned observation baseline, not normative approval of TypeScript behavior. A fix changes this baseline and must be reviewed."
+}

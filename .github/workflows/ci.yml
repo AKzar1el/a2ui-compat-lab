@@ -1,0 +1,41 @@
+name: A2UI Compatibility CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: a2ui-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  sdk-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned JS dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install published Python A2UI SDK
+        run: python -m pip install --disable-pip-version-check a2ui-core==0.5.0
+      - name: Node unit and differential tests
+        run: npm test
+      - name: Generate pinned TypeScript/Ajv parity report
+        run: node src/cli.mjs scan --strict --out out/differential.json
+      - name: Cross-check with real Python A2UI SDK
+        run: python scripts/python_parity.py --ts out/differential.json --out out/python.json
+      - name: Upload comparison results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2ui-compat-results
+          path: out/*.json
+          if-no-files-found: ignore
+          retention-days: 7
