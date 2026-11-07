@@ -78,3 +78,30 @@ jobs:
           path: renderer-react/out/react-browser-*
           if-no-files-found: ignore
           retention-days: 7
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned SDK dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install pinned React harness dependencies
+        working-directory: renderer-react
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Fail closed on new vulnerabilities; disclose known Zod 3 exposure
+        run: node scripts/security-audit.mjs --strict --out out/security.json
+      - name: Publish full dependency security report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: a2ui-dependency-security
+          path: out/security.json
+          retention-days: 7
+          if-no-files-found: ignore

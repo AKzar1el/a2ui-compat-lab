@@ -119,3 +119,9 @@ node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl --out out/my-repla
 The offline report includes a content SHA-256, event count and per-event component/data-model state from the **real pinned `@a2ui/web_core@0.15.0` MessageProcessor**. It does not perform browser rendering, trigger an agent or certify protocol conformance. Unsupported or malformed streams fail with a nonzero exit code; no report is written on replay failure. Existing output files are never overwritten, to avoid presenting stale evidence as a fresh run.
 
 Capture size is capped at 4 MiB, raw lines at 256 KiB and frames (including blank lines) at 10,000; malformed UTF-8 and non-newline-terminated input are rejected. **Reports reproduce captured data-model values, potentially including private information.** Keep real customer traces local and review or redact them before sharing CI artifacts.
+
+## Integration handoff and dependency security
+
+Automated PR integration is defined in docs/INTEGRATION.md. At the exact final verified PR head, include one line in the PR BODY: MERGER_HANDOFF: AKzar1el/a2ui-compat-lab@<full head SHA>. The A2UI-only GitHub Actions merger accepts only source/test/docs changes with fully green exact-head and main CI. Packages, lockfiles, workflows and security policies require owner review; never bypass this restriction. The separate shared fleet merger remains untouched.
+
+A2UI SDK 0.14/0.15 currently depends on Zod 3.25.76 with an unresolved HIGH advisory. See SECURITY.md. npm audit gate discloses it and permits a narrow expiry-bound exception until 2026-12-07; any new vulnerability fails CI.

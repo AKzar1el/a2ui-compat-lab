@@ -19,3 +19,9 @@ IMPLEMENTATION: Node.js 22+, pinned packages, no paid infrastructure. Run npm te
 DELIVERY: On successful scoped changes, branch/commit locally only when correctly bound; otherwise commit through authorized GitHub APIs on a target-repo feature branch. Open a PR to AKzar1el/a2ui-compat-lab and verify required checks/merger; never rewrite main or auto-merge unreviewed failures. In remote-only mode, do not claim local tests. Append a truthful receipt to worker/RUN_LOG.md with tests, SHA, PR, blockers and next candidate. Preserve a clean handoff even if no new PR is possible. Do not simplify or alter the prompts of other tasks.
 
 TIME BOUNDARY: Follow owner runtime of ~25–35 minutes productive work and at least 8 minutes final closeout when possible. Rate-limit API requests and avoid unnecessary repeated health checks.
+
+## Integration handoff and dependency security
+
+Automated PR integration is defined in docs/INTEGRATION.md. At the exact final verified PR head, include one line in the PR BODY: MERGER_HANDOFF: AKzar1el/a2ui-compat-lab@<full head SHA>. The A2UI-only GitHub Actions merger accepts only source/test/docs changes with fully green exact-head and main CI. Packages, lockfiles, workflows and security policies require owner review; never bypass this restriction. The separate shared fleet merger remains untouched.
+
+A2UI SDK 0.14/0.15 currently depends on Zod 3.25.76 with an unresolved HIGH advisory. See SECURITY.md. npm audit gate discloses it and permits a narrow expiry-bound exception until 2026-12-07; any new vulnerability fails CI.

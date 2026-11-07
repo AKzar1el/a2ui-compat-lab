@@ -91,3 +91,9 @@ Before hardening, `parseJsonLines` accepted a 2,060-byte newline-terminated JSON
 
 ## Local captured-session replay
 A standalone `src/replay-file.mjs --input capture.jsonl [--out report.json]` runner accepts user-supplied v0.9 JSONL offline, processes each message using the published pinned MessageProcessor, and emits a deterministic content-digest + lifecycle snapshot report without recording the original path. CI runs it on the included five-event JSONL sample and uploads the result as an artifact. The input boundary checks use raw bytes before JSON whitespace normalization and enforce 4 MiB per capture, 256 KiB per line and 10,000 total frames; strict UTF-8 and complete terminal newline are required. Unit tests reject padded-frame overflows, partial or malformed input, empty-frame floods and accidental evidence overwrite. This is local protocol replay, not browser-level fault recovery or independent evidence of an upstream defect; reports may contain sensitive state from the input.
+
+## Integration handoff and dependency security
+
+Automated PR integration is defined in docs/INTEGRATION.md. At the exact final verified PR head, include one line in the PR BODY: MERGER_HANDOFF: AKzar1el/a2ui-compat-lab@<full head SHA>. The A2UI-only GitHub Actions merger accepts only source/test/docs changes with fully green exact-head and main CI. Packages, lockfiles, workflows and security policies require owner review; never bypass this restriction. The separate shared fleet merger remains untouched.
+
+A2UI SDK 0.14/0.15 currently depends on Zod 3.25.76 with an unresolved HIGH advisory. See SECURITY.md. npm audit gate discloses it and permits a narrow expiry-bound exception until 2026-12-07; any new vulnerability fails CI.

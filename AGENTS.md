@@ -36,3 +36,9 @@ python scripts/python_parity.py --ts out/differential.json
 The Python parity command assumes `a2ui-core==0.5.0` has been installed in a dedicated environment. `npm run probe:releases` is network-dependent and deliberately separate from routine CI.
 
 Consult `docs/EVIDENCE.md`, `docs/ROADMAP.md`, `worker/WORKER_PROMPT.md` before new features.
+
+## Integration handoff and dependency security
+
+Automated PR integration is defined in docs/INTEGRATION.md. At the exact final verified PR head, include one line in the PR BODY: MERGER_HANDOFF: AKzar1el/a2ui-compat-lab@<full head SHA>. The A2UI-only GitHub Actions merger accepts only source/test/docs changes with fully green exact-head and main CI. Packages, lockfiles, workflows and security policies require owner review; never bypass this restriction. The separate shared fleet merger remains untouched.
+
+A2UI SDK 0.14/0.15 currently depends on Zod 3.25.76 with an unresolved HIGH advisory. See SECURITY.md. npm audit gate discloses it and permits a narrow expiry-bound exception until 2026-12-07; any new vulnerability fails CI.
