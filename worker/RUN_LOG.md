@@ -20,3 +20,10 @@
 - Unblock manually in the A2UI scheduled run's Codexify setup card: choose 'Switch to another project', select C:\Users\Tomi\Desktop\lol\a2ui-compat-lab, ordinary source checkout, createWorktree:false.
 - After an explicit correct selection and read-only git/remote verification, re-enable the SAME scheduled task. Do not create a duplicate task or a second tunnel.
 - New A2UI task remains PAUSED until that user selection; do not describe it as running hourly yet.
+
+## 2026-11-07 — Node 24-compatible CI action runners (PR #13)
+- Verified exact source checkout and origin `AKzar1el/a2ui-compat-lab`, clean owned files on entry (pre-existing untracked `renderer-react/` preserved), and current `origin/main` `a851a8608daa3520bc6577d16f62de0942969640`. PRs #4–#12 remained open, mergeable and green; no active local writer was detected by a bounded process check.
+- Branch `revshot/a2ui-node24-actions-20261107`, code SHA `c7cb6527de5037d3c33a284db95712d167e730a6`, changed `.github/workflows/ci.yml` only: Node 24-capable checkout/setup-node/setup-python/upload-artifact v7 actions, least-privilege checkout credentials off, existing test runtimes Node 22 and Python 3.13 unchanged.
+- Local Windows gates: `npm test` 10/10 PASS, `npm run scan:check` 25 fixtures / 9 expected mismatches MATCH, `git diff --check` PASS. Python parity not run locally; leave it to CI. No network-dependent npm release probe run.
+- PR: https://github.com/AKzar1el/a2ui-compat-lab/pull/13, open for existing merger, not self-merged. Exact-head GitHub Actions and artifact verification to be reported after this receipt commit. No other worker, repository, schedule, or Codexify service edited.
+- Next work: finish PR #13 CI/handoff; integrate pending PRs with append-only log reconciliation. Then React browser failure-recovery tests after #7 reaches main.
