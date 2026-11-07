@@ -126,6 +126,51 @@ try {
   assert.deepEqual(trace.actions, expectedActions, 'Surviving surface must still dispatch after peer deletion');
   checkpoints.push({step: 'parallel-deletion-survival', action: trace.actions[4], mountedButtons: 1});
 
+  // Deliver a stale response for the deleted peer followed by a valid response
+  // in deterministic microtasks. A rejected message must not poison subsequent
+  // updates, resurrect the peer's DOM, or change action routing.
+  const deliveries = await page.evaluate(async () => {
+    const messages = [
+      {version: 'v0.9', updateDataModel: {
+        surfaceId: 'parallel-surface', path: '/', value: {selection: 'stale'},
+      }},
+      {version: 'v0.9', updateDataModel: {
+        surfaceId: 'action-replay', path: '/', value: {selection: 'epsilon', confirmed: true},
+      }},
+    ];
+    return Promise.all(messages.map(message => Promise.resolve().then(() => {
+      try {
+        window.__a2uiLab.applyMessage(message);
+        return {status: 'applied', data: window.__a2uiLab.trace().data};
+      } catch {
+        return {status: 'rejected', data: window.__a2uiLab.trace().data};
+      }
+    })));
+  });
+  assert.deepEqual(deliveries, [
+    {status: 'rejected', data: {selection: 'delta', confirmed: true}},
+    {status: 'applied', data: {selection: 'epsilon', confirmed: true}},
+  ], 'A stale async peer update must fail without blocking a valid survivor update');
+  await page.getByText('epsilon', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await button.count(), 1, 'Stale async update must not restore a deleted peer');
+  assert.equal(await page.getByText('gamma', {exact: true}).count(), 0);
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length, 5,
+    'SDK message delivery alone must not emit a Button action');
+
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 6, null, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit',
+    context: {selection: 'epsilon'},
+  });
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions,
+    'Surviving keyboard Button must use its fresh data after a stale async rejection');
+  checkpoints.push({step: 'async-stale-peer-recovery', deliveries: deliveries.map(({status}) => status),
+    action: trace.actions[5], mountedButtons: 1});
+
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
