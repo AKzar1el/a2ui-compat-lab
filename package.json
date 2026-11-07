@@ -1,25 +1,26 @@
 {
-    "name":  "a2ui-compat-lab",
-    "version":  "0.1.0",
-    "private":  true,
-    "description":  "Local-first A2UI cross-SDK and published-release compatibility regression lab",
-    "type":  "module",
-    "engines":  {
-                    "node":  "\u003e=22"
-                },
-    "scripts":  {
-                    "test":  "node --test test/*.test.mjs",
-                    "scan":  "node src/cli.mjs scan",
-                    "scan:check":  "node src/cli.mjs scan --strict",
-                    "doctor":  "node src/cli.mjs doctor --strict",
-                    "parity:python":  "python scripts/python_parity.py --ts out/differential.json",
-                    "probe:releases":  "node src/cli.mjs releases --strict",
-                    "ci":  "npm test \u0026\u0026 npm run scan:check",
-                    "replay:demo":  "node src/replay-report.mjs --out out/replay.json",
-                    "replay:actions":  "node src/replay-action-report.mjs --out out/action-replay.json"
-                },
-    "dependencies":  {
-                         "@a2ui/web_core":  "0.15.0",
-                         "ajv":  "8.17.1"
-                     }
+  "name": "a2ui-compat-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first A2UI cross-SDK and published-release compatibility regression lab",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "scan": "node src/cli.mjs scan",
+    "scan:check": "node src/cli.mjs scan --strict",
+    "doctor": "node src/cli.mjs doctor --strict",
+    "parity:python": "python scripts/python_parity.py --ts out/differential.json",
+    "probe:releases": "node src/cli.mjs releases --strict",
+    "ci": "npm test && npm run scan:check",
+    "replay:demo": "node src/replay-report.mjs --out out/replay.json",
+    "replay:actions": "node src/replay-action-report.mjs --out out/action-replay.json",
+    "replay:recovery": "node src/recovery-report.mjs --out out/recovery.json"
+  },
+  "dependencies": {
+    "@a2ui/web_core": "0.15.0",
+    "ajv": "8.17.1"
+  }
 }

@@ -96,3 +96,9 @@ npm run build
 ```
 
 The test runs Vite on loopback with deterministic fixture data, drives real headless Chromium pointer and keyboard input, and closes both the browser and server afterward. Inspect `renderer-react/out/react-browser-trace.json` and `renderer-react/out/react-browser.png`. No LLM, credentials, or external HTTP endpoint is involved after dependency and Chromium installation; GitHub CI installs the browser and uploads both artifacts.
+
+## Fault/recovery replay (headless)
+
+Run `npm run replay:recovery` to create `out/recovery.json` using the published `@a2ui/web_core@0.15.0` v0.9 MessageProcessor, without any network access after installation. The fixture exercises updates before surface creation, an invalid catalog, and a stale update after deletion while checking that a second live surface still works and a deleted surface can be recreated with fresh data.
+
+The report records each applied or rejected SDK event, its error and exposed surface state. It checks that rejected events do not alter any *observed* surface or emit actions, and stops if a rejected event visibly mutates state. All four JSONL chunk sizes must produce the identical trace; the pinned three rejection positions are verified in CI and saved as an artifact. This demonstrates error containment in **headless published SDK APIs**, not React rendering, hidden SDK internals or a novel upstream defect. Browser recovery remains separate P1 work.
