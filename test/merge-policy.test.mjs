@@ -20,20 +20,36 @@ test('safe files limited to source/tests/docs, never workflow, dependency, or me
   assert.equal(permittedPath(path),false,path);
 });
 
-test('main CI ignores only its own in-progress integration check',()=>{
- const reports={total_count:4,check_runs:[
-  {name:'sdk-parity',app:{slug:'github-actions'},status:'completed',conclusion:'success'},
-  {name:'react-browser',app:{slug:'github-actions'},status:'completed',conclusion:'success'},
-  {name:'dependency-audit',app:{slug:'github-actions'},status:'completed',conclusion:'success'},
-  {name:'integrate',app:{slug:'github-actions'},status:'in_progress',conclusion:null}
- ]};
- assert.equal(checksGreen(reports,['sdk-parity','react-browser','dependency-audit']),true);
- const bad=structuredClone(reports);
- bad.check_runs[2].status='in_progress';bad.check_runs[2].conclusion=null;
- assert.equal(checksGreen(bad,['sdk-parity','react-browser','dependency-audit']),false);
- const failed=structuredClone(reports);
- failed.check_runs.push({name:'Socket Security',app:{slug:'socket-security'},status:'completed',conclusion:'failure'});
- assert.equal(checksGreen(failed,['sdk-parity','react-browser','dependency-audit']),false);
+test('PR-head CI refuses missing, unfinished, historical failed, or incomplete checks',()=>{
+ const required=['sdk-parity','react-browser','dependency-audit'];
+ const reports={total_count:3,check_runs:required.map(name=>({
+  name,app:{slug:'github-actions'},status:'completed',conclusion:'success'
+ }))};
+ assert.equal(checksGreen(reports,required),true);
+ const pending=structuredClone(reports);
+ pending.check_runs[2].status='in_progress';pending.check_runs[2].conclusion=null;
+ assert.equal(checksGreen(pending,required),false);
+ const failedIntegration=structuredClone(reports);
+ failedIntegration.check_runs.push({
+  name:'integrate',app:{slug:'github-actions'},status:'completed',conclusion:'failure'
+ });
+ failedIntegration.total_count++;
+ assert.equal(checksGreen(failedIntegration,required),false,
+  'a historical failed integration job cannot bypass PR-head validation');
+ const pendingIntegration=structuredClone(failedIntegration);
+ pendingIntegration.check_runs[3].status='in_progress';
+ pendingIntegration.check_runs[3].conclusion=null;
+ assert.equal(checksGreen(pendingIntegration,required),false);
+ const externalFailed=structuredClone(reports);
+ externalFailed.check_runs.push({
+  name:'Socket Security',app:{slug:'socket-security'},status:'completed',conclusion:'failure'
+ });
+ externalFailed.total_count++;
+ assert.equal(checksGreen(externalFailed,required),false);
+ assert.equal(checksGreen({...reports,total_count:4},required),false,
+  'truncated CI check-runs must never look green');
+ assert.equal(checksGreen({...reports,total_count:undefined},required),false,
+  'missing pagination evidence must fail closed');
 });
 
 test('latest exact-main CI must be selected by branch and SHA, not mixed branch checks',()=>{
