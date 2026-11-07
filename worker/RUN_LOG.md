@@ -20,3 +20,11 @@
 - Unblock manually in the A2UI scheduled run's Codexify setup card: choose 'Switch to another project', select C:\Users\Tomi\Desktop\lol\a2ui-compat-lab, ordinary source checkout, createWorktree:false.
 - After an explicit correct selection and read-only git/remote verification, re-enable the SAME scheduled task. Do not create a duplicate task or a second tunnel.
 - New A2UI task remains PAUSED until that user selection; do not describe it as running hourly yet.
+
+## 2026-11-07 — Local JSONL session replay, independently testable
+- Verified correct ordinary source checkout and AKzar1el/a2ui-compat-lab remote, fresh origin/main baseline `a851a86`; previous PR #11 branch had no owned uncommitted changes. All PRs #4–#11 were OPEN/MERGEABLE with green checks at inventory; no change made to them.
+- Feature branch `revshot/a2ui-user-jsonl-replay-20261107`; source commit `baa5035130cb83a0b889f514bcbe1d33e3e98863`. Files: `src/replay-file.mjs`, `test/replay-file.test.mjs`, `fixtures/lifecycle-v09.jsonl`, README, docs/EVIDENCE.md and .github/workflows/ci.yml.
+- Added an offline, bounded, explicit local JSONL capture replay that produces deterministic lifecycle snapshots using the actual pinned `@a2ui/web_core@0.15.0`; rejects malformed UTF-8, incomplete JSONL, excess input/frames and existing report paths. CI now exports a sample replay JSON artifact. This is NOT a browser renderer test or upstream vulnerability claim.
+- Windows local gates: `npm test` 17/17 PASS, `npm run scan:check` 25 SDK fixtures/9 expected deviations MATCH, bundled JSONL 5-event replay PASS, `git diff --check` PASS. Python parity not installed/attempted locally; GitHub Actions is the Python verification gate. No external release probe.
+- PR: https://github.com/AKzar1el/a2ui-compat-lab/pull/12 (non-draft, mergeable on creation). Exact-head CI and merger handoff to be verified after this log receipt commit.
+- The pre-existing untracked `renderer-react/` was preserved. No change to other repos, jobs, Codexify configuration, or the merger. Next: integrate compatible PR backlog #4–#12, then add real browser-level failure/recovery and cross-renderer tests.
