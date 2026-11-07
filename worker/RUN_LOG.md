@@ -20,3 +20,11 @@
 - Unblock manually in the A2UI scheduled run's Codexify setup card: choose 'Switch to another project', select C:\Users\Tomi\Desktop\lol\a2ui-compat-lab, ordinary source checkout, createWorktree:false.
 - After an explicit correct selection and read-only git/remote verification, re-enable the SAME scheduled task. Do not create a duplicate task or a second tunnel.
 - New A2UI task remains PAUSED until that user selection; do not describe it as running hourly yet.
+
+## 2026-11-07 — Text JSONL frame resource-limit hardening
+- Verified A2UI source checkout and origin AKzar1el/a2ui-compat-lab; main baseline a851a86; branch `revshot/a2ui-text-jsonl-limits-20261107`. PRs #4–#10 were open with green checks at inventory. Only pre-existing untracked `renderer-react/` remained, preserved without staging or modification.
+- Reproduced harness bug: 2,060-byte JSONL frame with trailing whitespace accepted under `maxLineBytes: 32`; original complete-line path checked byte length only AFTER trimming. New regression tests failed before the fix and passed afterward. No upstream SDK security claim.
+- Source commit `512fdd98a2f9a544875735fe7ce6fb1122c0cb99`: incremental untrimmed UTF-8 byte counting across text chunks (including split UTF-16 surrogate pairs and CRLF), configurable maxMessages=10,000, two new regression tests, README/EVIDENCE notes.
+- Local gates: `npm test` 12/12 PASS; `npm run scan:check` 25 fixture / 9 expected deviations MATCH; `node src/replay-report.mjs --out out/replay.json` PASS; `git diff --check` clean. No local Python parity or external release probe on this run; GitHub Actions owns Python verification.
+- PR: https://github.com/AKzar1el/a2ui-compat-lab/pull/11, review and merge assigned to existing fleet merger. Exact final-head CI verification follows this append-only receipt commit; do not self-merge.
+- Next priority after normal merger integration: real React browser-level fault injection/recovery and cross-renderer evidence; preserve untracked renderer files and avoid duplicate upstream conformance cases.
