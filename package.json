@@ -14,7 +14,8 @@
                     "parity:python":  "python scripts/python_parity.py --ts out/differential.json",
                     "probe:releases":  "node src/cli.mjs releases --strict",
                     "ci":  "npm test \u0026\u0026 npm run scan:check",
-                    "replay:demo":  "node src/replay-report.mjs --out out/replay.json"
+                    "replay:demo":  "node src/replay-report.mjs --out out/replay.json",
+                    "replay:actions":  "node src/replay-action-report.mjs --out out/action-replay.json"
                 },
     "dependencies":  {
                          "@a2ui/web_core":  "0.15.0",
