@@ -57,14 +57,20 @@ export function latestMainCiRun(result, mainSha) {
  * Required GitHub Actions jobs are proven by an exact-main workflow run.
  * Still fail closed on every unrelated check, including third-party security.
  */
-export function mainChecksGreen(checks, jobs, required) {
+export function mainChecksGreen(checks, jobs, required, activeIntegrationRunId) {
+ if(!Number.isSafeInteger(activeIntegrationRunId)||activeIntegrationRunId<1)return false;
  if(!Array.isArray(checks?.check_runs)||!Number.isSafeInteger(checks.total_count)||
     checks.total_count>=100||checks.check_runs.length!==checks.total_count||
     !Array.isArray(jobs?.jobs)||!Number.isSafeInteger(jobs.total_count)||
     jobs.total_count>=100||jobs.jobs.length!==jobs.total_count)return false;
+ // Only the currently executing integration job may remain in progress.
+ // Other historical integration jobs, including failures, still gate merges.
+ const activeJobUrl='https://github.com/'+repo+'/actions/runs/'+activeIntegrationRunId+'/job/';
  const unrelated=checks.check_runs.filter(check=>
   !(check.app?.slug==='github-actions'&&
-    (required.includes(check.name)||check.name==='integrate')));
+    (required.includes(check.name)||
+      (check.name==='integrate'&&Number.isSafeInteger(check.id)&&
+        check.details_url===activeJobUrl+check.id))));
  if(unrelated.some(check=>check.status!=='completed'||
     !['success','neutral','skipped'].includes(check.conclusion)))return false;
  if(jobs.jobs.some(job=>job.status!=='completed'||job.conclusion!=='success'))return false;
