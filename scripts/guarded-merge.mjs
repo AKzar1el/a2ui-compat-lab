@@ -29,7 +29,7 @@ async function run(){
   console.log('SKIP: latest exact-main CI workflow has not succeeded');return;
  }
  const mainJobs=await api(root+'/actions/runs/'+latest.id+'/jobs?per_page=100');
- if(!mainChecksGreen(await api(root+'/commits/'+main+'/check-runs?per_page=100'),mainJobs,required)){
+ if(!mainChecksGreen(await api(root+'/commits/'+main+'/check-runs?per_page=100'),mainJobs,required,Number(process.env.GITHUB_RUN_ID))){
   console.log('SKIP: exact-main CI jobs or unrelated security checks not green');return;
  }
  const prs=await api(root+'/pulls?state=open&per_page=100&sort=created&direction=asc');
