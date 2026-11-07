@@ -11,6 +11,7 @@
                     "test":  "node --test test/*.test.mjs",
                     "scan":  "node src/cli.mjs scan",
                     "scan:check":  "node src/cli.mjs scan --strict",
+                    "doctor":  "node src/cli.mjs doctor --strict",
                     "parity:python":  "python scripts/python_parity.py --ts out/differential.json",
                     "probe:releases":  "node src/cli.mjs releases --strict",
                     "ci":  "npm test \u0026\u0026 npm run scan:check",

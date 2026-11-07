@@ -18,3 +18,25 @@ test('CLI rejects unknown arguments', () => {
   assert.equal(result.status, 2);
   assert.match(result.stderr, /Unknown or incomplete option/);
 });
+
+test('CLI reports its own version without importing SDK runtime', () => {
+  const result = spawnSync(process.execPath, [path, '--version'], {encoding: 'utf8', timeout: 5000});
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '0.1.0');
+});
+
+test('CLI doctor emits offline JSON and verifies direct package installation', () => {
+  const result = spawnSync(process.execPath, [path, 'doctor', '--strict', '--json'], {encoding: 'utf8', timeout: 5000});
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.ok, true);
+  assert.equal(report.reportVersion, 1);
+  assert.equal(report.packages.length, 2);
+  assert.ok(report.packages.every(item => item.ok));
+});
+
+test('CLI rejects options on --version instead of ignoring them', () => {
+  const result = spawnSync(process.execPath, [path, '--version', '--json'], {encoding: 'utf8', timeout: 5000});
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Version command takes no options/);
+});
