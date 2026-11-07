@@ -1,4 +1,4 @@
-import {preliminary,permittedPath,repo,checksGreen} from './merge-policy.mjs';
+import {preliminary,permittedPath,repo,checksGreen,latestMainCiRun,mainChecksGreen} from './merge-policy.mjs';
 const token=process.env.GITHUB_TOKEN;
 const dry=process.env.A2UI_AUTO_MERGE_DRY_RUN==='true';
 if(process.env.GITHUB_REPOSITORY!==repo||!token)throw Error('Exact repo binding and GITHUB_TOKEN required');
@@ -21,8 +21,16 @@ async function threadsClear(number){
 async function run(){
  const required=['sdk-parity','react-browser','dependency-audit'];
  const main=(await api(root+'/branches/main')).commit.sha;
- if(!checksGreen(await api(root+'/commits/'+main+'/check-runs?per_page=100'),required)){
-  console.log('SKIP: main branch has not passed all required gates');return;
+ // Branch-creation CI may be cancelled on the exact same SHA as main.
+ // Inspect the latest exact-main CI run and its own jobs, not mixed ref checks.
+ const mainRuns=await api(root+'/actions/workflows/ci.yml/runs?branch=main&head_sha='+main+'&per_page=100');
+ const latest=latestMainCiRun(mainRuns,main);
+ if(!latest||latest.status!=='completed'||latest.conclusion!=='success'){
+  console.log('SKIP: latest exact-main CI workflow has not succeeded');return;
+ }
+ const mainJobs=await api(root+'/actions/runs/'+latest.id+'/jobs?per_page=100');
+ if(!mainChecksGreen(await api(root+'/commits/'+main+'/check-runs?per_page=100'),mainJobs,required)){
+  console.log('SKIP: exact-main CI jobs or unrelated security checks not green');return;
  }
  const prs=await api(root+'/pulls?state=open&per_page=100&sort=created&direction=asc');
  if(prs.length>=100)throw Error('Pull list requires pagination; refuse incomplete scan');
