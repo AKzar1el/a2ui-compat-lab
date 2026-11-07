@@ -1,4 +1,4 @@
-import {preliminary,permittedPath,repo} from './merge-policy.mjs';
+import {preliminary,permittedPath,repo,checksGreen} from './merge-policy.mjs';
 const token=process.env.GITHUB_TOKEN;
 const dry=process.env.A2UI_AUTO_MERGE_DRY_RUN==='true';
 if(process.env.GITHUB_REPOSITORY!==repo||!token)throw Error('Exact repo binding and GITHUB_TOKEN required');
@@ -12,11 +12,6 @@ async function api(endpoint,method='GET',payload){
  return r.status===204?null:r.json();
 }
 const root='/repos/'+repo;
-function checksGreen(result,required){
- if(!Array.isArray(result?.check_runs)||result.total_count>=100)return false;
- if(result.check_runs.some(x=>x.status!=='completed'||!['success','neutral','skipped'].includes(x.conclusion)))return false;
- return required.every(name=>result.check_runs.some(x=>x.name===name&&x.conclusion==='success'));
-}
 async function threadsClear(number){
  const query='query($number:Int!){repository(owner:"AKzar1el",name:"a2ui-compat-lab"){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved}pageInfo{hasNextPage}}}}}';
  const r=await api('/graphql','POST',{query,variables:{number}});

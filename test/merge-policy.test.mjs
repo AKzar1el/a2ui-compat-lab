@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {preliminary,permittedPath,repo} from '../scripts/merge-policy.mjs';
+import {preliminary,permittedPath,repo,checksGreen} from '../scripts/merge-policy.mjs';
 const sha='a'.repeat(40);
 const good={draft:false,state:'open',mergeable:true,mergeable_state:'clean',
  base:{ref:'main',repo:{full_name:repo}},head:{sha,ref:'revshot/safe-change',repo:{full_name:repo}},
@@ -18,4 +18,20 @@ test('safe files limited to source/tests/docs, never workflow, dependency, or me
  for(const path of ['.github/workflows/ci.yml','package.json','renderer-react/package-lock.json',
  'scripts/guarded-merge.mjs','scripts/security-audit-core.mjs','worker/WORKER_PROMPT.md','../secret'])
   assert.equal(permittedPath(path),false,path);
+});
+
+test('main CI ignores only its own in-progress integration check',()=>{
+ const reports={total_count:4,check_runs:[
+  {name:'sdk-parity',app:{slug:'github-actions'},status:'completed',conclusion:'success'},
+  {name:'react-browser',app:{slug:'github-actions'},status:'completed',conclusion:'success'},
+  {name:'dependency-audit',app:{slug:'github-actions'},status:'completed',conclusion:'success'},
+  {name:'integrate',app:{slug:'github-actions'},status:'in_progress',conclusion:null}
+ ]};
+ assert.equal(checksGreen(reports,['sdk-parity','react-browser','dependency-audit']),true);
+ const bad=structuredClone(reports);
+ bad.check_runs[2].status='in_progress';bad.check_runs[2].conclusion=null;
+ assert.equal(checksGreen(bad,['sdk-parity','react-browser','dependency-audit']),false);
+ const failed=structuredClone(reports);
+ failed.check_runs.push({name:'Socket Security',app:{slug:'socket-security'},status:'completed',conclusion:'failure'});
+ assert.equal(checksGreen(failed,['sdk-parity','react-browser','dependency-audit']),false);
 });
