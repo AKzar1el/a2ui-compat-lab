@@ -26,11 +26,11 @@ export function preliminary(pr){
 }
 
 export function checksGreen(result, required) {
- if(!Array.isArray(result?.check_runs) || result.total_count >= 100) return false;
- // Ignore ONLY the current guarded merger's own job, which is necessarily
- // in progress while performing this check. Other security/CI jobs still gate.
- const relevant = result.check_runs.filter(x =>
-  !(x.name === 'integrate' && x.app?.slug === 'github-actions'));
+ if(!Array.isArray(result?.check_runs) || !Number.isSafeInteger(result.total_count) ||
+    result.total_count >= 100 || result.check_runs.length !== result.total_count) return false;
+ // Source-PR head checks have no self-integration exemption: the currently
+ // executing merger runs on main, not on the PR head. All other checks gate.
+ const relevant = result.check_runs;
  if(relevant.some(x => x.status !== 'completed' ||
    !['success','neutral','skipped'].includes(x.conclusion))) return false;
  return required.every(name =>
