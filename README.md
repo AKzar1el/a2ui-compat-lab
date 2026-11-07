@@ -57,3 +57,16 @@ Maintainer: [AKzar1el](https://github.com/AKzar1el).
 
 ## First headless lifecycle replay
 The project also exercises the actual published A2UI v0.9 MessageProcessor with a five-event lifecycle (create surface, add components, initialize data, update data, delete surface). JSONL boundary fuzzing at 1/7/57 characters produces identical snapshots; malformed/incomplete lines fail closed. Run `npm run replay:demo` for a JSON trace in `out/replay.json`. This is not a browser or screenshot test.
+
+## Replay your own A2UI v0.9 capture
+
+Save a local UTF-8 JSONL transcript with **one A2UI message per line and a final newline**. The `createSurface` event can use the published catalog ID or `__BASIC_CATALOG__` placeholder as shown in the included sample.
+
+```bash
+node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl
+node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl --out out/my-replay.json
+```
+
+The offline report includes a content SHA-256, event count and per-event component/data-model state from the **real pinned `@a2ui/web_core@0.15.0` MessageProcessor**. It does not perform browser rendering, trigger an agent or certify protocol conformance. Unsupported or malformed streams fail with a nonzero exit code; no report is written on replay failure. Existing output files are never overwritten, to avoid presenting stale evidence as a fresh run.
+
+Capture size is capped at 4 MiB, raw lines at 256 KiB and frames (including blank lines) at 10,000; malformed UTF-8 and non-newline-terminated input are rejected. **Reports reproduce captured data-model values, potentially including private information.** Keep real customer traces local and review or redact them before sharing CI artifacts.
