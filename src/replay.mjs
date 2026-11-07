@@ -22,6 +22,39 @@ export function parseJsonLines(chunks, {maxLineBytes = 262144} = {}) {
   return messages;
 }
 
+/**
+ * Parse transport-level JSONL bytes without replacing split or invalid UTF-8.
+ * Newlines are ASCII delimiters, so a multi-byte code point can safely span
+ * arbitrary network chunks while each complete line is decoded exactly once.
+ */
+export function parseJsonLinesBytes(chunks, {maxLineBytes = 262144, maxMessages = 10000} = {}) {
+  if (!Number.isSafeInteger(maxLineBytes) || maxLineBytes < 1) throw new RangeError('Invalid line limit');
+  if (!Number.isSafeInteger(maxMessages) || maxMessages < 1) throw new RangeError('Invalid message limit');
+  const decoder = new TextDecoder('utf-8', {fatal: true});
+  const messages = [];
+  let line = [];
+
+  const decodeLine = () => decoder.decode(Uint8Array.from(line)).trim();
+  for (const chunk of chunks) {
+    if (!(chunk instanceof Uint8Array)) throw new TypeError('JSONL byte chunks must be Uint8Array or Buffer');
+    for (const byte of chunk) {
+      if (byte === 10) {
+        const raw = decodeLine();
+        line = [];
+        if (raw) {
+          if (messages.length >= maxMessages) throw new RangeError('JSONL message count exceeds limit');
+          messages.push(JSON.parse(raw));
+        }
+      } else {
+        if (line.length >= maxLineBytes) throw new RangeError('JSONL message exceeds byte limit');
+        line.push(byte);
+      }
+    }
+  }
+  if (line.length && decodeLine()) throw new SyntaxError('Incomplete trailing JSONL message');
+  return messages;
+}
+
 /** Exercise the real v0.9 A2UI MessageProcessor; intentionally NOT a browser renderer. */
 export function replayV09(messages) {
   const actions = [];

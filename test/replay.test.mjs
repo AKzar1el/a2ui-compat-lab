@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseJsonLines, replayV09} from '../src/replay.mjs';
+import {parseJsonLines, parseJsonLinesBytes, replayV09} from '../src/replay.mjs';
 
 const messages = [
   {version: 'v0.9', createSurface: {surfaceId: 'replay', catalogId: '__BASIC_CATALOG__'}},
@@ -36,4 +36,32 @@ test('JSONL chunk boundaries do not change A2UI state sequence', () => {
 test('incomplete and oversized JSONL messages fail closed', () => {
   assert.throws(() => parseJsonLines(['{"version":"v0.9"']), /Incomplete/);
   assert.throws(() => parseJsonLines(['{"oversized":"' + 'a'.repeat(200) + '"}\n'], {maxLineBytes: 100}), /exceeds/);
+});
+
+test('arbitrary UTF-8 byte boundaries preserve published A2UI SDK state and unicode', () => {
+  const localized = structuredClone(messages);
+  localized[2].updateDataModel.value = {title: 'Čebelica 🌍', body: 'こんにちは'};
+  localized[3].updateDataModel.value = 'Здраво 👋';
+  const bytes = Buffer.from(localized.map(JSON.stringify).join('\n') + '\n');
+  const expected = replayV09(localized);
+  assert.deepEqual(expected.snapshots[2].data, {title: 'Čebelica 🌍', body: 'こんにちは'});
+
+  for (const size of [1, 2, 3, 4, 7, 57, bytes.length]) {
+    const chunks = [];
+    for (let index = 0; index < bytes.length; index += size)
+      chunks.push(bytes.subarray(index, index + size));
+    assert.deepEqual(replayV09(parseJsonLinesBytes(chunks)), expected, 'byte size ' + size);
+  }
+});
+
+test('UTF-8 byte parser rejects invalid sequences, truncation and excess resources', () => {
+  const line = Buffer.from('{"label":"é🌍"}\n');
+  assert.deepEqual(parseJsonLinesBytes([line], {maxLineBytes: line.length - 1}), [{label: 'é🌍'}]);
+  assert.throws(() => parseJsonLinesBytes([line], {maxLineBytes: line.length - 2}), /exceeds byte limit/);
+  assert.throws(() => parseJsonLinesBytes([Uint8Array.from([0xc3, 0x28, 0x0a])]), /encoded data|UTF-8|valid for encoding/i);
+  assert.throws(() => parseJsonLinesBytes([line.subarray(0, -1)]), /Incomplete trailing/);
+  assert.throws(() => parseJsonLinesBytes(['{"text":"wrong input"}\n']), /Uint8Array or Buffer/);
+  assert.throws(() => parseJsonLinesBytes([line], {maxMessages: 0}), /Invalid message limit/);
+  assert.throws(() => parseJsonLinesBytes([line, line], {maxMessages: 1}), /count exceeds limit/);
+  assert.deepEqual(parseJsonLinesBytes([Buffer.from('\r\n  \r\n{"ok":true}\r\n')]), [{ok: true}]);
 });
