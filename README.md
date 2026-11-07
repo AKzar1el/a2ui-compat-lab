@@ -41,6 +41,19 @@ node src/cli.mjs releases --strict --json --out out/releases.json
 
 The release report records `observed`, `matchesExpectation`, `npmErrorCode`, `failureKind`, `nextAction` and a bounded diagnostic excerpt for each pinned pair. Possible outcomes are `resolves`, `ERESOLVE`, `infrastructure-error` (registry/network or runner failure) and `install-error` (other npm failure). **Only an actual npm dependency-conflict error can satisfy an expected `ERESOLVE` baseline**; an unreachable registry or timeout always causes drift in `--strict` mode. An upstream fix that makes 0.15 resolve also causes reviewable baseline drift. The offline unit tests exercise these classifications without contacting npm.
 
+### Review SDK upgrades without overwriting evidence
+
+Save a scan report **before** upgrading the pinned dependency, then scan again after the update. The scan records the **installed** `@a2ui/web_core` version rather than the expected baseline version. A version mismatch fails `scan --strict` even if all discrepancy IDs remain unchanged.
+
+```bash
+node src/cli.mjs scan --strict --out out/before.json
+# After a deliberate package upgrade and npm ci:
+node src/cli.mjs scan --out out/after.json
+node src/cli.mjs compare --before out/before.json --after out/after.json --strict --json --out out/comparison.json
+```
+
+`compare` runs offline and never changes the source reports or the pinned baseline. It distinguishes **resolved**, **newly observed**, and **persistent** discrepancies; flips of a discrepancy's direction; reference-validator and SDK decision changes; changed reference configuration; and added/missing fixture IDs. A strict comparison exits nonzero on observed drift, making an upstream fix a **review gate**, not a silent baseline update. SDK and reference provenance appear in `before` and `after` metadata. Compare scan outputs from the same fixture suite; real Python A2UI parity remains a separate CI check and is not inferred from the comparison.
+
 ## Non-goals and scope
 
 This first milestone **does not** implement actual browser-based A2UI event replay, prove a business model, certify conformance, or claim that the six additional cases are unknown to all other A2UI contributors. See [Evidence](docs/EVIDENCE.md) and [Roadmap](docs/ROADMAP.md).
