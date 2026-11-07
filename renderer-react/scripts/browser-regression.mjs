@@ -171,6 +171,45 @@ try {
     action: trace.actions[5], mountedButtons: 1});
 
 
+  // A deleted peer ID can be reused by a new surface. The React DOM and event
+  // binder must point at its fresh model rather than the old, detached one.
+  const recreatedMessages = parallelMessages.map(message => {
+    const copy = structuredClone(message);
+    if (copy.updateDataModel)
+      copy.updateDataModel.value = {selection: 'reborn', confirmed: false};
+    return copy;
+  });
+  await page.evaluate(messages => {
+    for (const message of messages) window.__a2uiLab.applyMessage(message);
+  }, recreatedMessages);
+  await button.nth(1).waitFor({state: 'visible', timeout: 5000});
+  await page.getByText('reborn', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await button.count(), 2, 'Recreated peer must have a distinct live Button');
+  assert.equal(await page.getByText('gamma', {exact: true}).count(), 0,
+    'Recreated peer must not retain its deleted model data');
+  assert.equal(await page.getByText('epsilon', {exact: true}).count(), 1,
+    'Surviving peer data must be unaffected by surface ID reuse');
+
+  await button.nth(1).click({timeout: 7000});
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 7, null, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: secondSurfaceId, sourceComponentId: 'submit',
+    context: {selection: 'reborn'},
+  });
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions,
+    'Recreated Button action must bind fresh peer data with the reused IDs');
+  checkpoints.push({step: 'recreated-peer-new-action', action: trace.actions[6], mountedButtons: 2});
+
+  await page.evaluate(surfaceId => window.__a2uiLab.applyMessage({
+    version: 'v0.9', deleteSurface: {surfaceId},
+  }), secondSurfaceId);
+  await page.getByText('reborn', {exact: true}).waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await button.count(), 1);
+  assert.equal(await page.getByText('epsilon', {exact: true}).count(), 1);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions, expectedActions,
+    'Second deletion must not leak a stale action');
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
