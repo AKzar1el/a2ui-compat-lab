@@ -59,6 +59,73 @@ try {
   assert.deepEqual(trace.actions, expectedActions);
   checkpoints.push({step: 'keyboard-enter', action: trace.actions[1]});
 
+  // Two live surfaces deliberately reuse the same Button and component IDs.
+  // This exercises real React DOM routing, beyond the headless SDK action replay.
+  const secondSurfaceId = 'parallel-surface';
+  const parallelMessages = JSON.parse(fixture).map(({message}) => {
+    const copy = structuredClone(message);
+    for (const type of ['createSurface', 'updateComponents', 'updateDataModel']) {
+      if (copy[type]) copy[type].surfaceId = secondSurfaceId;
+    }
+    if (copy.updateDataModel)
+      copy.updateDataModel.value = {selection: 'gamma', confirmed: false};
+    return copy;
+  });
+  await page.evaluate(messages => {
+    for (const message of messages) window.__a2uiLab.applyMessage(message);
+  }, parallelMessages);
+
+  const parallelButton = button.nth(1);
+  await parallelButton.waitFor({state: 'visible', timeout: 5000});
+  await page.getByText('gamma', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await button.count(), 2, 'Both surfaces must mount distinct DOM Buttons');
+
+  await parallelButton.click({timeout: 7000});
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 3, null, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: secondSurfaceId, sourceComponentId: 'submit',
+    context: {selection: 'gamma'},
+  });
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions, 'Parallel Button must route to its own surface');
+  checkpoints.push({step: 'parallel-pointer', action: trace.actions[2], mountedButtons: 2});
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/', value: {selection: 'delta', confirmed: true},
+    },
+  }));
+  await page.getByText('delta', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await page.getByText('gamma', {exact: true}).count(), 1,
+    'Updating the first surface must not overwrite the parallel surface');
+  await button.first().click({timeout: 7000});
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 4, null, {timeout: 5000});
+  const originalAfterUpdate = {
+    name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit',
+    context: {selection: 'delta'},
+  };
+  expectedActions.push(originalAfterUpdate);
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions, 'Original Button must use only its own updated data');
+  checkpoints.push({step: 'isolated-update', action: trace.actions[3], parallelText: 'gamma'});
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', deleteSurface: {surfaceId: secondSurfaceId},
+  }));
+  await parallelButton.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await button.count(), 1, 'Deleting one surface must preserve the other DOM Button');
+  await page.getByText('delta', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await page.getByText('gamma', {exact: true}).count(), 0);
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions, 'Deleting one surface must emit no stale action');
+
+  await button.click({timeout: 7000});
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 5, null, {timeout: 5000});
+  expectedActions.push(originalAfterUpdate);
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions, 'Surviving surface must still dispatch after peer deletion');
+  checkpoints.push({step: 'parallel-deletion-survival', action: trace.actions[4], mountedButtons: 1});
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
@@ -89,7 +156,7 @@ try {
   };
   const target = resolve(outDir, 'react-browser-trace.json');
   writeFileSync(target, JSON.stringify(report, null, 2) + '\n');
-  console.log('Real A2UI React Chromium: 4 checkpoints / 2 agent events / no runtime errors / PASS');
+  console.log('Real A2UI React Chromium: ' + checkpoints.length + ' checkpoints / ' + trace.actions.length + ' agent events / no runtime errors / PASS');
   console.log('Trace: ' + target);
 } finally {
   if (browser) await browser.close();
