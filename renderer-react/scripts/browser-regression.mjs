@@ -109,9 +109,9 @@ try {
   assert.deepEqual(trace.actions, expectedActions, 'Original Button must use only its own updated data');
   checkpoints.push({step: 'isolated-update', action: trace.actions[3], parallelText: 'gamma'});
 
-  await page.evaluate(() => window.__a2uiLab.applyMessage({
-    version: 'v0.9', deleteSurface: {surfaceId: secondSurfaceId},
-  }));
+  await page.evaluate(surfaceId => window.__a2uiLab.applyMessage({
+    version: 'v0.9', deleteSurface: {surfaceId},
+  }), secondSurfaceId);
   await parallelButton.waitFor({state: 'detached', timeout: 5000});
   assert.equal(await button.count(), 1, 'Deleting one surface must preserve the other DOM Button');
   await page.getByText('delta', {exact: true}).waitFor({state: 'visible'});
