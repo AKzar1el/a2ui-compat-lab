@@ -29,6 +29,8 @@ jobs:
         run: npm test
       - name: Generate deterministic UTF-8 byte-chunk replay evidence
         run: npm run replay:demo
+      - name: Replay pinned SDK against bundled local JSONL capture
+        run: node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl --out out/capture-replay.json
       - name: Generate pinned TypeScript/Ajv parity report
         run: node src/cli.mjs scan --strict --out out/differential.json
       - name: Verify published A2UI lifecycle rejection and recovery trace

@@ -106,3 +106,16 @@ The report records each applied or rejected SDK event, its error and exposed sur
 The project also exercises the actual published A2UI v0.9 MessageProcessor with a five-event lifecycle (create surface, add components, initialize data, update data, delete surface). JSONL boundary fuzzing at 1/7/57 characters produces identical snapshots. The separate `parseJsonLinesBytes` transport parser accepts `Uint8Array` / `Buffer` chunks, handles split multibyte UTF-8, and fails closed on invalid encoding, incomplete lines and resource limits. `npm run replay:demo` writes `out/replay.json` with both original string-chunk and localized byte-chunk SDK replay traces; CI uploads it alongside parity results. These are **headless SDK tests**, not browser or screenshot tests.
 
 The string-based JSONL replay harness enforces a 256 KiB limit on **each untrimmed line** and a 10,000-message limit by default. The configurable `parseJsonLines(chunks, {maxLineBytes, maxMessages})` counts UTF-8 bytes correctly across split surrogate pairs. These are local test-harness safety boundaries, not assertions about upstream SDK transport handling.
+
+## Replay your own A2UI v0.9 capture
+
+Save a local UTF-8 JSONL transcript with **one A2UI message per line and a final newline**. The `createSurface` event can use the published catalog ID or `__BASIC_CATALOG__` placeholder as shown in the included sample.
+
+```bash
+node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl
+node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl --out out/my-replay.json
+```
+
+The offline report includes a content SHA-256, event count and per-event component/data-model state from the **real pinned `@a2ui/web_core@0.15.0` MessageProcessor**. It does not perform browser rendering, trigger an agent or certify protocol conformance. Unsupported or malformed streams fail with a nonzero exit code; no report is written on replay failure. Existing output files are never overwritten, to avoid presenting stale evidence as a fresh run.
+
+Capture size is capped at 4 MiB, raw lines at 256 KiB and frames (including blank lines) at 10,000; malformed UTF-8 and non-newline-terminated input are rejected. **Reports reproduce captured data-model values, potentially including private information.** Keep real customer traces local and review or redact them before sharing CI artifacts.
