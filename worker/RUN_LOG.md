@@ -14,3 +14,9 @@
 - Ready backlog: #1 release matrix robustness, #2 real browser interaction/recovery replay, #3 version-aware parity reports.
 - Hourly scheduled worker created for minute :10 Europe/Ljubljana. Scheduler confirmed enabled; workspace binding must be inspected on first wake because originating conversation is bound to mcp-trendpulse. If wrong, require the Codexify setup card's explicit Switch to another project control. Never operate on the wrong project.
 - Commercial status: pilot only; no revenue/customer validation; no browser-rendered UI replay yet.
+## 2026-11-07 — First scheduled wake: fail-closed workspace guard
+- Actual first task run completed early with the WRONG Codexify workspace: mcp-trendpulse, not a2ui-compat-lab.
+- Worker correctly performed no project operations and paused the new A2UI automation. Existing fleet and source files remained untouched.
+- Unblock manually in the A2UI scheduled run's Codexify setup card: choose 'Switch to another project', select C:\Users\Tomi\Desktop\lol\a2ui-compat-lab, ordinary source checkout, createWorktree:false.
+- After an explicit correct selection and read-only git/remote verification, re-enable the SAME scheduled task. Do not create a duplicate task or a second tunnel.
+- New A2UI task remains PAUSED until that user selection; do not describe it as running hourly yet.
