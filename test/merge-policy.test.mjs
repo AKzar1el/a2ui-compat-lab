@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {preliminary,permittedPath,repo,checksGreen} from '../scripts/merge-policy.mjs';
+import {preliminary,permittedPath,repo,checksGreen,latestMainCiRun,mainChecksGreen} from '../scripts/merge-policy.mjs';
 const sha='a'.repeat(40);
 const good={draft:false,state:'open',mergeable:true,mergeable_state:'clean',
  base:{ref:'main',repo:{full_name:repo}},head:{sha,ref:'revshot/safe-change',repo:{full_name:repo}},
@@ -34,4 +34,47 @@ test('main CI ignores only its own in-progress integration check',()=>{
  const failed=structuredClone(reports);
  failed.check_runs.push({name:'Socket Security',app:{slug:'socket-security'},status:'completed',conclusion:'failure'});
  assert.equal(checksGreen(failed,['sdk-parity','react-browser','dependency-audit']),false);
+});
+
+test('latest exact-main CI must be selected by branch and SHA, not mixed branch checks',()=>{
+ const mainSha='b'.repeat(40);
+ const runs={total_count:3,workflow_runs:[
+  {id:42,head_sha:mainSha,head_branch:'revshot/test',event:'push',created_at:'2026-11-07T17:00:00Z',conclusion:'cancelled'},
+  {id:41,head_sha:mainSha,head_branch:'main',event:'workflow_dispatch',created_at:'2026-11-07T13:00:00Z',status:'completed',conclusion:'success'},
+  {id:40,head_sha:mainSha,head_branch:'main',event:'push',created_at:'2026-11-07T12:00:00Z',status:'completed',conclusion:'success'},
+ ]};
+ assert.equal(latestMainCiRun(runs,mainSha).id,41);
+ assert.equal(latestMainCiRun(runs,'c'.repeat(40)),null);
+ assert.equal(latestMainCiRun({...runs,total_count:100},mainSha),null);
+ const newer={...runs,workflow_runs:[
+  ...runs.workflow_runs,
+  {id:43,head_sha:mainSha,head_branch:'main',event:'workflow_dispatch',created_at:'2026-11-07T18:00:00Z',status:'completed',conclusion:'failure'}
+ ],total_count:4};
+ assert.equal(latestMainCiRun(newer,mainSha).id,43);
+ assert.equal(latestMainCiRun(newer,mainSha).conclusion,'failure');
+});
+
+test('main gate tolerates superseded foreign-branch cancellations but rejects missing or bad jobs',()=>{
+ const required=['sdk-parity','react-browser','dependency-audit'];
+ const ok=name=>({name,app:{slug:'github-actions'},status:'completed',conclusion:'success'});
+ const canceled=name=>({name,app:{slug:'github-actions'},status:'completed',conclusion:'cancelled'});
+ const checks={total_count:9,check_runs:[
+  ...required.map(canceled),...required.map(ok),
+  {name:'Socket Security',app:{slug:'socket-security'},status:'completed',conclusion:'success'},
+  {name:'integrate',app:{slug:'github-actions'},status:'in_progress',conclusion:null},
+  {name:'Other Gate',app:{slug:'github-actions'},status:'completed',conclusion:'success'},
+ ]};
+ const jobs={total_count:3,jobs:required.map(name=>({name,status:'completed',conclusion:'success'}))};
+ assert.equal(checksGreen(checks,required),false,'old gate wrongly rejects unrelated canceled checks');
+ assert.equal(mainChecksGreen(checks,jobs,required),true);
+ assert.equal(mainChecksGreen(checks,{...jobs,jobs:jobs.jobs.slice(1),total_count:2},required),false);
+ assert.equal(mainChecksGreen(checks,{...jobs,jobs:jobs.jobs.map(job=>
+  job.name==='react-browser'?{...job,conclusion:'cancelled'}:job)},required),false);
+ const externalFailed=structuredClone(checks);
+ externalFailed.check_runs[6].conclusion='failure';
+ assert.equal(mainChecksGreen(externalFailed,jobs,required),false);
+ const otherFailed=structuredClone(checks);
+ otherFailed.check_runs[8].status='in_progress';
+ assert.equal(mainChecksGreen(otherFailed,jobs,required),false);
+ assert.equal(mainChecksGreen({...checks,total_count:100},jobs,required),false);
 });
