@@ -45,9 +45,12 @@ function main() {
       console.log('  ' + row.id + ': JSON Schema=' + row.referenceValid + ' web_core=' + row.webCoreValid + ' (' + row.category + ')');
     if (!ok) console.error('Baseline drift: ' + JSON.stringify(report.baseline));
   } else {
-    for (const row of report.rows)
+    for (const row of report.rows) {
       console.log(row.id + ': expected ' + row.expected + ', observed ' + row.observed +
         ' — ' + (row.matchesExpectation ? 'MATCH' : 'DRIFT'));
+      if (!row.matchesExpectation && row.nextAction)
+        console.error('  ' + row.failureKind + (row.npmErrorCode ? ' (' + row.npmErrorCode + ')' : '') + ': ' + row.nextAction);
+    }
     if (!ok) console.error('Published package resolution diverged from expected baseline');
   }
   if (args.strict && !ok) process.exitCode = 1;
