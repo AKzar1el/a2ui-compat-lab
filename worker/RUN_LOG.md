@@ -20,3 +20,11 @@
 - Unblock manually in the A2UI scheduled run's Codexify setup card: choose 'Switch to another project', select C:\Users\Tomi\Desktop\lol\a2ui-compat-lab, ordinary source checkout, createWorktree:false.
 - After an explicit correct selection and read-only git/remote verification, re-enable the SAME scheduled task. Do not create a duplicate task or a second tunnel.
 - New A2UI task remains PAUSED until that user selection; do not describe it as running hourly yet.
+
+## 2026-11-07 — UTF-8 transport byte replay (scheduled run)
+- Verified selected project C:\Users\Tomi\Desktop\lol\a2ui-compat-lab, ordinary checkout, origin AKzar1el/a2ui-compat-lab, baseline origin/main a851a86; source branch revshot/a2ui-utf8-stream-replay-20261107. No concurrent writer or unrelated tracked changes observed.
+- Existing PRs #4–#9 remained OPEN/non-draft and green at inventory; their branches and receipts were not changed. Preserved the pre-existing untracked renderer-react/ directory without staging it.
+- Source commit 2999bbcf4f72983690d9d090354e93d68c1c507a: strict bounded Uint8Array/Buffer JSONL parser, Unicode real-SDK byte chunk replay and CI JSON artifact, regression tests, README/EVIDENCE.
+- Local offline gates: npm test 12/12 PASS; npm run scan:check 25 fixtures/9 expected discrepancies MATCH; npm run replay:demo six byte sizes (1/2/3/7/57/648) all match headless published-SDK snapshots; git diff --check clean. Python parity is GitHub CI's responsibility for this run; no network-dependent release probe.
+- PR: https://github.com/AKzar1el/a2ui-compat-lab/pull/10, review/integration assigned to existing fleet merger (never self-merge). Final-head GitHub Actions and artifact must be checked after receipt commit.
+- Novelty boundary: this tests a previously unsupported transport type in OUR harness; it is not proof of a new upstream A2UI defect or browser-rendering failure. Next candidate: React browser failure/recovery and merged PR integration, after unfinished-first inventory. Do not modify schedules or sibling repos.
