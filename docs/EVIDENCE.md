@@ -97,3 +97,10 @@ A standalone `src/replay-file.mjs --input capture.jsonl [--out report.json]` run
 Automated PR integration is defined in docs/INTEGRATION.md. At the exact final verified PR head, include one line in the PR BODY: MERGER_HANDOFF: AKzar1el/a2ui-compat-lab@<full head SHA>. The A2UI-only GitHub Actions merger accepts only source/test/docs changes with fully green exact-head and main CI. Packages, lockfiles, workflows and security policies require owner review; never bypass this restriction. The separate shared fleet merger remains untouched.
 
 A2UI SDK 0.14/0.15 currently depends on Zod 3.25.76 with an unresolved HIGH advisory. See SECURITY.md. npm audit gate discloses it and permits a narrow expiry-bound exception until 2026-12-07; any new vulnerability fails CI.
+
+## Interleaved multi-surface action isolation (2026-11-07)
+
+- The offline Node regression `test/multi-surface-actions.test.mjs` replays a deterministic, real-published-SDK v0.9 Button fixture against **two simultaneously live surfaces with identical component IDs** through the existing `MessageProcessor` / `ComponentContext` / `GenericBinder` harness.
+- It alternates action events and data updates, deletes one surface, recreates it under the same ID, and checks that five emitted actions retain the correct `surfaceId`, `sourceComponentId` and per-surface data-binding context. A stale Button action must reject while the second live surface remains actionable.
+- The same observable action/state trace must hold when complete JSONL is decoded from 1-, 2-, 7-, 57-byte and full-buffer transport chunks. Run with the regular offline `npm test`; CI's `sdk-parity` job executes the regression on the published `@a2ui/web_core@0.15.0`.
+- **Scope:** headless SDK action routing and lifetime isolation, not multi-surface React DOM rendering, visual accessibility, an upstream vulnerability, or evidence of a novel defect. Those integration and external-feedback milestones remain open.
