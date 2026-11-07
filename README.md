@@ -21,6 +21,8 @@ npm ci --ignore-scripts --no-audit --no-fund
 npm test
 npm run scan:check
 node src/cli.mjs scan --strict --out out/differential.json
+npm run doctor
+node src/cli.mjs --version
 ```
 
 Optional cross-SDK parity:
@@ -38,6 +40,8 @@ node src/cli.mjs releases --strict --json --out out/releases.json
 ```
 
 `scan` and `npm test` are deterministic and offline after dependency installation. `releases` downloads npm metadata, writes no other repositories, runs no lifecycle scripts and deletes its temporary test directories.
+
+`doctor` is a fast, read-only, offline installation preflight. It checks the declared Node.js minimum, exact direct dependency pins, package-lock entries and the actual installed package versions. Use `doctor --json --strict --out out/doctor.json` for a machine-readable report (exit 1 on mismatch; exit 2 on invalid invocation). It checks *this workspace's direct packages*, not the npm registry, transitive dependency provenance, React's isolated renderer workspace or remote published-release compatibility. Run `npm ci --ignore-scripts --no-audit --no-fund` to repair a missing or stale installation before retrying.
 
 ## Non-goals and scope
 
