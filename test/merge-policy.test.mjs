@@ -61,20 +61,32 @@ test('main gate tolerates superseded foreign-branch cancellations but rejects mi
  const checks={total_count:9,check_runs:[
   ...required.map(canceled),...required.map(ok),
   {name:'Socket Security',app:{slug:'socket-security'},status:'completed',conclusion:'success'},
-  {name:'integrate',app:{slug:'github-actions'},status:'in_progress',conclusion:null},
+  {id:1234,name:'integrate',app:{slug:'github-actions'},status:'in_progress',conclusion:null,
+   details_url:'https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42/job/1234'},
   {name:'Other Gate',app:{slug:'github-actions'},status:'completed',conclusion:'success'},
  ]};
  const jobs={total_count:3,jobs:required.map(name=>({name,status:'completed',conclusion:'success'}))};
  assert.equal(checksGreen(checks,required),false,'old gate wrongly rejects unrelated canceled checks');
- assert.equal(mainChecksGreen(checks,jobs,required),true);
- assert.equal(mainChecksGreen(checks,{...jobs,jobs:jobs.jobs.slice(1),total_count:2},required),false);
+ assert.equal(mainChecksGreen(checks,jobs,required,42),true);
+ assert.equal(mainChecksGreen(checks,{...jobs,jobs:jobs.jobs.slice(1),total_count:2},required,42),false);
  assert.equal(mainChecksGreen(checks,{...jobs,jobs:jobs.jobs.map(job=>
-  job.name==='react-browser'?{...job,conclusion:'cancelled'}:job)},required),false);
+  job.name==='react-browser'?{...job,conclusion:'cancelled'}:job)},required,42),false);
  const externalFailed=structuredClone(checks);
  externalFailed.check_runs[6].conclusion='failure';
- assert.equal(mainChecksGreen(externalFailed,jobs,required),false);
+ assert.equal(mainChecksGreen(externalFailed,jobs,required,42),false);
  const otherFailed=structuredClone(checks);
  otherFailed.check_runs[8].status='in_progress';
- assert.equal(mainChecksGreen(otherFailed,jobs,required),false);
- assert.equal(mainChecksGreen({...checks,total_count:100},jobs,required),false);
+ assert.equal(mainChecksGreen(otherFailed,jobs,required,42),false);
+ assert.equal(mainChecksGreen(checks,jobs,required,0),false,'missing current run must fail closed');
+ const failedOldIntegration=structuredClone(checks);
+ failedOldIntegration.check_runs.push({id:9876,name:'integrate',app:{slug:'github-actions'},status:'completed',conclusion:'failure',
+  details_url:'https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/41/job/9876'});
+ failedOldIntegration.total_count++;
+ assert.equal(mainChecksGreen(failedOldIntegration,jobs,required,42),false,
+  'failed historical merger job is not the current in-progress job');
+ const wrongSelfJob=structuredClone(checks);
+ wrongSelfJob.check_runs[7].details_url='https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/41/job/1234';
+ assert.equal(mainChecksGreen(wrongSelfJob,jobs,required,42),false,
+  'only exact current run and job id may be ignored');
+ assert.equal(mainChecksGreen({...checks,total_count:100},jobs,required,42),false);
 });
