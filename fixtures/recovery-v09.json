@@ -1,0 +1,123 @@
+[
+  {
+    "version": "v0.9",
+    "createSurface": {
+      "surfaceId": "alpha",
+      "catalogId": "__BASIC_CATALOG__"
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateComponents": {
+      "surfaceId": "alpha",
+      "components": [
+        {
+          "id": "root",
+          "component": "Column",
+          "children": [
+            "status"
+          ]
+        },
+        {
+          "id": "status",
+          "component": "Text",
+          "text": {
+            "path": "/value"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "alpha",
+      "path": "/",
+      "value": {
+        "value": "initial",
+        "alive": true
+      }
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "late",
+      "path": "/",
+      "value": {
+        "value": "too-early"
+      }
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "alpha",
+      "path": "/value",
+      "value": "healthy"
+    }
+  },
+  {
+    "version": "v0.9",
+    "createSurface": {
+      "surfaceId": "invalid",
+      "catalogId": "missing-catalog"
+    }
+  },
+  {
+    "version": "v0.9",
+    "createSurface": {
+      "surfaceId": "late",
+      "catalogId": "__BASIC_CATALOG__"
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "late",
+      "path": "/",
+      "value": {
+        "value": "born"
+      }
+    }
+  },
+  {
+    "version": "v0.9",
+    "deleteSurface": {
+      "surfaceId": "alpha"
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "alpha",
+      "path": "/value",
+      "value": "stale"
+    }
+  },
+  {
+    "version": "v0.9",
+    "createSurface": {
+      "surfaceId": "alpha",
+      "catalogId": "__BASIC_CATALOG__"
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "alpha",
+      "path": "/",
+      "value": {
+        "value": "recreated"
+      }
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "late",
+      "path": "/value",
+      "value": "still-born"
+    }
+  }
+]

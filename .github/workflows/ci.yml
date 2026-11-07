@@ -29,6 +29,8 @@ jobs:
         run: npm test
       - name: Generate pinned TypeScript/Ajv parity report
         run: node src/cli.mjs scan --strict --out out/differential.json
+      - name: Verify published A2UI lifecycle rejection and recovery trace
+        run: npm run replay:recovery
       - name: Cross-check with real Python A2UI SDK
         run: python scripts/python_parity.py --ts out/differential.json --out out/python.json
       - name: Upload comparison results
