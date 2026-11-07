@@ -57,3 +57,5 @@ Maintainer: [AKzar1el](https://github.com/AKzar1el).
 
 ## First headless lifecycle replay
 The project also exercises the actual published A2UI v0.9 MessageProcessor with a five-event lifecycle (create surface, add components, initialize data, update data, delete surface). JSONL boundary fuzzing at 1/7/57 characters produces identical snapshots; malformed/incomplete lines fail closed. Run `npm run replay:demo` for a JSON trace in `out/replay.json`. This is not a browser or screenshot test.
+
+The string-based JSONL replay harness enforces a 256 KiB limit on **each untrimmed line** and a 10,000-message limit by default. The configurable `parseJsonLines(chunks, {maxLineBytes, maxMessages})` counts UTF-8 bytes correctly across split surrogate pairs. These are local test-harness safety boundaries, not assertions about upstream SDK transport handling.

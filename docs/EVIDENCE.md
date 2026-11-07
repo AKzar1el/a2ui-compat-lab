@@ -49,3 +49,6 @@ Automated reproduction: `npm run probe:releases`. That command accesses the npm 
 
 ## First headless lifecycle replay
 The project also exercises the actual published A2UI v0.9 MessageProcessor with a five-event lifecycle (create surface, add components, initialize data, update data, delete surface). JSONL boundary fuzzing at 1/7/57 characters produces identical snapshots; malformed/incomplete lines fail closed. Run `npm run replay:demo` for a JSON trace in `out/replay.json`. This is not a browser or screenshot test.
+
+## Text JSONL replay resource limits
+Before hardening, `parseJsonLines` accepted a 2,060-byte newline-terminated JSONL frame under `maxLineBytes: 32` when 2,048 trailing spaces were trimmed before size validation. The affected parser is **our own harness**, not an upstream SDK vulnerability. The bounded parser now accounts for untrimmed UTF-8 line bytes as input arrives, including cross-chunk surrogate pairs and CRLF, and rejects more than `maxMessages` (default 10,000). Unit regressions confirm the original single-chunk and multi-chunk bypass is rejected, while published-SDK lifecycle snapshots remain identical. Tests run offline with `npm test`.
