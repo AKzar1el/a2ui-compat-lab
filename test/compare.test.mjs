@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -163,4 +163,46 @@ test('scan comparison refuses byte-corrupted but syntactically valid UTF-8 in ei
       assert.doesNotMatch(result.stderr, /RIVATE_SCAN_UTF8_MARKER/);
     }
   } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+
+test('comparison output protects source reports and prior evidence from overwrite', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-compare-no-clobber-'));
+  const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  try {
+    const before = join(dir, 'before.json');
+    const after = join(dir, 'after.json');
+    const existing = join(dir, 'prior-comparison.json');
+    const fresh = join(dir, 'new-comparison.json');
+    writeFileSync(before, JSON.stringify(scan([['one', true, true]])));
+    writeFileSync(after, JSON.stringify(scan([['one', true, true]])));
+    writeFileSync(existing, 'PRIOR_PRIVATE_EVIDENCE');
+
+    const invoke = output => spawnSync(process.execPath,
+      [cli, 'compare', '--before', before, '--after', after,
+        '--strict', '--json', '--out', output],
+      {encoding: 'utf8', timeout: 20000});
+
+    for (const occupied of [before, after, existing]) {
+      const original = readFileSync(occupied);
+      const result = invoke(occupied);
+      assert.equal(result.status, 2, result.stderr);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /Comparison output already exists/);
+      assert.doesNotMatch(result.stderr, /PRIOR_PRIVATE_EVIDENCE/);
+      assert.deepEqual(readFileSync(occupied), original,
+        'Existing inputs and prior outputs must remain byte-for-byte unchanged');
+    }
+
+    const success = invoke(fresh);
+    assert.equal(success.status, 0, success.stderr);
+    assert.equal(JSON.parse(readFileSync(fresh, 'utf8')).ok, true);
+    const originalResult = readFileSync(fresh);
+    const repeated = invoke(fresh);
+    assert.equal(repeated.status, 2, repeated.stderr);
+    assert.equal(repeated.stdout, '');
+    assert.deepEqual(readFileSync(fresh), originalResult);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
 });
