@@ -35,16 +35,23 @@ const MAX_COMPARISON_BYTES = 8 * 1024 * 1024;
 // User-provided scan artifacts may be confidential; Node JSON errors can quote
 // their contents, and unrestricted reads can exhaust memory before validation.
 function readComparisonReport(path) {
-  let contents;
+  let bytes;
   try {
     const target = resolve(path);
     const stat = statSync(target);
     if (!stat.isFile() || stat.size < 1 || stat.size > MAX_COMPARISON_BYTES)
       throw new RangeError('Comparison report must be a regular JSON file of 1 byte to 8 MiB');
-    contents = readFileSync(target, 'utf8');
+    bytes = readFileSync(target);
   } catch (error) {
     if (error instanceof RangeError) throw error;
     throw new Error('Cannot read comparison report; path omitted');
+  }
+  let contents;
+  try {
+    // Reject byte-corrupted evidence rather than accepting U+FFFD replacement text.
+    contents = new TextDecoder('utf-8', {fatal: true}).decode(bytes);
+  } catch {
+    throw new SyntaxError('Comparison JSON contains invalid UTF-8; input contents omitted');
   }
   try {
     return JSON.parse(contents);
