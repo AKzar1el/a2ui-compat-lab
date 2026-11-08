@@ -201,6 +201,21 @@ try {
     'Recreated Button action must bind fresh peer data with the reused IDs');
   checkpoints.push({step: 'recreated-peer-new-action', action: trace.actions[6], mountedButtons: 2});
 
+  // Real Tab/Space input must reach the newly mounted peer and use its
+  // current data, even though the surface and Button IDs were reused.
+  await button.first().focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 8, null, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: secondSurfaceId, sourceComponentId: 'submit',
+    context: {selection: 'reborn'},
+  });
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions,
+    'Tab/Space must route to the recreated peer rather than the surviving original');
+  checkpoints.push({step: 'recreated-peer-tab-space', action: trace.actions[7], mountedButtons: 2});
+
   await page.evaluate(surfaceId => window.__a2uiLab.applyMessage({
     version: 'v0.9', deleteSurface: {surfaceId},
   }), secondSurfaceId);
@@ -209,6 +224,9 @@ try {
   assert.equal(await page.getByText('epsilon', {exact: true}).count(), 1);
   assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions, expectedActions,
     'Second deletion must not leak a stale action');
+  await page.keyboard.press('Space');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions, expectedActions,
+    'Space after deleting the focused peer must not dispatch a stale action');
 
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
