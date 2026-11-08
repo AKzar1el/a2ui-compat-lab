@@ -28,6 +28,7 @@ window.__a2uiLab = Object.freeze({
   trace: () => ({
     actions: structuredClone(emitted),
     errors: structuredClone(errors),
+    surfaceIds: [...processor.model.surfacesMap.keys()].sort(),
     data: structuredClone(processor.getSurface('action-replay')?.dataModel.get('/') ?? null),
     components: [...(processor.getSurface('action-replay')?.componentsModel.keys ?? [])],
   }),

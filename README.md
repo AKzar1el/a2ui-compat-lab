@@ -114,7 +114,10 @@ Save a local UTF-8 JSONL transcript with **one A2UI message per line and a final
 ```bash
 node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl
 node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl --out out/my-replay.json
+node src/replay-file.mjs --input fixtures/lifecycle-v09.jsonl --verify-chunks
 ```
+
+Use `--verify-chunks` to replay the same local capture through the real SDK at 1, 7, 57 and full-buffer **UTF-8 byte** chunk boundaries (including splits inside Unicode code points). It compares every observable lifecycle snapshot with the ordinary replay, exports `chunkTrials` and `allChunksMatch`, and exits nonzero instead of writing a report if the replay differs. To keep one-byte replay bounded, verification is opt-in and limited to captures of 512 KiB; ordinary capture replay still accepts up to 4 MiB. The test harness parses complete JSONL frames from chunks; it does not prove the published SDK itself accepts streaming network byte chunks.
 
 The offline report includes a content SHA-256, event count and per-event component/data-model state from the **real pinned `@a2ui/web_core@0.15.0` MessageProcessor**. It does not perform browser rendering, trigger an agent or certify protocol conformance. Unsupported or malformed streams fail with a nonzero exit code; no report is written on replay failure. Existing output files are never overwritten, to avoid presenting stale evidence as a fresh run.
 
