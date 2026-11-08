@@ -37,6 +37,30 @@ try {
   await page.getByText('alpha', {exact: true}).waitFor({state: 'visible'});
   checkpoints.push({step: 'render', label: await button.innerText(), text: 'alpha'});
 
+  // A rejected agent message must not corrupt the mounted React surface or actions.
+  const beforeFault = await page.evaluate(() => window.__a2uiLab.trace());
+  const fault = await page.evaluate(() => {
+    try {
+      window.__a2uiLab.applyMessage({
+        version: 'v0.9',
+        createSurface: {surfaceId: 'invalid-catalog-test', catalogId: 'not-in-basic-catalog'},
+      });
+      return {rejected: false};
+    } catch (error) {
+      return {
+        rejected: true,
+        name: String(error?.name ?? 'Error'),
+        message: String(error?.message ?? error),
+      };
+    }
+  });
+  assert.equal(fault.rejected, true, 'Unknown catalog must be rejected by the published SDK');
+  assert.deepEqual(await page.evaluate(() => window.__a2uiLab.trace()), beforeFault,
+    'Rejected catalog must not mutate mounted surfaces, data, errors or actions');
+  assert.equal(await button.count(), 1, 'Valid Button should remain mounted after rejection');
+  await page.getByText('alpha', {exact: true}).waitFor({state: 'visible'});
+  checkpoints.push({step: 'rejected-catalog-recovery', fault, stateUnchanged: true});
+
   // Use real browser pointer input, never DOM .click() or a direct binder call.
   await button.click({timeout: 7000});
   await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 1, null, {timeout: 5000});

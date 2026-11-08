@@ -98,8 +98,39 @@ test('rejects oversized captures and excess empty frames before replay', () => i
   assert.match(result.stderr, /10,000 JSONL frames/);
 }));
 
+test('opt-in transport byte replay preserves actual SDK state across Unicode splits', () => inTemp(dir => {
+  const localized = structuredClone(fixture);
+  localized[2].updateDataModel.value = {title: 'Čebelica 🌍', body: 'こんにちは'};
+  localized[3].updateDataModel.value = 'Здраво 👋';
+  const raw = Buffer.from(localized.map(message => JSON.stringify(message)).join('\n') + '\n');
+  const input = join(dir, 'unicode.jsonl');
+  writeFileSync(input, raw);
+  const result = invoke(['--verify-chunks', '--input', input]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.allChunksMatch, true);
+  assert.deepEqual(report.chunkTrials.map(trial => trial.chunkSizeBytes), [1, 7, 57, raw.length]);
+  assert.ok(report.chunkTrials.every(trial => trial.matches));
+  assert.equal(report.chunkTrials[0].chunks, raw.length);
+  assert.deepEqual(report.replay.snapshots[2].data, {title: 'Čebelica 🌍', body: 'こんにちは'});
+  const normal = invoke(['--input', input]);
+  assert.equal(normal.status, 0, normal.stderr);
+  assert.deepEqual(report.replay, JSON.parse(normal.stdout).replay);
+  assert.equal(Object.hasOwn(JSON.parse(normal.stdout), 'chunkTrials'), false);
+}));
+
+test('oversized opt-in byte replay fails closed without writing an artifact', () => inTemp(dir => {
+  const input = join(dir, 'large.jsonl');
+  const output = join(dir, 'must-not-exist.json');
+  writeFileSync(input, Buffer.from('{}\n'.repeat(175000)));
+  const result = invoke(['--input', input, '--verify-chunks', '--out', output]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Chunk verification is limited to captures of 512 KiB/);
+  assert.equal(existsSync(output), false);
+}));
+
 test('unknown, duplicate or absent flags exit with usage and no output', () => {
-  for (const args of [[], ['--input'], ['--unknown', 'x'], ['--input', 'a', '--input', 'b']]) {
+  for (const args of [[], ['--input'], ['--unknown', 'x'], ['--input', 'a', '--input', 'b'], ['--input', 'a', '--verify-chunks', '--verify-chunks']]) {
     const result = invoke(args);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Usage:/);
