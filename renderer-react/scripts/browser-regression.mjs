@@ -309,6 +309,71 @@ try {
     checkpoints.push({step: 'utf8-jsonl-browser-' + chunkSize, chunkSize, action});
   }
 
+  // JSONL framing failures belong to the application transport, not the SDK.
+  // A malformed complete frame must not mutate the live surface; the next
+  // independently delimited valid frame must still render and dispatch.
+  const recoveredSelection = 'resumed 🧩';
+  const recoveredMessage = {
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/',
+      value: {selection: recoveredSelection, confirmed: true},
+    },
+  };
+  const recoveryBytes = [...Buffer.from(
+    '{"version":"v0.9","updateDataModel":' + '\n' +
+    JSON.stringify(recoveredMessage) + '\n', 'utf8',
+  )];
+  const recovery = await page.evaluate(bytes => {
+    const decoder = new TextDecoder('utf-8', {fatal: true});
+    const before = JSON.stringify(window.__a2uiLab.trace().data);
+    let carry = '';
+    let rejected = 0;
+    let applied = 0;
+    let unchangedOnReject = true;
+    for (let offset = 0; offset < bytes.length; offset += 3) {
+      const finalChunk = offset + 3 >= bytes.length;
+      carry += decoder.decode(Uint8Array.from(bytes.slice(offset, offset + 3)),
+        {stream: !finalChunk});
+      const lines = carry.split('\n');
+      carry = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+          rejected++;
+          unchangedOnReject &&= JSON.stringify(window.__a2uiLab.trace().data) === before;
+          continue;
+        }
+        window.__a2uiLab.applyMessage(message);
+        applied++;
+      }
+    }
+    return {rejected, applied, carry, unchangedOnReject, data: window.__a2uiLab.trace().data};
+  }, recoveryBytes);
+  assert.equal(recovery.rejected, 1, 'Malformed complete JSONL frame must be rejected');
+  assert.equal(recovery.applied, 1, 'Subsequent well-formed frame must reach the SDK exactly once');
+  assert.equal(recovery.carry, '', 'Recovery must leave no partial JSONL frame');
+  assert.equal(recovery.unchangedOnReject, true,
+    'Malformed transport frame must not mutate the published SDK model');
+  assert.deepEqual(recovery.data, {selection: recoveredSelection, confirmed: true});
+  await page.getByText(recoveredSelection, {exact: true}).waitFor({state: 'visible', timeout: 5000});
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    expectedActions.length, 'Transport rejection and recovery must not emit agent actions');
+  await button.click({timeout: 7000});
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    expectedActions.length + 1, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit',
+    context: {selection: recoveredSelection},
+  });
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions, expectedActions,
+    'Button after malformed JSONL recovery must dispatch only fresh valid data');
+  checkpoints.push({step: 'malformed-jsonl-transport-recovery', rejected: recovery.rejected,
+    applied: recovery.applied, action: expectedActions.at(-1)});
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
