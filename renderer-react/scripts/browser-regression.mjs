@@ -456,6 +456,90 @@ try {
     applied: recovery.applied, action: expectedActions.at(-1)});
 
 
+  // A corrupt multibyte UTF-8 transport frame must never reach the published
+  // SDK or mutate its rendered surface. A fresh decoder can then replay a
+  // valid Unicode frame and dispatch a real browser action with current data.
+  const beforeBadUtf8 = await page.evaluate(() => window.__a2uiLab.trace());
+  const badUtf8Bytes = Buffer.from(JSON.stringify({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/',
+      value: {selection: 'damaged 🌋', confirmed: true},
+    },
+  }) + '\n', 'utf8');
+  const emojiOffset = badUtf8Bytes.indexOf(Buffer.from('🌋', 'utf8'));
+  assert.notEqual(emojiOffset, -1, 'Corruption must target a real multibyte character');
+  badUtf8Bytes[emojiOffset + 1] = 0x28; // Invalid UTF-8 continuation byte.
+  const corruptFrame = await page.evaluate(bytes => {
+    const decoder = new TextDecoder('utf-8', {fatal: true});
+    let carry = '';
+    let applied = 0;
+    let rejected = false;
+    try {
+      for (let offset = 0; offset < bytes.length; offset++) {
+        carry += decoder.decode(Uint8Array.of(bytes[offset]),
+          {stream: offset !== bytes.length - 1});
+        const lines = carry.split('\n');
+        carry = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          window.__a2uiLab.applyMessage(JSON.parse(line));
+          applied++;
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      rejected = true;
+    }
+    return {rejected, applied};
+  }, [...badUtf8Bytes]);
+  assert.deepEqual(corruptFrame, {rejected: true, applied: 0},
+    'Fatal UTF-8 decoder must reject the corrupt frame before SDK delivery');
+  assert.deepEqual(await page.evaluate(() => window.__a2uiLab.trace()), beforeBadUtf8,
+    'Corrupted transport bytes must preserve the mounted model and action history');
+  await page.getByText(recoveredSelection, {exact: true}).waitFor({state: 'visible'});
+
+  const utf8RecoveredSelection = 'restored 🌐';
+  const goodUtf8Bytes = [...Buffer.from(JSON.stringify({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/',
+      value: {selection: utf8RecoveredSelection, confirmed: true},
+    },
+  }) + '\n', 'utf8')];
+  const recoveredUtf8 = await page.evaluate(bytes => {
+    const decoder = new TextDecoder('utf-8', {fatal: true});
+    let carry = '';
+    let applied = 0;
+    for (let offset = 0; offset < bytes.length; offset++) {
+      carry += decoder.decode(Uint8Array.of(bytes[offset]),
+        {stream: offset !== bytes.length - 1});
+      const lines = carry.split('\n');
+      carry = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        window.__a2uiLab.applyMessage(JSON.parse(line));
+        applied++;
+      }
+    }
+    return {applied, carry};
+  }, goodUtf8Bytes);
+  assert.deepEqual(recoveredUtf8, {applied: 1, carry: ''},
+    'Fresh decoder must apply exactly one valid frame after corruption');
+  await page.getByText(utf8RecoveredSelection, {exact: true}).waitFor({state: 'visible'});
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    expectedActions.length, 'Corrupt and valid data frames must not generate actions');
+  await button.click({timeout: 7000});
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    expectedActions.length + 1, {timeout: 5000});
+  const recoveredUtf8Action = {
+    name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit',
+    context: {selection: utf8RecoveredSelection},
+  };
+  expectedActions.push(recoveredUtf8Action);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Post-corruption real Button must bind the latest valid Unicode data');
+  checkpoints.push({step: 'invalid-utf8-transport-recovery', rejectedFrames: 1,
+    appliedFrames: recoveredUtf8.applied, action: recoveredUtf8Action});
+
   // Deliver interleaved agent updates to two mounted React surfaces in a
   // single microtask burst. Actions must bind each surface's FINAL data,
   // not an intermediate model value or the other surface's value.
