@@ -214,3 +214,22 @@ Validation requires final-head GitHub Actions `sdk-parity`, `react-browser`, and
 renderer files and is not used for local testing. The known Zod3 HIGH advisory
 remains **unresolved** under its December 7, 2026 exception; this work does not
 claim a new upstream A2UI compatibility defect or solve that advisory.
+
+## Fail-closed offline CLI option parsing (2026-11-08)
+
+The lab's local report CLI previously accepted repeated `--before`, `--after`
+or `--out` flags and silently retained the last value. It also treated a
+following flag token as a filename, e.g. `scan --out --strict` could create
+a file literally named `--strict` and run without strict checking. This is
+ambiguous evidence handling in **our CLI**, not an upstream A2UI SDK defect.
+
+The parser now refuses duplicate switches and valued options, and rejects
+missing or flag-looking values before performing scans or file I/O.
+A filename beginning with `--` can still be supplied explicitly with a
+relative prefix such as `./--report.json`. Offline subprocess regressions
+cover duplicate input/output options, duplicate boolean switches and flag
+tokens mistaken for paths, asserting nonzero exit, no JSON stdout and no
+unintended artifact. No changes to A2UI packages, dependency policies,
+security exceptions, CI workflows, or the historical normal `scan` output
+overwrite contract. The historical Windows checkout remains untouched;
+verification is exclusively through exact-head GitHub Actions.
