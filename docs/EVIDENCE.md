@@ -274,3 +274,25 @@ with Lit/Angular, a security vulnerability or a discovered upstream SDK bug.
 Verification comes only from exact-head GitHub Actions `react-browser`;
 the original Windows checkout is not modified or locally tested. The known
 Zod3 HIGH exception and installed SDK pins are unchanged.
+
+## Stable-ID React Button event hot-swap (2026-11-08)
+
+The isolated published React/core 0.14.0 Chromium regression now exercises an
+`updateComponents` event replacement where a mounted Button **retains the same
+component ID** (`new-submit`) while its action name and Text child change.
+This differs from the earlier new-component-ID replacement regression: DOM
+reconciliation can reuse a component and must not retain its former event
+binding. The test requires the obsolete button label to disappear, exactly one
+Button to remain, and no synthetic action from the update. A real pointer
+click must emit `confirm-hot-swap` (not the former event); a subsequent
+`updateDataModel` and keyboard Space must emit the same new event with the
+latest model value and original surface/component IDs. The existing final
+surface-deletion guard still checks no stale action can be emitted.
+
+This is a deterministic application-level integration regression using pinned
+published SDKs and real Chromium, not an upstream defect claim or coverage for
+other renderers. The change is committed remotely through GitHub to preserve
+historical untracked Windows files; final-head GitHub Actions `react-browser`,
+`sdk-parity` and `dependency-audit` results are required before handoff.
+No local test execution is claimed. The known Zod3 HIGH advisory and its
+expiry-bound 2026-12-07 exception remain unresolved.
