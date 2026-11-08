@@ -115,3 +115,19 @@ test('CLI rejects invalid options, malformed JSON and oversized reports', () => 
   assert.match(result.stderr, /8 MiB/);
   assert.match(run(diffCli, ['--help']).stdout, /Usage:/);
 }));
+
+test('malformed capture and action reports never echo confidential JSON in diagnostics', () => withReports(dir => {
+  const good = join(dir, 'good.json');
+  const malformed = join(dir, 'private.json');
+  writeFileSync(good, JSON.stringify(actualReport()));
+  writeFileSync(malformed, 'SECRET_CAPTURE_CONTEXT_TEST_NOT_JSON');
+  for (const mode of [[], ['--actions']]) {
+    for (const [before, after] of [[good, malformed], [malformed, good]]) {
+      const result = run(diffCli, [...mode, '--before', before, '--after', after, '--strict', '--json']);
+      assert.equal(result.status, 2);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /Report is not valid JSON/);
+      assert.doesNotMatch(result.stderr, /SECRET_/);
+    }
+  }
+}));
