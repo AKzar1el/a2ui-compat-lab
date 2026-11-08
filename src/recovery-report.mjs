@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
-import {dirname, resolve} from 'node:path';
+import {readFileSync} from 'node:fs';
+import {emitReplayReport} from './report-output.mjs';
 import {createHash} from 'node:crypto';
 import {parseJsonLines, replayV09Recoverable} from './replay.mjs';
 
@@ -29,14 +29,7 @@ const report = {
   allMatch: trials.every(trial => trial.matches),
   replay: baseline,
 };
-const args = process.argv.slice(2);
-if (args.length !== 0 && (args.length !== 2 || args[0] !== '--out' || !args[1] || args[1].startsWith('--')))
-  throw new Error('Usage: node src/recovery-report.mjs [--out FILE]');
-if (args.length === 2) {
-  const path = resolve(args[1]);
-  mkdirSync(dirname(path), {recursive: true});
-  writeFileSync(path, JSON.stringify(report, null, 2) + '\n');
-  console.error('Wrote ' + path);
-} else console.log(JSON.stringify(report, null, 2));
+emitReplayReport(report, process.argv.slice(2),
+  'Usage: node src/recovery-report.mjs [--out FILE]');
 if (!report.allMatch || !report.matchesExpectedRejections || !baseline.safeToContinue)
   process.exitCode = 1;
