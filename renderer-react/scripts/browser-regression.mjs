@@ -83,6 +83,175 @@ try {
   assert.deepEqual(trace.actions, expectedActions);
   checkpoints.push({step: 'keyboard-enter', action: trace.actions[1]});
 
+  // Two live surfaces deliberately reuse the same Button and component IDs.
+  // This exercises real React DOM routing, beyond the headless SDK action replay.
+  const secondSurfaceId = 'parallel-surface';
+  const parallelMessages = JSON.parse(fixture).map(({message}) => {
+    const copy = structuredClone(message);
+    for (const type of ['createSurface', 'updateComponents', 'updateDataModel']) {
+      if (copy[type]) copy[type].surfaceId = secondSurfaceId;
+    }
+    if (copy.updateDataModel)
+      copy.updateDataModel.value = {selection: 'gamma', confirmed: false};
+    return copy;
+  });
+  await page.evaluate(messages => {
+    for (const message of messages) window.__a2uiLab.applyMessage(message);
+  }, parallelMessages);
+
+  const parallelButton = button.nth(1);
+  await parallelButton.waitFor({state: 'visible', timeout: 5000});
+  await page.getByText('gamma', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await button.count(), 2, 'Both surfaces must mount distinct DOM Buttons');
+
+  await parallelButton.click({timeout: 7000});
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 3, null, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: secondSurfaceId, sourceComponentId: 'submit',
+    context: {selection: 'gamma'},
+  });
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions, 'Parallel Button must route to its own surface');
+  checkpoints.push({step: 'parallel-pointer', action: trace.actions[2], mountedButtons: 2});
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/', value: {selection: 'delta', confirmed: true},
+    },
+  }));
+  await page.getByText('delta', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await page.getByText('gamma', {exact: true}).count(), 1,
+    'Updating the first surface must not overwrite the parallel surface');
+  await button.first().click({timeout: 7000});
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 4, null, {timeout: 5000});
+  const originalAfterUpdate = {
+    name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit',
+    context: {selection: 'delta'},
+  };
+  expectedActions.push(originalAfterUpdate);
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions, 'Original Button must use only its own updated data');
+  checkpoints.push({step: 'isolated-update', action: trace.actions[3], parallelText: 'gamma'});
+
+  await page.evaluate(surfaceId => window.__a2uiLab.applyMessage({
+    version: 'v0.9', deleteSurface: {surfaceId},
+  }), secondSurfaceId);
+  await parallelButton.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await button.count(), 1, 'Deleting one surface must preserve the other DOM Button');
+  await page.getByText('delta', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await page.getByText('gamma', {exact: true}).count(), 0);
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions, 'Deleting one surface must emit no stale action');
+
+  await button.click({timeout: 7000});
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 5, null, {timeout: 5000});
+  expectedActions.push(originalAfterUpdate);
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions, 'Surviving surface must still dispatch after peer deletion');
+  checkpoints.push({step: 'parallel-deletion-survival', action: trace.actions[4], mountedButtons: 1});
+
+  // Deliver a stale response for the deleted peer followed by a valid response
+  // in deterministic microtasks. A rejected message must not poison subsequent
+  // updates, resurrect the peer's DOM, or change action routing.
+  const deliveries = await page.evaluate(async () => {
+    const messages = [
+      {version: 'v0.9', updateDataModel: {
+        surfaceId: 'parallel-surface', path: '/', value: {selection: 'stale'},
+      }},
+      {version: 'v0.9', updateDataModel: {
+        surfaceId: 'action-replay', path: '/', value: {selection: 'epsilon', confirmed: true},
+      }},
+    ];
+    return Promise.all(messages.map(message => Promise.resolve().then(() => {
+      try {
+        window.__a2uiLab.applyMessage(message);
+        return {status: 'applied', data: window.__a2uiLab.trace().data};
+      } catch {
+        return {status: 'rejected', data: window.__a2uiLab.trace().data};
+      }
+    })));
+  });
+  assert.deepEqual(deliveries, [
+    {status: 'rejected', data: {selection: 'delta', confirmed: true}},
+    {status: 'applied', data: {selection: 'epsilon', confirmed: true}},
+  ], 'A stale async peer update must fail without blocking a valid survivor update');
+  await page.getByText('epsilon', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await button.count(), 1, 'Stale async update must not restore a deleted peer');
+  assert.equal(await page.getByText('gamma', {exact: true}).count(), 0);
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length, 5,
+    'SDK message delivery alone must not emit a Button action');
+
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 6, null, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit',
+    context: {selection: 'epsilon'},
+  });
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions,
+    'Surviving keyboard Button must use its fresh data after a stale async rejection');
+  checkpoints.push({step: 'async-stale-peer-recovery', deliveries: deliveries.map(({status}) => status),
+    action: trace.actions[5], mountedButtons: 1});
+
+
+  // A deleted peer ID can be reused by a new surface. The React DOM and event
+  // binder must point at its fresh model rather than the old, detached one.
+  const recreatedMessages = parallelMessages.map(message => {
+    const copy = structuredClone(message);
+    if (copy.updateDataModel)
+      copy.updateDataModel.value = {selection: 'reborn', confirmed: false};
+    return copy;
+  });
+  await page.evaluate(messages => {
+    for (const message of messages) window.__a2uiLab.applyMessage(message);
+  }, recreatedMessages);
+  await button.nth(1).waitFor({state: 'visible', timeout: 5000});
+  await page.getByText('reborn', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await button.count(), 2, 'Recreated peer must have a distinct live Button');
+  assert.equal(await page.getByText('gamma', {exact: true}).count(), 0,
+    'Recreated peer must not retain its deleted model data');
+  assert.equal(await page.getByText('epsilon', {exact: true}).count(), 1,
+    'Surviving peer data must be unaffected by surface ID reuse');
+
+  await button.nth(1).click({timeout: 7000});
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 7, null, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: secondSurfaceId, sourceComponentId: 'submit',
+    context: {selection: 'reborn'},
+  });
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions,
+    'Recreated Button action must bind fresh peer data with the reused IDs');
+  checkpoints.push({step: 'recreated-peer-new-action', action: trace.actions[6], mountedButtons: 2});
+
+  // Real Tab/Space input must reach the newly mounted peer and use its
+  // current data, even though the surface and Button IDs were reused.
+  await button.first().focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__a2uiLab.trace().actions.length === 8, null, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: secondSurfaceId, sourceComponentId: 'submit',
+    context: {selection: 'reborn'},
+  });
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions,
+    'Tab/Space must route to the recreated peer rather than the surviving original');
+  checkpoints.push({step: 'recreated-peer-tab-space', action: trace.actions[7], mountedButtons: 2});
+
+  await page.evaluate(surfaceId => window.__a2uiLab.applyMessage({
+    version: 'v0.9', deleteSurface: {surfaceId},
+  }), secondSurfaceId);
+  await page.getByText('reborn', {exact: true}).waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await button.count(), 1);
+  assert.equal(await page.getByText('epsilon', {exact: true}).count(), 1);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions, expectedActions,
+    'Second deletion must not leak a stale action');
+  await page.keyboard.press('Space');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions, expectedActions,
+    'Space after deleting the focused peer must not dispatch a stale action');
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
