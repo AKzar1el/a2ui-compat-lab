@@ -233,3 +233,25 @@ unintended artifact. No changes to A2UI packages, dependency policies,
 security exceptions, CI workflows, or the historical normal `scan` output
 overwrite contract. The historical Windows checkout remains untouched;
 verification is exclusively through exact-head GitHub Actions.
+
+## Fatal UTF-8 corruption and live React recovery (2026-11-08)
+
+The existing published `@a2ui/react@0.14.0` / `@a2ui/web_core@0.14.0`
+Chromium integration now includes a negative raw-byte transport frame:
+a multibyte emoji continuation byte is corrupted in a complete JSONL
+`updateDataModel` message. The browser-side `TextDecoder` with `fatal: true`
+must reject that frame **before SDK delivery**, with the mounted A2UI model,
+DOM and action history unchanged. After replacing the failed transport
+decoder, a separately framed, valid Unicode update must render in the live
+React surface and a real pointer click must emit the updated action context
+exactly once. The trace records an `invalid-utf8-transport-recovery`
+checkpoint and does not include user data.
+
+This tests fail-closed framing and recovery in **our application transport
+harness** coupled to a real browser and published A2UI renderer. It does not
+claim that the A2UI SDK itself implements a byte parser, has an unreported
+UTF-8 vulnerability, or supports arbitrary resynchronization within a
+corrupted stream. The explicit reset boundary is required. Validation is
+via the final-head GitHub Actions `react-browser` job; the historical Windows
+checkout was not used to run local tests. SDK dependencies, CI and the
+unresolved narrow Zod3 exception are unchanged.
