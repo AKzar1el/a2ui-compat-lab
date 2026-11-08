@@ -685,6 +685,68 @@ try {
     oldButtonRemoved: true, mountedButtons: 1,
     pointerAction: replacementPointerAction, keyboardAction: replacementKeyboardAction});
 
+  // Replacing the event on an existing component ID is different from
+  // mounting a new Button: the renderer may reuse its DOM and listener.
+  // Both pointer and keyboard input must route to the new event definition.
+  const actionsBeforeHotSwap = expectedActions.length;
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateComponents: {
+      surfaceId: 'action-replay',
+      components: [
+        {id: 'root', component: 'Column', children: ['status', 'new-submit']},
+        {id: 'status', component: 'Text', text: {path: '/selection'}},
+        {
+          id: 'new-submit', component: 'Button', child: 'new-label', variant: 'primary',
+          action: {event: {name: 'confirm-hot-swap',
+            context: {selection: {path: '/selection'}}}},
+        },
+        {id: 'new-label', component: 'Text', text: 'Confirm updated'},
+      ],
+    },
+  }));
+  const hotSwapButton = page.getByRole('button', {name: 'Confirm updated', exact: true});
+  await hotSwapButton.waitFor({state: 'visible', timeout: 5000});
+  await replacementButton.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await page.getByRole('button').count(), 1,
+    'Stable-ID event replacement must not duplicate rendered Buttons');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeHotSwap, 'Hot-swapping a Button event must not fire it');
+
+  await hotSwapButton.click({timeout: 7000});
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    actionsBeforeHotSwap + 1, {timeout: 5000});
+  const hotSwapPointerAction = {
+    name: 'confirm-hot-swap', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {selection: 'replaced 🍂'},
+  };
+  expectedActions.push(hotSwapPointerAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Stable-ID Button must not retain its previous event handler');
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {
+      surfaceId: 'action-replay', path: '/',
+      value: {selection: 'refreshed 🌿', confirmed: true},
+    },
+  }));
+  await page.getByText('refreshed 🌿', {exact: true}).waitFor({state: 'visible'});
+  await hotSwapButton.focus();
+  await page.keyboard.press('Space');
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    actionsBeforeHotSwap + 2, {timeout: 5000});
+  const hotSwapKeyboardAction = {
+    name: 'confirm-hot-swap', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {selection: 'refreshed 🌿'},
+  };
+  expectedActions.push(hotSwapKeyboardAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Keyboard action after stable-ID rebind must use current data');
+  assert.deepEqual(runtimeErrors, [], 'Stable-ID event hot-swap must not throw in Chromium');
+  checkpoints.push({step: 'stable-id-event-hot-swap', mountedButtons: 1,
+    pointerAction: hotSwapPointerAction, keyboardAction: hotSwapKeyboardAction});
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
