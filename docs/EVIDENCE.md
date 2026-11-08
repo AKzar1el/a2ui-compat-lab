@@ -108,3 +108,10 @@ The local `src/replay-file.mjs --verify-chunks` path parses the same captured UT
 - After the rejected message, Chromium still performs the original real pointer click, agent data update, keyboard Enter and surface deletion. The machine-readable browser trace records five checkpoints, the rejected error name/message, and the unchanged-state assertion.
 - GitHub Actions on source commit `848ef19b7e1a4f04b8acfcdcc500b115be0f7b0f`: [run 42376021157](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42376021157) passed `react-browser`, `sdk-parity`, and `dependency-audit` and published the `a2ui-react-browser-trace` artifact. This run was performed remotely, not in the older local checkout.
 - Scope is one rejected catalog case in the actual React/Chromium integration, not a general renderer-fault guarantee or a new upstream defect. Zod3 security exposure remains documented separately in `SECURITY.md`.
+
+## Interleaved multi-surface action isolation (2026-11-07)
+
+- The offline Node regression `test/multi-surface-actions.test.mjs` replays a deterministic, real-published-SDK v0.9 Button fixture against **two simultaneously live surfaces with identical component IDs** through the existing `MessageProcessor` / `ComponentContext` / `GenericBinder` harness.
+- It alternates action events and data updates, deletes one surface, recreates it under the same ID, and checks that five emitted actions retain the correct `surfaceId`, `sourceComponentId` and per-surface data-binding context. A stale Button action must reject while the second live surface remains actionable.
+- The same observable action/state trace must hold when complete JSONL is decoded from 1-, 2-, 7-, 57-byte and full-buffer transport chunks. Run with the regular offline `npm test`; CI's `sdk-parity` job executes the regression on the published `@a2ui/web_core@0.15.0`.
+- **Scope:** headless SDK action routing and lifetime isolation, not multi-surface React DOM rendering, visual accessibility, an upstream vulnerability, or evidence of a novel defect. Those integration and external-feedback milestones remain open.
