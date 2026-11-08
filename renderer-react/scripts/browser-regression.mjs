@@ -309,6 +309,87 @@ try {
     checkpoints.push({step: 'utf8-jsonl-browser-' + chunkSize, chunkSize, action});
   }
 
+  // Stream a complete create/components/data lifecycle across arbitrary byte
+  // boundaries, then delete the new surface after a real browser action.
+  // This guards application framing order, not an SDK transport parser.
+  const lifecycleSurfaceId = 'streamed-lifecycle';
+  const lifecycleMessages = parallelMessages.map(message => {
+    const copy = structuredClone(message);
+    for (const kind of ['createSurface', 'updateComponents', 'updateDataModel']) {
+      if (copy[kind]) copy[kind].surfaceId = lifecycleSurfaceId;
+    }
+    if (copy.updateDataModel)
+      copy.updateDataModel.value = {selection: 'lifecycle 🌱', confirmed: false};
+    return copy;
+  });
+  const lifecycleBytes = [...Buffer.from(
+    lifecycleMessages.map(message => JSON.stringify(message)).join('\\n') + '\\n', 'utf8',
+  )];
+  const streamedLifecycle = await page.evaluate(bytes => {
+    const decoder = new TextDecoder('utf-8', {fatal: true});
+    let carry = '';
+    const kinds = [];
+    for (let offset = 0; offset < bytes.length; offset += 5) {
+      const last = offset + 5 >= bytes.length;
+      carry += decoder.decode(Uint8Array.from(bytes.slice(offset, offset + 5)), {stream: !last});
+      const lines = carry.split('\\n');
+      carry = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const message = JSON.parse(line);
+        window.__a2uiLab.applyMessage(message);
+        kinds.push(Object.keys(message).find(key => key !== 'version'));
+      }
+    }
+    return {kinds, carry};
+  }, lifecycleBytes);
+  assert.deepEqual(streamedLifecycle.kinds,
+    ['createSurface', 'updateComponents', 'updateDataModel'],
+    'Each lifecycle frame must reach the published SDK once and in order');
+  assert.equal(streamedLifecycle.carry, '', 'Streamed lifecycle must end at a frame boundary');
+  await page.getByText('lifecycle 🌱', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await button.count(), 2, 'Streamed lifecycle must render a second real Button');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    expectedActions.length, 'Streamed lifecycle alone must not emit an action');
+  await button.nth(1).click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    expectedActions.length + 1, {timeout: 5000});
+  expectedActions.push({
+    name: 'confirm-choice', surfaceId: lifecycleSurfaceId, sourceComponentId: 'submit',
+    context: {selection: 'lifecycle 🌱'},
+  });
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Stream-created Button must route to its own fresh model');
+
+  const deletionBytes = [...Buffer.from(JSON.stringify({
+    version: 'v0.9', deleteSurface: {surfaceId: lifecycleSurfaceId},
+  }) + '\\n', 'utf8')];
+  const deletion = await page.evaluate(bytes => {
+    const decoder = new TextDecoder('utf-8', {fatal: true});
+    let carry = '';
+    let applied = 0;
+    for (let offset = 0; offset < bytes.length; offset += 2) {
+      const last = offset + 2 >= bytes.length;
+      carry += decoder.decode(Uint8Array.from(bytes.slice(offset, offset + 2)), {stream: !last});
+      const lines = carry.split('\\n');
+      carry = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        window.__a2uiLab.applyMessage(JSON.parse(line));
+        applied++;
+      }
+    }
+    return {applied, carry};
+  }, deletionBytes);
+  assert.deepEqual(deletion, {applied: 1, carry: ''},
+    'Streamed deletion must apply exactly once');
+  await page.getByText('lifecycle 🌱', {exact: true}).waitFor({state: 'detached'});
+  assert.equal(await button.count(), 1, 'Streamed deletion must preserve the original surface');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions, expectedActions,
+    'Streamed deletion must not dispatch a stale action');
+  checkpoints.push({step: 'utf8-jsonl-full-browser-lifecycle', kinds: streamedLifecycle.kinds,
+    deletionCount: deletion.applied, action: expectedActions.at(-1)});
+
   // JSONL framing failures belong to the application transport, not the SDK.
   // A malformed complete frame must not mutate the live surface; the next
   // independently delimited valid frame must still render and dispatch.
