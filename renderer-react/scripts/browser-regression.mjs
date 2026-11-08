@@ -832,6 +832,47 @@ try {
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
 
+  // Treat the data model as untrusted input, not executable HTML. This
+  // exercises the rendered Text and a genuine Button action together; it
+  // does not claim comprehensive XSS coverage or a new SDK vulnerability.
+  const markupSelection = 'agent-data-marker <img src="data:image/png;base64,AA" ' +
+    'onerror="window.__a2uiLabMarkupExecuted = true">';
+  const actionsBeforeMarkup = expectedActions.length;
+  await page.evaluate(value => {
+    window.__a2uiLabMarkupExecuted = false;
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9',
+      updateDataModel: {
+        surfaceId: 'action-replay', path: '/',
+        value: {selection: value, confirmed: true},
+      },
+    });
+  }, markupSelection);
+  await page.getByText(/agent-data-marker/).waitFor({state: 'visible', timeout: 5000});
+  assert.equal(await page.locator('[onerror]').count(), 0,
+    'Agent model Text must not install executable inline HTML event handlers');
+  assert.equal(await page.evaluate(() => window.__a2uiLabMarkupExecuted), false,
+    'Untrusted Text must not execute an injected image error handler');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeMarkup, 'Rendering untrusted Text must not dispatch an agent action');
+
+  await restoredButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeMarkup + 1, {timeout: 5000});
+  const markupAction = {
+    name: 'confirm-restored', surfaceId: 'action-replay', sourceComponentId: 'new-submit',
+    context: {selection: markupSelection},
+  };
+  expectedActions.push(markupAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Real Button must preserve agent-controlled Text as inert action data');
+  assert.equal(await page.evaluate(() => window.__a2uiLabMarkupExecuted), false,
+    'Pointer interaction must not trigger an injected HTML handler');
+  assert.deepEqual(runtimeErrors, [], 'Agent markup containment must not throw in Chromium');
+  checkpoints.push({step: 'agent-markup-text-action-containment',
+    executableHandlerAttributes: 0, injectedHandlerExecuted: false,
+    action: markupAction});
+
   // A late action after surface deletion must not target a stale DOM Button.
   await page.evaluate(() => window.__a2uiLab.applyMessage({
     version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
