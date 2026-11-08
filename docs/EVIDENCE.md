@@ -258,10 +258,10 @@ unresolved narrow Zod3 exception are unchanged.
 
 ## Live React component-graph replacement and event rebinding (2026-11-08)
 
-The published \`@a2ui/react@0.14.0\` / \`@a2ui/web_core@0.14.0\` Chromium
+The published `@a2ui/react@0.14.0` / `@a2ui/web_core@0.14.0` Chromium
 replay now replaces the mounted original surface's component graph: its
-\`Confirm\` Button is removed from the rendered DOM and a newly identified
-\`Confirm replacement\` Button is introduced with a different A2UI action
+`Confirm` Button is removed from the rendered DOM and a newly identified
+`Confirm replacement` Button is introduced with a different A2UI action
 name. The regression asserts no event on the component-only update, verifies
 one real pointer event from the new Button, then updates the model and
 verifies a keyboard Space event from that Button carries the latest bound
@@ -271,6 +271,6 @@ the resulting action trace.
 This is actual browser/SDK application integration behavior beyond a
 standalone schema-conformance check. It does not establish compatibility
 with Lit/Angular, a security vulnerability or a discovered upstream SDK bug.
-Verification comes only from exact-head GitHub Actions \`react-browser\`;
+Verification comes only from exact-head GitHub Actions `react-browser`;
 the original Windows checkout is not modified or locally tested. The known
 Zod3 HIGH exception and installed SDK pins are unchanged.
