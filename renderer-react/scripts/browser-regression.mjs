@@ -455,6 +455,86 @@ try {
   checkpoints.push({step: 'malformed-jsonl-transport-recovery', rejected: recovery.rejected,
     applied: recovery.applied, action: expectedActions.at(-1)});
 
+
+  // Deliver interleaved agent updates to two mounted React surfaces in a
+  // single microtask burst. Actions must bind each surface's FINAL data,
+  // not an intermediate model value or the other surface's value.
+  const burstSurfaceId = 'burst-parallel';
+  const burstMessages = parallelMessages.map(message => {
+    const copy = structuredClone(message);
+    for (const kind of ['createSurface', 'updateComponents', 'updateDataModel']) {
+      if (copy[kind]) copy[kind].surfaceId = burstSurfaceId;
+    }
+    if (copy.updateDataModel)
+      copy.updateDataModel.value = {selection: 'seed 🌿', confirmed: false};
+    return copy;
+  });
+  await page.evaluate(messages => {
+    for (const message of messages) window.__a2uiLab.applyMessage(message);
+  }, burstMessages);
+  await button.nth(1).waitFor({state: 'visible', timeout: 5000});
+  await page.getByText('seed 🌿', {exact: true}).waitFor({state: 'visible'});
+
+  const actionsBeforeBurst = expectedActions.length;
+  const burstUpdates = [
+    {surfaceId: 'action-replay', selection: 'first 🍃'},
+    {surfaceId: burstSurfaceId, selection: 'second 🦋'},
+    {surfaceId: 'action-replay', selection: 'third 🚀'},
+    {surfaceId: burstSurfaceId, selection: 'fourth 🎻'},
+    {surfaceId: 'action-replay', selection: 'final 🐙'},
+    {surfaceId: burstSurfaceId, selection: 'final 🐝'},
+  ];
+  await page.evaluate(async updates => {
+    await Promise.all(updates.map(({surfaceId, selection}) =>
+      Promise.resolve().then(() => window.__a2uiLab.applyMessage({
+        version: 'v0.9',
+        updateDataModel: {surfaceId, path: '/', value: {selection, confirmed: true}},
+      }))));
+  }, burstUpdates);
+  await page.getByText('final 🐙', {exact: true}).waitFor({state: 'visible'});
+  await page.getByText('final 🐝', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await button.count(), 2, 'Both live Buttons must survive the update burst');
+  for (const stale of ['first 🍃', 'second 🦋', 'third 🚀', 'fourth 🎻', 'seed 🌿']) {
+    assert.equal(await page.getByText(stale, {exact: true}).count(), 0,
+      'Burst must leave no intermediate Text in the rendered DOM');
+  }
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeBurst, 'Agent model updates must never dispatch synthetic Button actions');
+
+  await button.first().click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeBurst + 1, {timeout: 5000});
+  const firstBurstAction = {
+    name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit',
+    context: {selection: 'final 🐙'},
+  };
+  expectedActions.push(firstBurstAction);
+  await button.nth(1).focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeBurst + 2, {timeout: 5000});
+  const secondBurstAction = {
+    name: 'confirm-choice', surfaceId: burstSurfaceId, sourceComponentId: 'submit',
+    context: {selection: 'final 🐝'},
+  };
+  expectedActions.push(secondBurstAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Pointer and keyboard actions must use isolated last-write-wins data');
+  checkpoints.push({step: 'interleaved-live-surface-burst', updates: burstUpdates.length,
+    pointerAction: firstBurstAction, keyboardAction: secondBurstAction, mountedButtons: 2});
+
+  await page.evaluate(surfaceId => window.__a2uiLab.applyMessage({
+    version: 'v0.9', deleteSurface: {surfaceId},
+  }), burstSurfaceId);
+  await button.nth(1).waitFor({state: 'detached', timeout: 5000});
+  await page.getByText('final 🐙', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await button.count(), 1, 'Removing the burst peer must preserve the original');
+  await page.keyboard.press('Enter');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Focused deleted peer must not emit a stale action');
+  checkpoints.push({step: 'interleaved-burst-peer-delete', buttonCount: 1,
+    actionCount: expectedActions.length});
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});

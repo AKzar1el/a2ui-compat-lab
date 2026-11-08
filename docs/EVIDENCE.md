@@ -176,3 +176,19 @@ The exact source commit `4eb99c567bb20ec4060f735be2768a143d715f09` passed all re
 Local scan and A2UI capture/action comparison reports are evidence, not permissive text. Node's `readFileSync(path, 'utf8')` silently replaces malformed UTF-8 bytes with U+FFFD; a damaged report can therefore remain syntactically valid JSON and be incorrectly treated as valid comparison input. The scan comparator and the capture/action comparator now use fatal UTF-8 decoding before JSON parsing and fail closed with content-redacted diagnostics.
 
 Deterministic regressions insert a malformed UTF-8 byte into an otherwise valid report's implementation string and verify refusal for before, after and self-comparison inputs. This tests transport/report integrity, **not** a newly discovered A2UI SDK vulnerability. Published-SDK fixture and real browser test coverage remains unchanged. GitHub CI is the sole source of validation for this GitHub-only change; no local Windows tests are claimed.
+
+## React interleaved live-surface update burst (2026-11-08)
+
+The published React 0.14 / core 0.14 Chromium harness now includes a bounded
+six-message agent-update burst interleaved across two simultaneously mounted
+surfaces, followed by an actual pointer Button click and keyboard Enter.
+It asserts that neither the original nor peer React Text displays stale
+intermediate data; mere agent updates emit no actions; and each real action
+uses its own surface's final data despite reused component IDs. It then
+deletes the keyboard-focused peer and asserts that no stale action is emitted.
+
+This is an application-level integration regression, not an upstream SDK
+defect claim. Microtasks run in deterministic delivery order, so this does
+not establish behavior for truly concurrent network writers or additional
+renderer frameworks. CI's `react-browser` job supplies the real Chromium
+execution proof; local checkout tests are not claimed.
