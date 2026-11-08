@@ -98,6 +98,10 @@ Automated PR integration is defined in docs/INTEGRATION.md. At the exact final v
 
 A2UI SDK 0.14/0.15 currently depends on Zod 3.25.76 with an unresolved HIGH advisory. See SECURITY.md. npm audit gate discloses it and permits a narrow expiry-bound exception until 2026-12-07; any new vulnerability fails CI.
 
+## Opt-in byte-boundary replay for user-provided captures (2026-11-07)
+
+The local `src/replay-file.mjs --verify-chunks` path parses the same captured UTF-8 JSONL file at 1, 7, 57 and full-buffer byte chunk widths. It runs each decoded message sequence through the actual pinned `@a2ui/web_core@0.15.0` v0.9 MessageProcessor, compares observable component/data snapshots to the ordinary replay and fails closed on mismatch. The report records per-trial byte sizes and equivalence. Tests include split multibyte Unicode and a limit rejection without writing evidence; opt-in verification caps input at 512 KiB, while normal replay retains its 4 MiB cap. These are deterministic offline **harness-level byte-frame** tests, not an assertion that the SDK implements an incremental network transport parser or evidence of a new upstream defect.
+
 ## React Chromium invalid-catalog rejection and continuation (2026-11-07)
 
 - The version-pinned published `@a2ui/react@0.14.0` / `@a2ui/web_core@0.14.0` browser harness now injects an unknown-catalog `createSurface` while a valid surface remains mounted. The test requires the published SDK to reject it, compares the before/after sorted surface IDs, components, data, surface errors and emitted actions, and confirms the visible Button remains mounted.
