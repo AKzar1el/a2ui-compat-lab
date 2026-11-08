@@ -169,3 +169,10 @@ The exact source commit `4eb99c567bb20ec4060f735be2768a143d715f09` passed all re
 - The offline `src/cli.mjs compare` scan comparison now limits each JSON input to a regular 1-byte-to-8-MiB file and refuses malformed JSON with a generic diagnostic rather than Node's parser excerpt. These limits do not affect `scan`, `doctor`, or the separate release matrix.
 - Offline subprocess regressions supply deliberately malformed captures and a missing-surface SDK message with private markers, then assert failure without marker leakage or a written report. Scan comparison tests both `--before` and `--after` malformed inputs plus an over-8-MiB report. This checks user-facing failure handling, not a new published A2UI compatibility disagreement or an external security incident.
 - All source, tests and evidence were changed **through GitHub only** to preserve the historical untracked Windows renderer directory. GitHub Actions remains the required validation channel; no local test execution is claimed. The separate unresolved Zod3 HIGH advisory and its December 7, 2026 exception are unchanged.
+
+
+## 2026-11-08 — Report byte-integrity regression (remote-only candidate)
+
+Local scan and A2UI capture/action comparison reports are evidence, not permissive text. Node's `readFileSync(path, 'utf8')` silently replaces malformed UTF-8 bytes with U+FFFD; a damaged report can therefore remain syntactically valid JSON and be incorrectly treated as valid comparison input. The scan comparator and the capture/action comparator now use fatal UTF-8 decoding before JSON parsing and fail closed with content-redacted diagnostics.
+
+Deterministic regressions insert a malformed UTF-8 byte into an otherwise valid report's implementation string and verify refusal for before, after and self-comparison inputs. This tests transport/report integrity, **not** a newly discovered A2UI SDK vulnerability. Published-SDK fixture and real browser test coverage remains unchanged. GitHub CI is the sole source of validation for this GitHub-only change; no local Windows tests are claimed.

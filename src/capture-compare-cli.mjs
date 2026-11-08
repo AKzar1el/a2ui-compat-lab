@@ -27,7 +27,15 @@ function readReport(path) {
   const stat = statSync(path);
   if (!stat.isFile() || stat.size < 1 || stat.size > MAX_REPORT_BYTES)
     throw new RangeError('Report must be a regular JSON file of 1 byte to 8 MiB');
-  const contents = readFileSync(path, 'utf8');
+  let contents;
+  try {
+    // A lossy UTF-8 replacement can turn a damaged JSON report into valid JSON.
+    contents = new TextDecoder('utf-8', {fatal: true}).decode(readFileSync(path));
+  } catch (error) {
+    if (error instanceof TypeError)
+      throw new SyntaxError('Report is not valid UTF-8; input contents omitted');
+    throw error;
+  }
   try {
     return JSON.parse(contents);
   } catch {

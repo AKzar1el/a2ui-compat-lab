@@ -135,3 +135,32 @@ test('comparison CLI is offline, deterministic, and strict on observed drift', (
     rmSync(root, {recursive: true, force: true});
   }
 });
+
+
+test('scan comparison refuses byte-corrupted but syntactically valid UTF-8 in either report', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-scan-utf8-'));
+  const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  try {
+    const report = scan([['one', true, true]]);
+    const good = join(dir, 'good.json');
+    const corrupt = join(dir, 'corrupt.json');
+    writeFileSync(good, JSON.stringify(report));
+    const bytes = Buffer.from(JSON.stringify({
+      ...report,
+      implementations: {...report.implementations, reference: 'PRIVATE_SCAN_UTF8_MARKER'},
+    }));
+    const index = bytes.indexOf(Buffer.from('PRIVATE_SCAN_UTF8_MARKER'));
+    assert.ok(index > 0);
+    bytes[index] = 0xff;
+    writeFileSync(corrupt, bytes);
+    for (const [before, after] of [[corrupt, good], [good, corrupt], [corrupt, corrupt]]) {
+      const result = spawnSync(process.execPath,
+        [cli, 'compare', '--before', before, '--after', after, '--strict', '--json'],
+        {encoding: 'utf8', timeout: 20000});
+      assert.equal(result.status, 2, result.stderr);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /Comparison JSON contains invalid UTF-8/);
+      assert.doesNotMatch(result.stderr, /RIVATE_SCAN_UTF8_MARKER/);
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
