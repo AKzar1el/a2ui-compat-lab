@@ -86,6 +86,31 @@ test('rejects malformed UTF-8, partial JSONL and invalid JSON without publishing
   }
 }));
 
+test('capture processing failures redact private JSONL and SDK input', () => inTemp(dir => {
+  const input = join(dir, 'private.jsonl');
+  const output = join(dir, 'must-not-exist.json');
+  const secret = 'LEAK1234_PRIVATE_CAPTURE';
+  const cases = [
+    [Buffer.from('{"version":"v0.9","debug":' + secret + '}\n'),
+      /Capture JSONL parsing failed; input contents omitted/],
+    [Buffer.from(JSON.stringify({
+      version: 'v0.9', updateDataModel: {
+        surfaceId: secret, path: '/', value: {customerToken: secret},
+      },
+    }) + '\n'), /Capture SDK replay failed; input contents omitted/],
+  ];
+  for (const [raw, expected] of cases) {
+    writeFileSync(input, raw);
+    const result = invoke(['--input', input, '--out', output]);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, expected);
+    assert.doesNotMatch(result.stderr, /LEAK1234|PRIVATE_CAPTURE/,
+      'Capture content must never appear in CLI failure diagnostics');
+    assert.equal(existsSync(output), false, 'Rejected captures must not publish a trace');
+  }
+}));
+
 test('rejects oversized captures and excess empty frames before replay', () => inTemp(dir => {
   const input = join(dir, 'large.jsonl');
   writeFileSync(input, Buffer.alloc(4 * 1024 * 1024 + 1, 0x0a));

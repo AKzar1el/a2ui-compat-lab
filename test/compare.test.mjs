@@ -80,6 +80,39 @@ test('scan baseline fails if SDK installation disagrees with the pinned version'
   assert.equal(check.observedWebCoreVersion, '0.16.0');
 });
 
+test('comparison CLI bounds report size and redacts malformed JSON in either input', () => {
+  const root = mkdtempSync(join(tmpdir(), 'a2ui-compare-private-'));
+  const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  try {
+    const valid = join(root, 'valid.json');
+    const invalid = join(root, 'invalid.json');
+    const huge = join(root, 'huge.json');
+    writeFileSync(valid, JSON.stringify(scan([['ok', true, true]])));
+    writeFileSync(invalid, '{"secret":LEAK1234_PRIVATE_SCAN}\n');
+    writeFileSync(huge, Buffer.alloc(8 * 1024 * 1024 + 1, 0x20));
+    for (const flag of ['--before', '--after']) {
+      const args = flag === '--before'
+        ? ['--before', invalid, '--after', valid]
+        : ['--before', valid, '--after', invalid];
+      const bad = spawnSync(process.execPath, [cli, 'compare', ...args, '--strict'], {
+        encoding: 'utf8', timeout: 20000,
+      });
+      assert.equal(bad.status, 2, bad.stderr);
+      assert.match(bad.stderr, /Comparison JSON is invalid; input contents omitted/);
+      assert.doesNotMatch(bad.stderr, /LEAK1234|PRIVATE_SCAN/);
+      assert.equal(bad.stdout, '');
+    }
+    const oversized = spawnSync(process.execPath, [cli, 'compare', '--before', huge, '--after', valid], {
+      encoding: 'utf8', timeout: 20000,
+    });
+    assert.equal(oversized.status, 2, oversized.stderr);
+    assert.match(oversized.stderr, /regular JSON file of 1 byte to 8 MiB/);
+    assert.equal(oversized.stdout, '');
+  } finally {
+    rmSync(root, {recursive: true, force: true});
+  }
+});
+
 test('comparison CLI is offline, deterministic, and strict on observed drift', () => {
   const root = mkdtempSync(join(tmpdir(), 'a2ui-compare-'));
   const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
