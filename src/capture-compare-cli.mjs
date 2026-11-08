@@ -27,7 +27,13 @@ function readReport(path) {
   const stat = statSync(path);
   if (!stat.isFile() || stat.size < 1 || stat.size > MAX_REPORT_BYTES)
     throw new RangeError('Report must be a regular JSON file of 1 byte to 8 MiB');
-  return JSON.parse(readFileSync(path, 'utf8'));
+  const contents = readFileSync(path, 'utf8');
+  try {
+    return JSON.parse(contents);
+  } catch {
+    // Node's JSON.parse SyntaxError may contain slices of confidential input.
+    throw new SyntaxError('Report is not valid JSON; input contents omitted');
+  }
 }
 
 try {
