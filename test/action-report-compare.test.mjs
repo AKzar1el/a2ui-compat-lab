@@ -78,3 +78,28 @@ test('CLI action mode is strict and redacts action payloads',()=>{
     assert.match(p.stderr,/different fixtures/);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('action comparison refuses byte-corrupted but parseable JSON reports', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-action-utf8-'));
+  try {
+    const report = actual();
+    const good = join(dir, 'good.json');
+    const corrupt = join(dir, 'corrupt.json');
+    writeFileSync(good, JSON.stringify(report));
+    const bytes = Buffer.from(JSON.stringify({
+      ...report, implementation: 'PRIVATE_ACTION_UTF8_MARKER',
+    }));
+    const index = bytes.indexOf(Buffer.from('PRIVATE_ACTION_UTF8_MARKER'));
+    assert.ok(index > 0);
+    bytes[index] = 0xff;
+    writeFileSync(corrupt, bytes);
+    for (const [before, after] of [[corrupt, good], [good, corrupt], [corrupt, corrupt]]) {
+      const p = run(cli, ['--actions', '--before', before, '--after', after, '--strict', '--json']);
+      assert.equal(p.status, 2, p.stderr);
+      assert.equal(p.stdout, '');
+      assert.match(p.stderr, /Report is not valid UTF-8/);
+      assert.doesNotMatch(p.stderr, /RIVATE_ACTION_UTF8_MARKER/);
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
