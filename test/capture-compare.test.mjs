@@ -131,3 +131,25 @@ test('malformed capture and action reports never echo confidential JSON in diagn
     }
   }
 }));
+
+
+test('capture comparison refuses lossy UTF-8 replacement in either input', () => withReports(dir => {
+  const good = join(dir, 'good.json');
+  const corrupt = join(dir, 'corrupt.json');
+  const report = actualReport();
+  writeFileSync(good, JSON.stringify(report));
+  const bytes = Buffer.from(JSON.stringify({
+    ...report, implementation: 'PRIVATE_CAPTURE_UTF8_MARKER',
+  }));
+  const index = bytes.indexOf(Buffer.from('PRIVATE_CAPTURE_UTF8_MARKER'));
+  assert.ok(index > 0);
+  bytes[index] = 0xff;
+  writeFileSync(corrupt, bytes);
+  for (const [before, after] of [[corrupt, good], [good, corrupt], [corrupt, corrupt]]) {
+    const result = run(diffCli, ['--before', before, '--after', after, '--strict', '--json']);
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Report is not valid UTF-8/);
+    assert.doesNotMatch(result.stderr, /RIVATE_CAPTURE_UTF8_MARKER/);
+  }
+}));
