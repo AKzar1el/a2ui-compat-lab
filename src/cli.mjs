@@ -18,14 +18,25 @@ function usage() {
 function parseArgs(argv) {
   const verb = argv[0] ?? 'help';
   let strict = false, json = false, out = null, before = null, after = null;
+  const known = new Set(['--strict', '--json', '--out', '--before', '--after']);
+  const seen = new Set();
   for (let i = 1; i < argv.length; i++) {
     const token = argv[i];
+    if (!known.has(token)) throw new Error('Unknown or incomplete option: ' + token);
+    if (seen.has(token)) throw new Error('Duplicate option: ' + token);
+    seen.add(token);
     if (token === '--strict') strict = true;
     else if (token === '--json') json = true;
-    else if (token === '--out' && argv[i + 1]) out = argv[++i];
-    else if (token === '--before' && argv[i + 1]) before = argv[++i];
-    else if (token === '--after' && argv[i + 1]) after = argv[++i];
-    else throw new Error('Unknown or incomplete option: ' + token);
+    else {
+      // Never consume another flag as an output or comparison input path.
+      const value = argv[i + 1];
+      if (!value || value.startsWith('--'))
+        throw new Error('Missing value for option: ' + token);
+      i++;
+      if (token === '--out') out = value;
+      else if (token === '--before') before = value;
+      else after = value;
+    }
   }
   return {verb, strict, json, out, before, after};
 }
