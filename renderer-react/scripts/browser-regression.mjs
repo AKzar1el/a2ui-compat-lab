@@ -252,6 +252,63 @@ try {
   assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions, expectedActions,
     'Space after deleting the focused peer must not dispatch a stale action');
 
+  // Reconstruct a JSONL agent update from actual UTF-8 transport bytes, then
+  // exercise its rendered Text and real Button. Only complete newline-delimited
+  // messages enter the published SDK; no partial chunk may mutate the model.
+  for (const [chunkSize, selection] of [[1, 'café 🍵'], [7, 'música 🚀'], [57, 'über 🎯']]) {
+    const message = {
+      version: 'v0.9',
+      updateDataModel: {
+        surfaceId: 'action-replay', path: '/',
+        value: {selection, confirmed: true},
+      },
+    };
+    const bytes = [...Buffer.from(JSON.stringify(message) + '\n', 'utf8')];
+    const streamed = await page.evaluate(({bytes, chunkSize}) => {
+      const decoder = new TextDecoder('utf-8', {fatal: true});
+      const before = JSON.stringify(window.__a2uiLab.trace().data);
+      let carry = '';
+      let applied = 0;
+      let prematureMutation = false;
+      for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        const finalChunk = offset + chunkSize >= bytes.length;
+        carry += decoder.decode(Uint8Array.from(bytes.slice(offset, offset + chunkSize)),
+          {stream: !finalChunk});
+        const lines = carry.split('\n');
+        carry = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          window.__a2uiLab.applyMessage(JSON.parse(line));
+          applied++;
+        }
+        if (!finalChunk && JSON.stringify(window.__a2uiLab.trace().data) !== before)
+          prematureMutation = true;
+      }
+      return {applied, carry, prematureMutation, data: window.__a2uiLab.trace().data};
+    }, {bytes, chunkSize});
+    assert.equal(streamed.applied, 1, 'Exactly one complete JSONL update should be applied');
+    assert.equal(streamed.carry, '', 'Transport must not leave trailing partial data');
+    assert.equal(streamed.prematureMutation, false,
+      'No partial UTF-8 or JSONL chunk may mutate the published SDK state');
+    assert.deepEqual(streamed.data, {selection, confirmed: true});
+    await page.getByText(selection, {exact: true}).waitFor({state: 'visible', timeout: 5000});
+    const previousCount = expectedActions.length;
+    assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+      previousCount, 'Streaming an update alone must not emit an agent action');
+    await button.click({timeout: 7000});
+    await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+      previousCount + 1, {timeout: 5000});
+    const action = {
+      name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit',
+      context: {selection},
+    };
+    expectedActions.push(action);
+    trace = await page.evaluate(() => window.__a2uiLab.trace());
+    assert.deepEqual(trace.actions, expectedActions,
+      'Real Button must emit the latest Unicode data after streamed JSONL delivery');
+    checkpoints.push({step: 'utf8-jsonl-browser-' + chunkSize, chunkSize, action});
+  }
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
