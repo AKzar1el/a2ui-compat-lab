@@ -296,3 +296,9 @@ historical untracked Windows files; final-head GitHub Actions `react-browser`,
 `sdk-parity` and `dependency-audit` results are required before handoff.
 No local test execution is claimed. The known Zod3 HIGH advisory and its
 expiry-bound 2026-12-07 exception remain unresolved.
+
+## Focused Button detachment and same-ID reinsertion (2026-11-08)
+
+The published `@a2ui/react@0.14.0` / `@a2ui/web_core@0.14.0` real-Chromium integration now exercises a temporary component-only removal of a **keyboard-focused** Button while its surface and bound Text remain mounted. The test requires the Button to detach, the Text to remain visible, and a subsequent Space keypress to emit no stale action. A later `updateComponents` reuses the same Button/component ID but assigns a *new* event (`confirm-restored`), followed by a real pointer click and a keyboard Enter after a model update. Both interactions must carry only fresh event names and model values without duplicate controls or runtime errors.
+
+Unlike the preceding component replacement and hot-swap checks, this covers the **zero-Button interval** and reattachment of a previously detached component ID within the same live surface. It is a deterministic application-level renderer regression, not a newly demonstrated upstream SDK defect or a guarantee for other browsers/renderers. Source is edited remotely to preserve the historical untracked Windows renderer directory; **GitHub Actions `sdk-parity`, `react-browser`, and `dependency-audit` at the final PR head** must confirm execution. No local tests are claimed. Pinned dependencies, workflow/security rules, and the unresolved Zod3 HIGH exception through 2026-12-07 are unchanged.

@@ -747,6 +747,87 @@ try {
   checkpoints.push({step: 'stable-id-event-hot-swap', mountedButtons: 1,
     pointerAction: hotSwapPointerAction, keyboardAction: hotSwapKeyboardAction});
 
+  // A temporary component-only update can remove the focused Button while
+  // preserving its surface and model. Reintroducing the SAME component ID
+  // must bind a fresh event, not resurrect the detached listener.
+  const actionsBeforeDetach = expectedActions.length;
+  await hotSwapButton.focus();
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateComponents: {
+      surfaceId: 'action-replay',
+      components: [
+        {id: 'root', component: 'Column', children: ['status']},
+        {id: 'status', component: 'Text', text: {path: '/selection'}},
+      ],
+    },
+  }));
+  await hotSwapButton.waitFor({state: 'detached', timeout: 5000});
+  await page.getByText('refreshed 🌿', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await page.getByRole('button').count(), 0,
+    'Removing only the Button must preserve surface Text without a clickable control');
+  await page.keyboard.press('Space');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeDetach, 'Space after focused Button detachment must not trigger a stale action');
+  assert.deepEqual(runtimeErrors, [], 'Detaching a focused Button must not throw');
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateComponents: {
+      surfaceId: 'action-replay',
+      components: [
+        {id: 'root', component: 'Column', children: ['status', 'new-submit']},
+        {id: 'status', component: 'Text', text: {path: '/selection'}},
+        {
+          id: 'new-submit', component: 'Button', child: 'new-label', variant: 'primary',
+          action: {event: {name: 'confirm-restored',
+            context: {selection: {path: '/selection'}}}},
+        },
+        {id: 'new-label', component: 'Text', text: 'Confirm restored'},
+      ],
+    },
+  }));
+  const restoredButton = page.getByRole('button', {name: 'Confirm restored', exact: true});
+  await restoredButton.waitFor({state: 'visible', timeout: 5000});
+  assert.equal(await page.getByRole('button').count(), 1,
+    'Reinserting an old component ID must create exactly one live Button');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeDetach, 'Reinsertion without user input must not emit actions');
+  await restoredButton.click({timeout: 7000});
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    actionsBeforeDetach + 1, {timeout: 5000});
+  const restoredPointerAction = {
+    name: 'confirm-restored', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {selection: 'refreshed 🌿'},
+  };
+  expectedActions.push(restoredPointerAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Remounted Button must not emit the obsolete hot-swap event');
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {
+      surfaceId: 'action-replay', path: '/',
+      value: {selection: 'restored 🍁', confirmed: true},
+    },
+  }));
+  await page.getByText('restored 🍁', {exact: true}).waitFor({state: 'visible'});
+  await restoredButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    actionsBeforeDetach + 2, {timeout: 5000});
+  const restoredKeyboardAction = {
+    name: 'confirm-restored', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {selection: 'restored 🍁'},
+  };
+  expectedActions.push(restoredKeyboardAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Reinserted Button keyboard action must use updated model data');
+  assert.deepEqual(runtimeErrors, [], 'Component detachment/remount must not throw in Chromium');
+  checkpoints.push({step: 'focused-button-detach-reinsert', detachedButtonCount: 0,
+    remountedButtonCount: 1, pointerAction: restoredPointerAction,
+    keyboardAction: restoredKeyboardAction});
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
