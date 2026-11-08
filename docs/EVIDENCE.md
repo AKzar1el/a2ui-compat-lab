@@ -97,3 +97,10 @@ A standalone `src/replay-file.mjs --input capture.jsonl [--out report.json]` run
 Automated PR integration is defined in docs/INTEGRATION.md. At the exact final verified PR head, include one line in the PR BODY: MERGER_HANDOFF: AKzar1el/a2ui-compat-lab@<full head SHA>. The A2UI-only GitHub Actions merger accepts only source/test/docs changes with fully green exact-head and main CI. Packages, lockfiles, workflows and security policies require owner review; never bypass this restriction. The separate shared fleet merger remains untouched.
 
 A2UI SDK 0.14/0.15 currently depends on Zod 3.25.76 with an unresolved HIGH advisory. See SECURITY.md. npm audit gate discloses it and permits a narrow expiry-bound exception until 2026-12-07; any new vulnerability fails CI.
+
+## React Chromium invalid-catalog rejection and continuation (2026-11-07)
+
+- The version-pinned published `@a2ui/react@0.14.0` / `@a2ui/web_core@0.14.0` browser harness now injects an unknown-catalog `createSurface` while a valid surface remains mounted. The test requires the published SDK to reject it, compares the before/after sorted surface IDs, components, data, surface errors and emitted actions, and confirms the visible Button remains mounted.
+- After the rejected message, Chromium still performs the original real pointer click, agent data update, keyboard Enter and surface deletion. The machine-readable browser trace records five checkpoints, the rejected error name/message, and the unchanged-state assertion.
+- GitHub Actions on source commit `848ef19b7e1a4f04b8acfcdcc500b115be0f7b0f`: [run 42376021157](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42376021157) passed `react-browser`, `sdk-parity`, and `dependency-audit` and published the `a2ui-react-browser-trace` artifact. This run was performed remotely, not in the older local checkout.
+- Scope is one rejected catalog case in the actual React/Chromium integration, not a general renderer-fault guarantee or a new upstream defect. Zod3 security exposure remains documented separately in `SECURITY.md`.
