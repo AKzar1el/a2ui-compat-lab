@@ -308,3 +308,17 @@ Unlike the preceding component replacement and hot-swap checks, this covers the 
 - Added a deterministic real-Chromium React 0.14/core 0.14 replay assertion for agent-provided `updateDataModel` Text containing an HTML-looking image with an inline `onerror` assignment and an offline `data:` source. The browser regression requires no executable `onerror` DOM attributes, no execution of that handler and no synthetic agent actions from rendering. A genuine Playwright pointer click must still emit the existing Button event with the **exact original markup string** as data.
 - This protects the application boundary between untrusted model data, browser DOM rendering and event context. It does **not** claim that published A2UI has an XSS vulnerability, that all HTML injection vectors are covered or that the A2UI SDK is patched. The upstream dependency advisory GHSA-mrhx-c7xc-m3w5 remains separate and unresolved.
 - Changes were authored using GitHub-only APIs because the historical local checkout has untracked `renderer-react/` files; local tests were not run. At final PR head, require GitHub Actions `sdk-parity` (including Python), `react-browser` (real Chromium) and `dependency-audit` (documented narrow Zod3 exception) before exact-SHA merger handoff.
+
+## 2026-11-09 — Replay fixture report output integrity (GitHub-only candidate)
+
+The three committed offline published-SDK fixture report commands (`replay-report`,
+`replay-action-report`, and `recovery-report`) previously used ordinary
+file writes for `--out` (and two silently ignored unknown CLI arguments).
+They now share strict `[--out FILE]` parsing and exclusive file creation:
+an existing report or symlink destination cannot be overwritten, and invalid
+or duplicate flags cannot publish artifacts. Standard JSON stdout remains
+unchanged. Deterministic subprocess tests exercise each command's real
+published-SDK output, exact stdout/file equivalence, invalid options and
+repeat-run refusal. This protects local evidence provenance, not a claimed
+upstream A2UI defect. GitHub Actions only; no Windows-local test claimed.
+The pinned Zod3 advisory remains unresolved with its 2026-12-07 exception.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
-import {dirname, resolve} from 'node:path';
+import {readFileSync} from 'node:fs';
+import {emitReplayReport} from './report-output.mjs';
 import {createHash} from 'node:crypto';
 import {parseJsonLines, parseJsonLinesBytes, replayV09} from './replay.mjs';
 
@@ -42,11 +42,6 @@ const report = {
   replay: baseline,
   unicodeReplay: unicodeBaseline,
 };
-const i = process.argv.indexOf('--out');
-if (i !== -1 && process.argv[i + 1]) {
-  const path = resolve(process.argv[i + 1]);
-  mkdirSync(dirname(path), {recursive: true});
-  writeFileSync(path, JSON.stringify(report, null, 2) + '\n');
-  console.error('Wrote ' + path);
-} else console.log(JSON.stringify(report, null, 2));
+emitReplayReport(report, process.argv.slice(2),
+  'Usage: node src/replay-report.mjs [--out FILE]');
 if (!report.allMatch) process.exitCode = 1;
