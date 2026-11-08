@@ -323,7 +323,7 @@ try {
     return copy;
   });
   const lifecycleBytes = [...Buffer.from(
-    lifecycleMessages.map(message => JSON.stringify(message)).join('\\n') + '\\n', 'utf8',
+    lifecycleMessages.map(message => JSON.stringify(message)).join('\n') + '\n', 'utf8',
   )];
   const streamedLifecycle = await page.evaluate(bytes => {
     const decoder = new TextDecoder('utf-8', {fatal: true});
@@ -332,7 +332,7 @@ try {
     for (let offset = 0; offset < bytes.length; offset += 5) {
       const last = offset + 5 >= bytes.length;
       carry += decoder.decode(Uint8Array.from(bytes.slice(offset, offset + 5)), {stream: !last});
-      const lines = carry.split('\\n');
+      const lines = carry.split('\n');
       carry = lines.pop();
       for (const line of lines) {
         if (!line.trim()) continue;
@@ -363,7 +363,7 @@ try {
 
   const deletionBytes = [...Buffer.from(JSON.stringify({
     version: 'v0.9', deleteSurface: {surfaceId: lifecycleSurfaceId},
-  }) + '\\n', 'utf8')];
+  }) + '\n', 'utf8')];
   const deletion = await page.evaluate(bytes => {
     const decoder = new TextDecoder('utf-8', {fatal: true});
     let carry = '';
@@ -371,7 +371,7 @@ try {
     for (let offset = 0; offset < bytes.length; offset += 2) {
       const last = offset + 2 >= bytes.length;
       carry += decoder.decode(Uint8Array.from(bytes.slice(offset, offset + 2)), {stream: !last});
-      const lines = carry.split('\\n');
+      const lines = carry.split('\n');
       carry = lines.pop();
       for (const line of lines) {
         if (!line.trim()) continue;
