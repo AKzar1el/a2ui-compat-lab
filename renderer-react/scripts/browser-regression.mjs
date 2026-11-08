@@ -619,6 +619,72 @@ try {
   checkpoints.push({step: 'interleaved-burst-peer-delete', buttonCount: 1,
     actionCount: expectedActions.length});
 
+  // Replacing a mounted component graph must remove the old Button and its
+  // event binding, rather than leaving an obsolete action reachable by input.
+  // This exercises a live published React renderer, not schema conformance.
+  const actionsBeforeReplacement = expectedActions.length;
+  const formerButton = page.getByRole('button', {name: 'Confirm', exact: true});
+  await formerButton.waitFor({state: 'visible'});
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateComponents: {
+      surfaceId: 'action-replay',
+      components: [
+        {id: 'root', component: 'Column', children: ['status', 'new-submit']},
+        {id: 'status', component: 'Text', text: {path: '/selection'}},
+        {
+          id: 'new-submit', component: 'Button', child: 'new-label', variant: 'primary',
+          action: {event: {name: 'confirm-replacement',
+            context: {selection: {path: '/selection'}}}},
+        },
+        {id: 'new-label', component: 'Text', text: 'Confirm replacement'},
+      ],
+    },
+  }));
+  const replacementButton = page.getByRole('button', {name: 'Confirm replacement', exact: true});
+  await replacementButton.waitFor({state: 'visible', timeout: 5000});
+  await formerButton.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await page.getByRole('button').count(), 1,
+    'Replacing component graph must leave exactly one live Button');
+  await page.getByText('final 🐙', {exact: true}).waitFor({state: 'visible'});
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeReplacement, 'Component update alone must not emit an action');
+
+  await replacementButton.click({timeout: 7000});
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    actionsBeforeReplacement + 1, {timeout: 5000});
+  const replacementPointerAction = {
+    name: 'confirm-replacement', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {selection: 'final 🐙'},
+  };
+  expectedActions.push(replacementPointerAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'New pointer target must emit only the replacement event');
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {
+      surfaceId: 'action-replay', path: '/',
+      value: {selection: 'replaced 🍂', confirmed: true},
+    },
+  }));
+  await page.getByText('replaced 🍂', {exact: true}).waitFor({state: 'visible'});
+  await replacementButton.focus();
+  await page.keyboard.press('Space');
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    actionsBeforeReplacement + 2, {timeout: 5000});
+  const replacementKeyboardAction = {
+    name: 'confirm-replacement', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {selection: 'replaced 🍂'},
+  };
+  expectedActions.push(replacementKeyboardAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Replacement keyboard action must use current data, not stale context');
+  assert.deepEqual(runtimeErrors, [], 'Live component graph swap must not throw in Chromium');
+  checkpoints.push({step: 'live-component-replacement-action-rebind',
+    oldButtonRemoved: true, mountedButtons: 1,
+    pointerAction: replacementPointerAction, keyboardAction: replacementKeyboardAction});
+
   const outDir = resolve(root, 'out');
   mkdirSync(outDir, {recursive: true});
   await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
