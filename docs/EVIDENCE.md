@@ -192,3 +192,25 @@ defect claim. Microtasks run in deterministic delivery order, so this does
 not establish behavior for truly concurrent network writers or additional
 renderer frameworks. CI's `react-browser` job supplies the real Chromium
 execution proof; local checkout tests are not claimed.
+
+## Comparison report output preserves prior evidence (2026-11-08)
+
+The local `compare --before ... --after ... --out ...` CLI previously used normal
+`writeFileSync` semantics for its output, so selecting the same path as either
+input silently replaced a source scan report with a comparison report. It could
+also overwrite an earlier comparison artifact. Such replacement destroys the
+original bytes needed to reproduce an SDK baseline comparison.
+
+The comparison output now uses atomic exclusive-create (`wx`) on the resolved
+destination, rejecting **any** existing file (including matching input paths,
+symbolic links and existing report paths) without altering those bytes. The
+subprocess regression checks both input collisions, an unrelated existing
+output, successful new output, and an attempted second write to that output.
+It does not change the historical overwrite contract of `scan` or `releases`,
+the published SDK behavior, or the existing pinned dependency versions.
+
+Validation requires final-head GitHub Actions `sdk-parity`, `react-browser`, and
+`dependency-audit`. The Windows source checkout retains historical untracked
+renderer files and is not used for local testing. The known Zod3 HIGH advisory
+remains **unresolved** under its December 7, 2026 exception; this work does not
+claim a new upstream A2UI compatibility defect or solve that advisory.
