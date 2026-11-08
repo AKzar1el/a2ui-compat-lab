@@ -26,13 +26,53 @@ export function preliminary(pr){
 }
 
 export function checksGreen(result, required) {
- if(!Array.isArray(result?.check_runs) || result.total_count >= 100) return false;
- // Ignore ONLY the current guarded merger's own job, which is necessarily
- // in progress while performing this check. Other security/CI jobs still gate.
- const relevant = result.check_runs.filter(x =>
-  !(x.name === 'integrate' && x.app?.slug === 'github-actions'));
+ if(!Array.isArray(result?.check_runs) || !Number.isSafeInteger(result.total_count) ||
+    result.total_count >= 100 || result.check_runs.length !== result.total_count) return false;
+ // Source-PR head checks have no self-integration exemption: the currently
+ // executing merger runs on main, not on the PR head. All other checks gate.
+ const relevant = result.check_runs;
  if(relevant.some(x => x.status !== 'completed' ||
    !['success','neutral','skipped'].includes(x.conclusion))) return false;
  return required.every(name =>
   relevant.some(x => x.name === name && x.status === 'completed' && x.conclusion === 'success'));
+}
+
+/**
+ * A source-branch creation can start then cancel CI at the *same commit SHA*
+ * as main. Find the latest CI run explicitly executed for main instead of
+ * treating unrelated historical branch check-runs as current main failures.
+ */
+export function latestMainCiRun(result, mainSha) {
+ if(!/^[a-f0-9]{40}$/.test(mainSha)||!Array.isArray(result?.workflow_runs)||
+    !Number.isSafeInteger(result.total_count)||result.total_count>=100||
+    result.workflow_runs.length!==result.total_count)return null;
+ return result.workflow_runs.filter(run=>
+   run.head_sha===mainSha&&run.head_branch==='main'&&
+   ['push','workflow_dispatch'].includes(run.event)&&Number.isSafeInteger(run.id)&&
+   typeof run.created_at==='string'&&!Number.isNaN(Date.parse(run.created_at)))
+  .sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)||b.id-a.id)[0]??null;
+}
+
+/**
+ * Required GitHub Actions jobs are proven by an exact-main workflow run.
+ * Still fail closed on every unrelated check, including third-party security.
+ */
+export function mainChecksGreen(checks, jobs, required, activeIntegrationRunId) {
+ if(!Number.isSafeInteger(activeIntegrationRunId)||activeIntegrationRunId<1)return false;
+ if(!Array.isArray(checks?.check_runs)||!Number.isSafeInteger(checks.total_count)||
+    checks.total_count>=100||checks.check_runs.length!==checks.total_count||
+    !Array.isArray(jobs?.jobs)||!Number.isSafeInteger(jobs.total_count)||
+    jobs.total_count>=100||jobs.jobs.length!==jobs.total_count)return false;
+ // Only the currently executing integration job may remain in progress.
+ // Other historical integration jobs, including failures, still gate merges.
+ const activeJobUrl='https://github.com/'+repo+'/actions/runs/'+activeIntegrationRunId+'/job/';
+ const unrelated=checks.check_runs.filter(check=>
+  !(check.app?.slug==='github-actions'&&
+    (required.includes(check.name)||
+      (check.name==='integrate'&&Number.isSafeInteger(check.id)&&
+        check.details_url===activeJobUrl+check.id))));
+ if(unrelated.some(check=>check.status!=='completed'||
+    !['success','neutral','skipped'].includes(check.conclusion)))return false;
+ if(jobs.jobs.some(job=>job.status!=='completed'||job.conclusion!=='success'))return false;
+ return required.every(name=>jobs.jobs.some(job=>job.name===name));
 }

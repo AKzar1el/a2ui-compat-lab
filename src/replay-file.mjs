@@ -2,31 +2,50 @@
 import {createHash} from 'node:crypto';
 import {mkdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
-import {parseJsonLines, replayV09} from './replay.mjs';
+import {parseJsonLines, parseJsonLinesBytes, replayV09} from './replay.mjs';
 
 const MAX_INPUT_BYTES = 4 * 1024 * 1024;
 const MAX_LINE_BYTES = 256 * 1024;
 const MAX_FRAMES = 10000;
-const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json]';
+// Keep the opt-in 1-byte transport replay bounded on real-world captures.
+const MAX_CHUNK_VERIFY_BYTES = 512 * 1024;
+const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks]';
 
 // This CLI handles local captures only: never fetch, upload or run supplied code.
 function options(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const result = {};
-  for (let i = 0; i < argv.length; i += 2) {
+  let verifyChunks = false;
+  for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
-    const next = argv[i + 1];
+    if (key === '--verify-chunks') {
+      if (verifyChunks) throw new Error(USAGE);
+      verifyChunks = true;
+      continue;
+    }
+    const next = argv[++i];
     if ((key !== '--input' && key !== '--out') || !next || next.startsWith('--') || result[key])
       throw new Error(USAGE);
     result[key] = next;
   }
   if (!result['--input']) throw new Error(USAGE);
-  return {input: resolve(result['--input']), out: result['--out'] ? resolve(result['--out']) : null};
+  return {
+    input: resolve(result['--input']),
+    out: result['--out'] ? resolve(result['--out']) : null,
+    verifyChunks,
+  };
 }
 
-function replayCapture(raw) {
+function* byteChunks(raw, size) {
+  for (let offset = 0; offset < raw.length; offset += size)
+    yield raw.subarray(offset, offset + size);
+}
+
+function replayCapture(raw, {verifyChunks = false} = {}) {
   if (raw.length === 0 || raw.length > MAX_INPUT_BYTES)
     throw new RangeError('Capture must be 1 byte to 4 MiB');
+  if (verifyChunks && raw.length > MAX_CHUNK_VERIFY_BYTES)
+    throw new RangeError('Chunk verification is limited to captures of 512 KiB or less');
   // Validate raw bytes BEFORE the older text parser's whitespace normalization.
   // This remains safe even when testing older installed harness versions.
   let start = 0;
@@ -45,7 +64,7 @@ function replayCapture(raw) {
   const messages = parseJsonLines([text], {maxLineBytes: MAX_LINE_BYTES});
   if (!messages.length) throw new SyntaxError('Capture has no A2UI messages');
   const replay = replayV09(messages);
-  return {
+  const report = {
     schemaVersion: 1,
     protocol: 'v0.9',
     implementation: '@a2ui/web_core@0.15.0 MessageProcessor',
@@ -55,17 +74,33 @@ function replayCapture(raw) {
     events: messages.length,
     replay,
   };
+  if (verifyChunks) {
+    const baseline = JSON.stringify(replay);
+    const chunkSizes = [1, 7, 57, raw.length];
+    const trials = chunkSizes.map(chunkSizeBytes => ({
+      chunkSizeBytes,
+      chunks: Math.ceil(raw.length / chunkSizeBytes),
+      matches: JSON.stringify(replayV09(parseJsonLinesBytes(byteChunks(raw, chunkSizeBytes), {
+        maxLineBytes: MAX_LINE_BYTES, maxMessages: MAX_FRAMES,
+      }))) === baseline,
+    }));
+    if (!trials.every(trial => trial.matches))
+      throw new Error('A2UI SDK state diverged across transport byte-chunk boundaries');
+    report.chunkTrials = trials;
+    report.allChunksMatch = true;
+  }
+  return report;
 }
 
 try {
-  const {input, out, help} = options(process.argv.slice(2));
+  const {input, out, help, verifyChunks} = options(process.argv.slice(2));
   if (help) {
     console.log(USAGE);
   } else {
     const metadata = statSync(input);
     if (!metadata.isFile() || metadata.size === 0 || metadata.size > MAX_INPUT_BYTES)
       throw new RangeError('Capture must be a regular file of 1 byte to 4 MiB');
-    const report = JSON.stringify(replayCapture(readFileSync(input)), null, 2) + '\n';
+    const report = JSON.stringify(replayCapture(readFileSync(input), {verifyChunks}), null, 2) + '\n';
     if (out) {
       mkdirSync(dirname(out), {recursive: true});
       // Fail closed on an existing report instead of silently leaving stale evidence.
