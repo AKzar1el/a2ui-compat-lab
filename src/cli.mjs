@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {inspectInstallation} from './doctor.mjs';
 import {compareScans} from './compare.mjs';
@@ -30,6 +30,29 @@ function parseArgs(argv) {
   return {verb, strict, json, out, before, after};
 }
 
+const MAX_COMPARISON_BYTES = 8 * 1024 * 1024;
+
+// User-provided scan artifacts may be confidential; Node JSON errors can quote
+// their contents, and unrestricted reads can exhaust memory before validation.
+function readComparisonReport(path) {
+  let contents;
+  try {
+    const target = resolve(path);
+    const stat = statSync(target);
+    if (!stat.isFile() || stat.size < 1 || stat.size > MAX_COMPARISON_BYTES)
+      throw new RangeError('Comparison report must be a regular JSON file of 1 byte to 8 MiB');
+    contents = readFileSync(target, 'utf8');
+  } catch (error) {
+    if (error instanceof RangeError) throw error;
+    throw new Error('Cannot read comparison report; path omitted');
+  }
+  try {
+    return JSON.parse(contents);
+  } catch {
+    throw new SyntaxError('Comparison JSON is invalid; input contents omitted');
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.verb === 'help' || args.verb === '--help') return usage();
@@ -53,8 +76,8 @@ async function main() {
     const {probeAllReleases} = await import('./releases.mjs');
     report = probeAllReleases();
   } else if (args.verb === 'compare') {
-    report = compareScans(JSON.parse(readFileSync(resolve(args.before), 'utf8')),
-      JSON.parse(readFileSync(resolve(args.after), 'utf8')));
+    report = compareScans(readComparisonReport(args.before),
+      readComparisonReport(args.after));
   } else {
     report = inspectInstallation();
   }
