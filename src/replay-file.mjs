@@ -41,6 +41,15 @@ function* byteChunks(raw, size) {
     yield raw.subarray(offset, offset + size);
 }
 
+// Errors thrown while interpreting user captures may include private JSON or surface IDs.
+function redactCaptureError(stage, run) {
+  try {
+    return run();
+  } catch {
+    throw new Error('Capture ' + stage + ' failed; input contents omitted');
+  }
+}
+
 function replayCapture(raw, {verifyChunks = false} = {}) {
   if (raw.length === 0 || raw.length > MAX_INPUT_BYTES)
     throw new RangeError('Capture must be 1 byte to 4 MiB');
@@ -60,10 +69,12 @@ function replayCapture(raw, {verifyChunks = false} = {}) {
   }
   if (start !== raw.length) throw new SyntaxError('Capture must end with a JSONL newline');
   if (frames === 0) throw new SyntaxError('Capture contains no JSONL frames');
-  const text = new TextDecoder('utf-8', {fatal: true}).decode(raw);
-  const messages = parseJsonLines([text], {maxLineBytes: MAX_LINE_BYTES});
+  const text = redactCaptureError('UTF-8 decoding', () =>
+    new TextDecoder('utf-8', {fatal: true}).decode(raw));
+  const messages = redactCaptureError('JSONL parsing', () =>
+    parseJsonLines([text], {maxLineBytes: MAX_LINE_BYTES}));
   if (!messages.length) throw new SyntaxError('Capture has no A2UI messages');
-  const replay = replayV09(messages);
+  const replay = redactCaptureError('SDK replay', () => replayV09(messages));
   const report = {
     schemaVersion: 1,
     protocol: 'v0.9',
@@ -80,9 +91,10 @@ function replayCapture(raw, {verifyChunks = false} = {}) {
     const trials = chunkSizes.map(chunkSizeBytes => ({
       chunkSizeBytes,
       chunks: Math.ceil(raw.length / chunkSizeBytes),
-      matches: JSON.stringify(replayV09(parseJsonLinesBytes(byteChunks(raw, chunkSizeBytes), {
-        maxLineBytes: MAX_LINE_BYTES, maxMessages: MAX_FRAMES,
-      }))) === baseline,
+      matches: redactCaptureError('byte-chunk verification', () =>
+        JSON.stringify(replayV09(parseJsonLinesBytes(byteChunks(raw, chunkSizeBytes), {
+          maxLineBytes: MAX_LINE_BYTES, maxMessages: MAX_FRAMES,
+        }))) === baseline),
     }));
     if (!trials.every(trial => trial.matches))
       throw new Error('A2UI SDK state diverged across transport byte-chunk boundaries');
