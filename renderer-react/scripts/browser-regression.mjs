@@ -992,11 +992,98 @@ try {
     expectedActions, 'Keyboard action must use empty selection, not the stale leaf value');
   checkpoints.push({step: 'empty-string-leaf-action-refresh',
     path: '/selection', siblingPreserved: true, action: emptySelectionAction});
+
+  // Falsy JSON scalars are valid action-context values, not absent bindings.
+  // Rebind a mounted Button to two additional model paths and exercise real
+  // pointer and keyboard input against published React/core 0.14.
+  const actionsBeforeScalars = expectedActions.length;
+  await page.evaluate(() => {
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9',
+      updateComponents: {
+        surfaceId: 'action-replay',
+        components: [
+          {id: 'root', component: 'Column', children: ['status', 'new-submit']},
+          {id: 'status', component: 'Text', text: {path: '/selection'}},
+          {
+            id: 'new-submit', component: 'Button', child: 'new-label', variant: 'primary',
+            action: {event: {name: 'confirm-scalars', context: {
+              selection: {path: '/selection'},
+              count: {path: '/count'},
+              enabled: {path: '/enabled'},
+            }}},
+          },
+          {id: 'new-label', component: 'Text', text: 'Confirm scalar values'},
+        ],
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9',
+      updateDataModel: {
+        surfaceId: 'action-replay', path: '/',
+        value: {selection: 'scalar binding', confirmed: true, count: 0, enabled: false},
+      },
+    });
+  });
+  const scalarButton = page.getByRole('button', {name: 'Confirm scalar values', exact: true});
+  await scalarButton.waitFor({state: 'visible', timeout: 5000});
+  await restoredButton.waitFor({state: 'detached', timeout: 5000});
+  await page.getByText('scalar binding', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await page.getByRole('button').count(), 1,
+    'Rebinding scalar contexts must retain exactly one live Button');
+  const initialScalarState = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(initialScalarState.data,
+    {selection: 'scalar binding', confirmed: true, count: 0, enabled: false},
+    'Published model must preserve explicit numeric zero and boolean false');
+  assert.equal(initialScalarState.actions.length, actionsBeforeScalars,
+    'Component and model updates alone must not emit actions');
+
+  await scalarButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeScalars + 1, {timeout: 5000});
+  const falsyScalarAction = {
+    name: 'confirm-scalars', surfaceId: 'action-replay', sourceComponentId: 'new-submit',
+    context: {selection: 'scalar binding', count: 0, enabled: false},
+  };
+  expectedActions.push(falsyScalarAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Pointer action must retain 0 and false, not omit falsy context values');
+
+  await page.evaluate(() => {
+    for (const [path, value] of [['/count', 3], ['/enabled', true]]) {
+      window.__a2uiLab.applyMessage({
+        version: 'v0.9',
+        updateDataModel: {surfaceId: 'action-replay', path, value},
+      });
+    }
+  });
+  const updatedScalarState = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(updatedScalarState.data,
+    {selection: 'scalar binding', confirmed: true, count: 3, enabled: true},
+    'Changing scalar leaves must preserve unrelated model fields');
+  assert.equal(updatedScalarState.actions.length, actionsBeforeScalars + 1,
+    'Changing scalar leaves must not emit a synthetic action');
+  await scalarButton.focus();
+  await page.keyboard.press('Space');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeScalars + 2, {timeout: 5000});
+  const updatedScalarAction = {
+    name: 'confirm-scalars', surfaceId: 'action-replay', sourceComponentId: 'new-submit',
+    context: {selection: 'scalar binding', count: 3, enabled: true},
+  };
+  expectedActions.push(updatedScalarAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Keyboard action must read fresh scalar leaves from the published model');
+  checkpoints.push({step: 'falsy-scalar-context-rebind',
+    pointerAction: falsyScalarAction, keyboardAction: updatedScalarAction,
+    siblingPreserved: true, mountedButtons: 1});
   // A late action after surface deletion must not target a stale DOM Button.
   await page.evaluate(() => window.__a2uiLab.applyMessage({
     version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
   }));
-  await button.waitFor({state: 'detached', timeout: 5000});
+  await scalarButton.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await scalarButton.count(), 0,
+    'Deleting the surface must remove the last live Button, not only an old locator');
   await page.keyboard.press('Enter');
   trace = await page.evaluate(() => window.__a2uiLab.trace());
   assert.equal(trace.data, null);
@@ -1007,7 +1094,7 @@ try {
     'Real React browser replay must not hide console.error diagnostics');
   assert.deepEqual(deniedRequests, [deniedProbe],
     'No later renderer action may require an unapproved browser HTTP(S) origin');
-  checkpoints.push({step: 'deleted-surface', buttonCount: await button.count(), actionCount: trace.actions.length});
+  checkpoints.push({step: 'deleted-surface', buttonCount: await scalarButton.count(), actionCount: trace.actions.length});
 
   const report = {
     schemaVersion: 1,
