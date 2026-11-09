@@ -237,3 +237,54 @@ test('optional PNG byte verification detects an altered screenshot despite ident
     rmSync(dir, {recursive: true, force: true});
   }
 });
+
+
+test('Markdown browser comparison is reviewable, redacted, strict and never overwrites prior evidence', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-browser-markdown-'));
+  try {
+    const before = join(dir, 'old.json');
+    const after = join(dir, 'new.json');
+    const output = join(dir, 'review.md');
+    const baseline = trace();
+    const candidate = trace();
+    candidate.versions['@a2ui/react'] = '0.14.1';
+    candidate.actions[0].context.selection = 'PRIVATE_ACTION_CONTEXT_DO_NOT_PRINT';
+    writeFileSync(before, JSON.stringify(baseline));
+    writeFileSync(after, JSON.stringify(candidate));
+    const flags = ['--before', before, '--after', after, '--markdown'];
+    const drift = spawnSync(process.execPath,
+      [cli, ...flags, '--strict', '--out', output], {encoding: 'utf8'});
+    assert.equal(drift.status, 1, drift.stderr);
+    assert.equal(drift.stdout, readFileSync(output, 'utf8'));
+    assert.match(drift.stdout, /# A2UI real-browser regression comparison/);
+    assert.match(drift.stdout, /\*\*Result:\*\* DRIFT/);
+    assert.match(drift.stdout, /\| actions \| 1 \| 1 \| 1 \| 0 \|/);
+    assert.match(drift.stdout, /\| \x60@a2ui\/react\x60 \| \x600\.14\.0\x60 \| \x600\.14\.1\x60 \|/);
+    assert.match(drift.stdout, /saved artifact bytes verified: no/);
+    assert.doesNotMatch(drift.stdout, /PRIVATE_ACTION_CONTEXT_DO_NOT_PRINT/);
+    assert.doesNotMatch(drift.stdout, /a2ui-browser-markdown-/,
+      'Comparison should not echo local file paths');
+
+    const saved = readFileSync(output, 'utf8');
+    const repeated = spawnSync(process.execPath,
+      [cli, ...flags, '--out', output], {encoding: 'utf8'});
+    assert.equal(repeated.status, 2);
+    assert.match(repeated.stderr, /output exists/);
+    assert.equal(readFileSync(output, 'utf8'), saved);
+
+    candidate.actions = structuredClone(baseline.actions);
+    writeFileSync(after, JSON.stringify(candidate));
+    const match = spawnSync(process.execPath,
+      [cli, ...flags, '--strict'], {encoding: 'utf8'});
+    assert.equal(match.status, 0, match.stderr);
+    assert.match(match.stdout, /\*\*Result:\*\* MATCH/);
+    assert.match(match.stdout, /\*\*Changed fields:\*\* none/);
+
+    const exclusive = spawnSync(process.execPath,
+      [cli, ...flags, '--json'], {encoding: 'utf8'});
+    assert.equal(exclusive.status, 2, 'Markdown and JSON must be exclusive');
+    assert.match(exclusive.stderr, /Usage:/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
