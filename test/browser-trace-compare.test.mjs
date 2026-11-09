@@ -19,7 +19,7 @@ function trace() {
       {step: 'pointer', actionCount: 1}],
     actions: [{name: 'submit', context: {selection: 'hello', retained: 1}}],
     runtimeErrors: [], consoleErrors: [],
-    accessibilityFindings: [{kind: 'missing-accessible-name', expected: 'Edit form'}],
+    accessibilityFindings: [{id: 'textfield-missing-accessible-name', severity: 'warning', expectedName: 'Edit form'}],
   };
 }
 
