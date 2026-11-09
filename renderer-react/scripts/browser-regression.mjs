@@ -1410,6 +1410,114 @@ try {
     surfaceIdReused: true, freshModel: true, peerDeletedAgain: true,
     keyboardAction: rebornKeyboardAction, agentUpdatedPointerAction: rebornPointerAction});
 
+  // Removing a focused editor while preserving its surface must detach the
+  // old input. Restoring that component ID must use current agent data and
+  // a fresh DOM binding, not an obsolete browser draft or stale action.
+  const actionsBeforeEditorRemount = expectedActions.length;
+  const focusedDraft = 'focused draft 🪁';
+  await formInput.fill(focusedDraft);
+  await page.getByText(focusedDraft, {exact: true}).waitFor({state: 'visible'});
+  await formInput.focus();
+  assert.equal(await formInput.evaluate(node => document.activeElement === node), true,
+    'The old TextField must actually own browser focus before it is removed');
+  const oldEditorNode = await formInput.elementHandle();
+  assert.ok(oldEditorNode, 'Focused editor must expose a real Chromium input element');
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateComponents: {surfaceId: 'action-replay', components: [
+      {id: 'root', component: 'Column', children: ['status', 'new-submit']},
+      {id: 'status', component: 'Text', text: {path: '/form/label'}},
+      {id: 'new-submit', component: 'Button', child: 'new-label',
+        variant: 'primary', action: {event: {name: 'submit-edited-form',
+          context: {label: {path: '/form/label'}}}}},
+      {id: 'new-label', component: 'Text', text: 'Submit edited form'},
+    ]},
+  }));
+  await formInput.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await page.getByRole('textbox').count(), 0,
+    'Removing only the focused TextField must unmount its real browser input');
+  assert.equal(await oldEditorNode.evaluate(node => node.isConnected), false,
+    'The old focused editor node must not remain attached to the document');
+  assert.equal(await page.evaluate(() => document.activeElement?.isConnected), true,
+    'Deleting a focused TextField must not retain a detached focus target');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeEditorRemount, 'Removing a focused editor must emit no action');
+
+  const agentWhileDetached = 'agent while editor absent 🪐';
+  await page.evaluate(value => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {surfaceId: 'action-replay', path: '/form/label', value},
+  }), agentWhileDetached);
+  await page.getByText(agentWhileDetached, {exact: true}).waitFor({state: 'visible'});
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {selection: '', confirmed: true, form: {label: agentWhileDetached, retained: 7}},
+    'Model changes while the editor is absent must retain unrelated form data');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeEditorRemount, 'Agent leaf updates must not synthesize submissions');
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateComponents: {surfaceId: 'action-replay', components: [
+      {id: 'root', component: 'Column', children: ['status', 'editor', 'new-submit']},
+      {id: 'status', component: 'Text', text: {path: '/form/label'}},
+      {id: 'editor', component: 'TextField', label: 'Edit form label',
+        value: {path: '/form/label'}, variant: 'shortText'},
+      {id: 'new-submit', component: 'Button', child: 'new-label',
+        variant: 'primary', action: {event: {name: 'submit-edited-form',
+          context: {label: {path: '/form/label'}}}}},
+      {id: 'new-label', component: 'Text', text: 'Submit edited form'},
+    ]},
+  }));
+  const remountedEditor = page.getByRole('textbox').first();
+  await remountedEditor.waitFor({state: 'visible', timeout: 5000});
+  assert.equal(await page.getByRole('textbox').count(), 1,
+    'Restoring the focused editor must mount exactly one new input');
+  assert.equal(await remountedEditor.inputValue(), agentWhileDetached,
+    'Restored TextField must use the agent value, never the detached draft');
+  assert.equal(await oldEditorNode.evaluate(node => node.isConnected), false,
+    'Remount must not reuse the detached input node');
+  const remountedDraft = 'fresh editor draft 🌾';
+  await remountedEditor.fill(remountedDraft);
+  await page.getByText(remountedDraft, {exact: true}).waitFor({state: 'visible'});
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {selection: '', confirmed: true, form: {label: remountedDraft, retained: 7}},
+    'Restored editor must reconnect two-way binding without losing model siblings');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeEditorRemount, 'Typing in a remounted editor must not emit Button actions');
+  await formButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeEditorRemount + 1, {timeout: 5000});
+  const remountedPointerAction = {
+    name: 'submit-edited-form', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {label: remountedDraft},
+  };
+  expectedActions.push(remountedPointerAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Remounted Button must dispatch fresh browser-edited context');
+
+  const latestAgentValue = 'restored agent leaf ☄️';
+  await page.evaluate(value => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {surfaceId: 'action-replay', path: '/form/label', value},
+  }), latestAgentValue);
+  await page.getByText(latestAgentValue, {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await remountedEditor.inputValue(), latestAgentValue,
+    'Remounted editor must continue reflecting later agent updates');
+  await formButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeEditorRemount + 2, {timeout: 5000});
+  const remountedKeyboardAction = {
+    name: 'submit-edited-form', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {label: latestAgentValue},
+  };
+  expectedActions.push(remountedKeyboardAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Keyboard action after remount must use latest agent-bound data');
+  checkpoints.push({step: 'focused-textfield-detach-remount',
+    oldNodeDetached: true, oneRestoredEditor: true, staleDraftDiscarded: true,
+    pointerAction: remountedPointerAction, keyboardAction: remountedKeyboardAction});
+
   // Falsy JSON scalars are valid action-context values, not absent bindings.
   // Rebind a mounted Button to two additional model paths and exercise real
   // pointer and keyboard input against published React/core 0.14.
