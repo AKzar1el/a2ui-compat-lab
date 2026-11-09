@@ -1519,6 +1519,8 @@ try {
     harness: 'real React A2uiSurface + published core Custom Elements; Playwright Chromium pointer and keyboard',
     versions: installed,
     fixtureSha256: createHash('sha256').update(fixture).digest('hex'),
+    // Hash the previously captured PNG bytes; this is evidence integrity, not a pixel diff.
+    screenshotSha256: createHash('sha256').update(screenshotBytes).digest('hex'),
     checkpoints,
     actions: trace.actions,
     runtimeErrors,
@@ -1528,7 +1530,9 @@ try {
     accessibilityFindings,
     passed: true,
   };
-  const {tracePath} = publishBrowserEvidence(outDir, screenshotBytes, report);
+  const {tracePath, screenshotPath} = publishBrowserEvidence(outDir, screenshotBytes, report);
+  assert.equal(createHash('sha256').update(readFileSync(screenshotPath)).digest('hex'),
+    report.screenshotSha256, 'Published PNG must agree with its saved browser trace digest');
   console.log('Real A2UI React Chromium: ' + checkpoints.length + ' checkpoints / ' + trace.actions.length + ' agent events / no runtime errors / PASS');
   console.log('Trace: ' + tracePath);
 } finally {
