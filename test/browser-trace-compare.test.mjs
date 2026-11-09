@@ -303,8 +303,12 @@ test('failed report output never prints private paths or damages previous files'
     mkdirSync(directoryTarget);
     const blockedParent = join(dir, 'PRIVATE_BLOCKED_PARENT');
     writeFileSync(blockedParent, 'original user file');
+    // O_EXCL already reports EEXIST for a directory. An overlong basename
+    // specifically exercises the native write-failure path on Linux CI.
+    const overlongName = join(dir, 'PRIVATE_LONG_FILENAME_' + 'x'.repeat(280) + '.md');
     for (const [target, expected] of [
-      [directoryTarget, /Cannot write comparison output; path omitted/],
+      [directoryTarget, /Comparison output exists; choose a new --out path/],
+      [overlongName, /Cannot write comparison output; path omitted/],
       [join(blockedParent, 'report.md'),
         /Cannot prepare comparison output directory; path omitted/],
     ]) {
