@@ -21,15 +21,34 @@ function digest(value) {
   return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 }
 
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validVersions(value) {
+  if (!isRecord(value)) return false;
+  const entries = Object.entries(value);
+  // Provenance is package-name -> published-version only; never echo arbitrary objects.
+  return entries.length > 0 && entries.length <= 32 &&
+    entries.every(([name, version]) =>
+      /^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/.test(name) &&
+      typeof version === 'string' &&
+      /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version));
+}
+
 function checkTrace(trace, label) {
-  if (!trace || typeof trace !== 'object' || Array.isArray(trace) ||
-      trace.schemaVersion !== 1 || trace.protocol !== 'v0.9' ||
+  if (!isRecord(trace) || trace.schemaVersion !== 1 || trace.protocol !== 'v0.9' ||
       !/^[a-f0-9]{64}$/i.test(trace.fixtureSha256 ?? '') ||
-      !trace.versions || typeof trace.versions !== 'object' ||
-      Array.isArray(trace.versions) || typeof trace.passed !== 'boolean' ||
+      typeof trace.harness !== 'string' || trace.harness.trim().length === 0 ||
+      !validVersions(trace.versions) || typeof trace.passed !== 'boolean' ||
       FIELDS.some(field => !Array.isArray(trace[field])) ||
-      trace.checkpoints.some(item => !item || typeof item !== 'object' ||
-        Array.isArray(item) || typeof item.step !== 'string' || item.step.length === 0))
+      trace.actions.some(item => !isRecord(item) ||
+        typeof item.name !== 'string' || item.name.length === 0) ||
+      trace.checkpoints.some(item => !isRecord(item) ||
+        typeof item.step !== 'string' || item.step.length === 0) ||
+      [...trace.runtimeErrors, ...trace.consoleErrors].some(item => typeof item !== 'string') ||
+      trace.accessibilityFindings.some(item => !isRecord(item) ||
+        typeof item.id !== 'string' || item.id.length === 0))
     throw new Error('Invalid ' + label + ' browser trace schema; input contents omitted');
 }
 
@@ -53,6 +72,8 @@ export function compareBrowserTraces(before, after) {
   checkTrace(after, 'after');
   if (before.fixtureSha256.toLowerCase() !== after.fixtureSha256.toLowerCase())
     throw new Error('Incomparable browser traces: fixture SHA-256 differs');
+  if (before.harness !== after.harness)
+    throw new Error('Incomparable browser traces: rendering harness differs');
   const differences = Object.fromEntries(FIELDS.map(field =>
     [field, fieldDiff(before[field], after[field])]));
   const changedFields = FIELDS.filter(field => differences[field].changedCount > 0);
