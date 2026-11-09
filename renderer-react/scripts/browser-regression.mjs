@@ -23,15 +23,41 @@ try {
   server = await createServer({
     root,
     configFile: resolve(root, 'vite.config.mjs'),
-    server: {port: 4181, host: '127.0.0.1', strictPort: true},
+    server: {port: 0, host: '127.0.0.1', strictPort: true},
     logLevel: 'error',
   });
   await server.listen();
+  const address = server.httpServer?.address();
+  assert.ok(address && typeof address !== 'string' &&
+    Number.isInteger(address.port) && address.port > 0,
+  'Vite must bind an OS-assigned loopback port before the browser starts');
+  const origin = 'http://127.0.0.1:' + address.port;
   browser = await chromium.launch({headless: true, timeout: 20000});
-  const page = await browser.newPage();
+  const context = await browser.newContext({serviceWorkers: 'block'});
+  const deniedRequests = [];
+  // Fail closed on unexpected browser HTTP(S) dependencies, not just page errors.
+  await context.route('**/*', async route => {
+    const url = route.request().url();
+    if (new URL(url).origin !== origin) {
+      deniedRequests.push(url);
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
+  const page = await context.newPage();
   page.on('pageerror', error => runtimeErrors.push(error.message));
 
-  await page.goto('http://127.0.0.1:4181/', {waitUntil: 'domcontentloaded'});
+  await page.goto(origin + '/', {waitUntil: 'domcontentloaded'});
+  // Use a second LOOPBACK origin to exercise interception without network egress.
+  const deniedProbe = 'http://127.0.0.1:1/__a2ui_browser_network_guard_probe__';
+  await page.evaluate(async url => {
+    try { await fetch(url); } catch { /* The request must be aborted. */ }
+  }, deniedProbe);
+  assert.deepEqual(deniedRequests, [deniedProbe],
+    'Chromium must abort an HTTP request outside the ephemeral Vite origin');
+  checkpoints.push({step: 'browser-http-isolation',
+    offOriginProbeBlocked: true, unexpectedOffOriginRequests: 0});
   const button = page.getByRole('button', {name: 'Confirm'});
   await button.waitFor({state: 'visible'});
   await page.getByText('alpha', {exact: true}).waitFor({state: 'visible'});
@@ -884,6 +910,8 @@ try {
   assert.deepEqual(trace.actions, expectedActions);
   assert.deepEqual(trace.errors, []);
   assert.deepEqual(runtimeErrors, []);
+  assert.deepEqual(deniedRequests, [deniedProbe],
+    'No later renderer action may require an unapproved browser HTTP(S) origin');
   checkpoints.push({step: 'deleted-surface', buttonCount: await button.count(), actionCount: trace.actions.length});
 
   const report = {

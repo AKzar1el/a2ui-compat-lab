@@ -322,3 +322,9 @@ published-SDK output, exact stdout/file equivalence, invalid options and
 repeat-run refusal. This protects local evidence provenance, not a claimed
 upstream A2UI defect. GitHub Actions only; no Windows-local test claimed.
 The pinned Zod3 advisory remains unresolved with its 2026-12-07 exception.
+
+## React browser harness loopback isolation (2026-11-09)
+
+- Real Chromium replay now uses an OS-assigned ephemeral Vite port on `127.0.0.1` instead of a fixed port 4181, avoiding avoidable port contention in parallel local runs.
+- The Playwright browser context blocks service workers and denies HTTP(S) page requests outside the active local Vite origin. A deterministic fetch to a **different loopback port** must be intercepted, and subsequent real Button/data/surface interactions must make no unexpected off-origin HTTP(S) requests.
+- The request guard is part of the pinned `@a2ui/react@0.14.0` / `@a2ui/web_core@0.14.0` Chromium regression. It does **not** prove general-purpose sandboxing or cover non-HTTP requests, external tools or all WebSocket traffic. No remote service is needed during test execution after installation.
