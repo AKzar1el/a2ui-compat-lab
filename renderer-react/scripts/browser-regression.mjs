@@ -17,6 +17,7 @@ const expectedActions = [
   {name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit', context: {selection: 'beta'}},
 ];
 const runtimeErrors = [];
+const consoleErrors = [];
 const checkpoints = [];
 let server, browser;
 try {
@@ -47,17 +48,45 @@ try {
   });
   const page = await context.newPage();
   page.on('pageerror', error => runtimeErrors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
 
   await page.goto(origin + '/', {waitUntil: 'domcontentloaded'});
+  // pageerror does not catch console.error (including many React diagnostics).
+  // Prove the listener is live before monitoring the actual renderer replay.
+  const consoleProbeMarker = '__a2ui_browser_console_probe__';
+  const consoleProbe = page.waitForEvent('console', {
+    predicate: message => message.type() === 'error' && message.text() === consoleProbeMarker,
+    timeout: 5000,
+  });
+  await page.evaluate(marker => console.error(marker), consoleProbeMarker);
+  await consoleProbe;
+  assert.deepEqual(consoleErrors, [consoleProbeMarker],
+    'Console observer must see the controlled probe and no startup errors');
+  consoleErrors.length = 0;
+  checkpoints.push({step: 'browser-console-error-monitor', probeObserved: true});
   // Use a second LOOPBACK origin to exercise interception without network egress.
   const deniedProbe = 'http://127.0.0.1:1/__a2ui_browser_network_guard_probe__';
+  // Chromium also logs a resource error for this deliberately aborted request.
+  // Accept exactly that controlled diagnostic, not unrelated renderer errors.
+  const blockedProbeConsole = page.waitForEvent('console', {
+    predicate: message => message.type() === 'error' &&
+      message.text() === 'Failed to load resource: net::ERR_FAILED',
+    timeout: 5000,
+  });
   await page.evaluate(async url => {
     try { await fetch(url); } catch { /* The request must be aborted. */ }
   }, deniedProbe);
+  await blockedProbeConsole;
   assert.deepEqual(deniedRequests, [deniedProbe],
     'Chromium must abort an HTTP request outside the ephemeral Vite origin');
+  assert.deepEqual(consoleErrors, ['Failed to load resource: net::ERR_FAILED'],
+    'Only the deliberately aborted HTTP probe may log a resource failure');
+  consoleErrors.length = 0;
   checkpoints.push({step: 'browser-http-isolation',
-    offOriginProbeBlocked: true, unexpectedOffOriginRequests: 0});
+    offOriginProbeBlocked: true, expectedProbeConsoleError: true,
+    unexpectedOffOriginRequests: 0});
   const button = page.getByRole('button', {name: 'Confirm'});
   await button.waitFor({state: 'visible'});
   await page.getByText('alpha', {exact: true}).waitFor({state: 'visible'});
@@ -910,6 +939,8 @@ try {
   assert.deepEqual(trace.actions, expectedActions);
   assert.deepEqual(trace.errors, []);
   assert.deepEqual(runtimeErrors, []);
+  assert.deepEqual(consoleErrors, [],
+    'Real React browser replay must not hide console.error diagnostics');
   assert.deepEqual(deniedRequests, [deniedProbe],
     'No later renderer action may require an unapproved browser HTTP(S) origin');
   checkpoints.push({step: 'deleted-surface', buttonCount: await button.count(), actionCount: trace.actions.length});
@@ -923,6 +954,7 @@ try {
     checkpoints,
     actions: trace.actions,
     runtimeErrors,
+    consoleErrors,
     passed: true,
   };
   const target = resolve(outDir, 'react-browser-trace.json');
