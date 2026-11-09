@@ -1071,6 +1071,100 @@ try {
     path: '/form/label', siblingPreserved: true,
     pointerAction: nestedInitialAction, keyboardAction: nestedUpdatedAction});
 
+  // A real text input must write back into the published data model. The
+  // same path also drives visible Text and a Button's action context; an
+  // agent update must later flow in the opposite direction to the input.
+  const formActionsBefore = expectedActions.length;
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateComponents: {
+      surfaceId: 'action-replay',
+      components: [
+        {id: 'root', component: 'Column', children: ['status', 'editor', 'new-submit']},
+        {id: 'status', component: 'Text', text: {path: '/form/label'}},
+        {
+          id: 'editor', component: 'TextField', label: 'Edit form label',
+          value: {path: '/form/label'}, variant: 'shortText',
+        },
+        {
+          id: 'new-submit', component: 'Button', child: 'new-label',
+          variant: 'primary', action: {event: {name: 'submit-edited-form',
+            context: {label: {path: '/form/label'}}}},
+        },
+        {id: 'new-label', component: 'Text', text: 'Submit edited form'},
+      ],
+    },
+  }));
+  const formInput = page.getByRole('textbox');
+  const formButton = page.getByRole('button', {name: 'Submit edited form', exact: true});
+  await formButton.waitFor({state: 'visible', timeout: 5000});
+  assert.equal(await formInput.count(), 1, 'Exactly one real TextField must be mounted');
+  await formInput.waitFor({state: 'visible', timeout: 5000});
+  await nestedButton.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await formInput.inputValue(), 'after 🧭',
+    'TextField must initially read the existing nested model value');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    formActionsBefore, 'Mounting an editor must not dispatch an action');
+
+  const browserEditedLabel = 'typed in Chromium 🖊';
+  await formInput.fill(browserEditedLabel);
+  await page.getByText(browserEditedLabel, {exact: true}).waitFor({
+    state: 'visible', timeout: 5000,
+  });
+  const browserEditedTrace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(browserEditedTrace.data,
+    {selection: '', confirmed: true, form: {label: browserEditedLabel, retained: 7}},
+    'Real text input must update the shared model without dropping siblings');
+  assert.equal(browserEditedTrace.actions.length, formActionsBefore,
+    'Typing alone must not dispatch a server-bound agent action');
+
+  await formButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    formActionsBefore + 1, {timeout: 5000});
+  const editedFormAction = {
+    name: 'submit-edited-form', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {label: browserEditedLabel},
+  };
+  expectedActions.push(editedFormAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Real pointer action must send user-edited, not initial, form data');
+
+  const agentEditedLabel = 'agent updated label 🌙';
+  await page.evaluate(value => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {
+      surfaceId: 'action-replay', path: '/form/label', value,
+    },
+  }), agentEditedLabel);
+  await page.getByText(agentEditedLabel, {exact: true}).waitFor({
+    state: 'visible', timeout: 5000,
+  });
+  await page.waitForFunction(value =>
+    document.querySelector('input')?.value === value, agentEditedLabel, {timeout: 5000});
+  assert.equal(await formInput.inputValue(), agentEditedLabel,
+    'Agent leaf update must flow back into the live TextField');
+  const agentEditedTrace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(agentEditedTrace.data,
+    {selection: '', confirmed: true, form: {label: agentEditedLabel, retained: 7}},
+    'Agent leaf update must preserve browser-edited form siblings');
+  assert.equal(agentEditedTrace.actions.length, formActionsBefore + 1,
+    'Agent model update must not synthesize a form submission');
+
+  await formButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    formActionsBefore + 2, {timeout: 5000});
+  const agentUpdatedFormAction = {
+    name: 'submit-edited-form', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {label: agentEditedLabel},
+  };
+  expectedActions.push(agentUpdatedFormAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Keyboard submission must use agent-updated live form state');
+  checkpoints.push({step: 'textfield-two-way-form-action-replay',
+    path: '/form/label', siblingPreserved: true,
+    pointerAction: editedFormAction, keyboardAction: agentUpdatedFormAction});
+
   // Falsy JSON scalars are valid action-context values, not absent bindings.
   // Rebind a mounted Button to two additional model paths and exercise real
   // pointer and keyboard input against published React/core 0.14.
