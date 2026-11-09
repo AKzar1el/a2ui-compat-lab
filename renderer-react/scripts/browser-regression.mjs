@@ -1095,7 +1095,7 @@ try {
       ],
     },
   }));
-  const formInput = page.getByRole('textbox');
+  const formInput = page.getByRole('textbox').first();
   const formButton = page.getByRole('button', {name: 'Submit edited form', exact: true});
   await formButton.waitFor({state: 'visible', timeout: 5000});
   assert.equal(await formInput.count(), 1, 'Exactly one real TextField must be mounted');
