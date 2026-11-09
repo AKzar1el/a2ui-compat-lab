@@ -40,6 +40,9 @@ function checkTrace(trace, label) {
   if (!isRecord(trace) || trace.schemaVersion !== 1 || trace.protocol !== 'v0.9' ||
       !/^[a-f0-9]{64}$/i.test(trace.fixtureSha256 ?? '') ||
       typeof trace.harness !== 'string' || trace.harness.trim().length === 0 ||
+      (Object.hasOwn(trace, 'screenshotSha256') &&
+        (typeof trace.screenshotSha256 !== 'string' ||
+          !/^[a-f0-9]{64}$/i.test(trace.screenshotSha256))) ||
       !validVersions(trace.versions) || typeof trace.passed !== 'boolean' ||
       FIELDS.some(field => !Array.isArray(trace[field])) ||
       trace.actions.some(item => !isRecord(item) ||
@@ -76,7 +79,14 @@ export function compareBrowserTraces(before, after) {
     throw new Error('Incomparable browser traces: rendering harness differs');
   const differences = Object.fromEntries(FIELDS.map(field =>
     [field, fieldDiff(before[field], after[field])]));
+  // Optional legacy PNG evidence remains comparable. A partial pair is not a MATCH.
+  const beforeScreenshot = before.screenshotSha256?.toLowerCase() ?? null;
+  const afterScreenshot = after.screenshotSha256?.toLowerCase() ?? null;
+  const screenshotChanged = beforeScreenshot !== afterScreenshot;
+  const visualEvidence = beforeScreenshot && afterScreenshot ? 'both' :
+    beforeScreenshot || afterScreenshot ? 'partial' : 'legacy-unavailable';
   const changedFields = FIELDS.filter(field => differences[field].changedCount > 0);
+  if (screenshotChanged) changedFields.push('screenshotSha256');
   const passedChanged = before.passed !== after.passed;
   const candidateHealthy = after.passed && after.runtimeErrors.length === 0 &&
     after.consoleErrors.length === 0;
@@ -90,10 +100,12 @@ export function compareBrowserTraces(before, after) {
     afterPassed: after.passed,
     candidateHealthy,
     passedChanged,
+    screenshotChanged,
+    visualEvidence,
     changedFields,
     differences,
     ok: candidateHealthy && !passedChanged && changedFields.length === 0,
-    note: 'Observable actual Chromium replay comparison, not official A2UI conformance or authenticated provenance',
+    note: 'PNG SHA-256 is byte-level visual evidence, not pixel-diff; legacy traces may lack it. Not official conformance or authenticated provenance',
   };
 }
 
@@ -158,7 +170,8 @@ function main() {
   else console.log('A2UI actual-browser trace comparison: ' +
     (report.ok ? 'MATCH' : 'DRIFT') + '; changed fields: ' +
     (report.changedFields.join(', ') || 'none') +
-    '; candidate healthy: ' + report.candidateHealthy);
+    '; candidate healthy: ' + report.candidateHealthy +
+    '; PNG evidence: ' + report.visualEvidence);
   if (args.strict && !report.ok) process.exitCode = 1;
 }
 

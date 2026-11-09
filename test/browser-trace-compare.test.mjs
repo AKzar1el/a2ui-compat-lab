@@ -137,3 +137,44 @@ test('malformed browser evidence cannot produce a false MATCH or echo raw proven
         !error.message.includes('DO_NOT_ECHO'));
   }
 });
+
+test('PNG-only browser visual drift is detected even when action and Text checkpoints match', () => {
+  const before = trace();
+  const after = structuredClone(before);
+  before.screenshotSha256 = 'a'.repeat(64);
+  after.screenshotSha256 = 'b'.repeat(64);
+  const changed = compareBrowserTraces(before, after);
+  assert.equal(changed.candidateHealthy, true);
+  assert.equal(changed.visualEvidence, 'both');
+  assert.equal(changed.screenshotChanged, true);
+  assert.deepEqual(changed.changedFields, ['screenshotSha256']);
+  assert.equal(changed.ok, false);
+  assert.equal(JSON.stringify(changed).includes('private'), false);
+
+  after.screenshotSha256 = before.screenshotSha256.toUpperCase();
+  const match = compareBrowserTraces(before, after);
+  assert.equal(match.ok, true);
+  assert.equal(match.visualEvidence, 'both');
+  assert.equal(match.screenshotChanged, false);
+
+  delete after.screenshotSha256;
+  const partial = compareBrowserTraces(before, after);
+  assert.equal(partial.ok, false, 'Missing candidate PNG must not match a captured baseline');
+  assert.equal(partial.visualEvidence, 'partial');
+  assert.deepEqual(partial.changedFields, ['screenshotSha256']);
+
+  delete before.screenshotSha256;
+  const legacy = compareBrowserTraces(before, after);
+  assert.equal(legacy.ok, true, 'Two pre-digest traces must remain comparable');
+  assert.equal(legacy.visualEvidence, 'legacy-unavailable');
+});
+
+test('invalid PNG digests fail closed with no untrusted contents in diagnostics', () => {
+  const baseline = trace();
+  for (const bad of ['not-a-digest', '', null, 123, {sensitive: 'PRIVATE_IMAGE'}]) {
+    const candidate = {...trace(), screenshotSha256: bad};
+    assert.throws(() => compareBrowserTraces(baseline, candidate),
+      error => /Invalid after browser trace schema; input contents omitted/.test(error.message) &&
+        !error.message.includes('PRIVATE_IMAGE'));
+  }
+});
