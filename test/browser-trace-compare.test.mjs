@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -176,5 +177,63 @@ test('invalid PNG digests fail closed with no untrusted contents in diagnostics'
     assert.throws(() => compareBrowserTraces(baseline, candidate),
       error => /Invalid after browser trace schema; input contents omitted/.test(error.message) &&
         !error.message.includes('PRIVATE_IMAGE'));
+  }
+});
+
+test('optional PNG byte verification detects an altered screenshot despite identical trace JSON', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-browser-png-'));
+  try {
+    // Tiny public-domain 1x1 PNG: actual binary evidence, never an HTTP dependency.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==',
+      'base64');
+    const hash = createHash('sha256').update(png).digest('hex');
+    const beforeTrace = join(dir, 'before.json');
+    const afterTrace = join(dir, 'after.json');
+    const beforePng = join(dir, 'before.png');
+    const afterPng = join(dir, 'after.png');
+    const withPng = ['--before', beforeTrace, '--after', afterTrace,
+      '--before-png', beforePng, '--after-png', afterPng, '--strict', '--json'];
+    writeFileSync(beforeTrace, JSON.stringify({...trace(), screenshotSha256: hash}));
+    writeFileSync(afterTrace, JSON.stringify({...trace(), screenshotSha256: hash}));
+    writeFileSync(beforePng, png);
+    writeFileSync(afterPng, png);
+
+    const verified = spawnSync(process.execPath, [cli, ...withPng], {encoding: 'utf8'});
+    assert.equal(verified.status, 0, verified.stderr);
+    assert.equal(JSON.parse(verified.stdout).pngArtifactsVerified, true);
+    assert.equal(JSON.parse(verified.stdout).ok, true);
+
+    // Without this opt-in check, matching JSON digests alone cannot establish
+    // that the two saved screenshot files are still the bytes that were captured.
+    writeFileSync(afterPng, Buffer.concat([png, Buffer.from('PRIVATE_IMAGE_TRAILER')]));
+    const tampered = spawnSync(process.execPath, [cli, ...withPng], {encoding: 'utf8'});
+    assert.equal(tampered.status, 2);
+    assert.match(tampered.stderr, /after PNG SHA-256 mismatch/);
+    assert.doesNotMatch(tampered.stderr, /PRIVATE_IMAGE_TRAILER/);
+    const jsonOnly = spawnSync(process.execPath,
+      [cli, '--before', beforeTrace, '--after', afterTrace, '--json'], {encoding: 'utf8'});
+    assert.equal(jsonOnly.status, 0, jsonOnly.stderr);
+    assert.equal(JSON.parse(jsonOnly.stdout).pngArtifactsVerified, false);
+
+    writeFileSync(afterPng, Buffer.from('PRIVATE_IMAGE_NOT_PNG'));
+    const invalidSignature = spawnSync(process.execPath, [cli, ...withPng], {encoding: 'utf8'});
+    assert.equal(invalidSignature.status, 2);
+    assert.match(invalidSignature.stderr, /Invalid after PNG signature/);
+    assert.doesNotMatch(invalidSignature.stderr, /PRIVATE_IMAGE_NOT_PNG/);
+
+    const incomplete = spawnSync(process.execPath,
+      [cli, '--before', beforeTrace, '--after', afterTrace,
+        '--before-png', beforePng], {encoding: 'utf8'});
+    assert.equal(incomplete.status, 2);
+    assert.match(incomplete.stderr, /Usage:/);
+
+    writeFileSync(afterPng, png);
+    writeFileSync(afterTrace, JSON.stringify(trace()));
+    const legacy = spawnSync(process.execPath, [cli, ...withPng], {encoding: 'utf8'});
+    assert.equal(legacy.status, 2);
+    assert.match(legacy.stderr, /Missing after screenshot SHA-256/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
   }
 });
