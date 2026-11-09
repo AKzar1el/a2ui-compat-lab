@@ -993,6 +993,84 @@ try {
   checkpoints.push({step: 'empty-string-leaf-action-refresh',
     path: '/selection', siblingPreserved: true, action: emptySelectionAction});
 
+
+  // A nested JSON Pointer binding must follow a leaf update without losing
+  // siblings or carrying stale action context across React re-renders.
+  const nestedBefore = expectedActions.length;
+  await page.evaluate(() => {
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9',
+      updateComponents: {
+        surfaceId: 'action-replay',
+        components: [
+          {id: 'root', component: 'Column', children: ['status', 'new-submit']},
+          {id: 'status', component: 'Text', text: {path: '/form/label'}},
+          {
+            id: 'new-submit', component: 'Button', child: 'new-label',
+            variant: 'primary', action: {event: {name: 'confirm-nested',
+              context: {label: {path: '/form/label'}, selection: {path: '/selection'}}}},
+          },
+          {id: 'new-label', component: 'Text', text: 'Confirm nested model'},
+        ],
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9',
+      updateDataModel: {
+        surfaceId: 'action-replay', path: '/',
+        value: {selection: '', confirmed: true, form: {label: 'before 🌿', retained: 7}},
+      },
+    });
+  });
+  const nestedButton = page.getByRole('button', {name: 'Confirm nested model', exact: true});
+  await nestedButton.waitFor({state: 'visible', timeout: 5000});
+  await restoredButton.waitFor({state: 'detached', timeout: 5000});
+  await page.getByText('before 🌿', {exact: true}).waitFor({state: 'visible'});
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {selection: '', confirmed: true, form: {label: 'before 🌿', retained: 7}});
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    nestedBefore, 'Mounting a nested binding and setting its model must not emit an action');
+
+  await nestedButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    nestedBefore + 1, {timeout: 5000});
+  const nestedInitialAction = {
+    name: 'confirm-nested', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {label: 'before 🌿', selection: ''},
+  };
+  expectedActions.push(nestedInitialAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Pointer action must resolve the nested model before its leaf update');
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/form/label', value: 'after 🧭',
+    },
+  }));
+  await page.getByText('after 🧭', {exact: true}).waitFor({state: 'visible', timeout: 5000});
+  await page.getByText('before 🌿', {exact: true}).waitFor({state: 'hidden'});
+  const nestedUpdated = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(nestedUpdated.data,
+    {selection: '', confirmed: true, form: {label: 'after 🧭', retained: 7}},
+    'Nested leaf update must preserve its sibling and unrelated root fields');
+  assert.equal(nestedUpdated.actions.length, nestedBefore + 1,
+    'Nested leaf update must not create an unsolicited action');
+
+  await nestedButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    nestedBefore + 2, {timeout: 5000});
+  const nestedUpdatedAction = {
+    name: 'confirm-nested', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {label: 'after 🧭', selection: ''},
+  };
+  expectedActions.push(nestedUpdatedAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Real keyboard action must use the latest nested leaf, not stale context');
+  checkpoints.push({step: 'nested-object-leaf-action-binding',
+    path: '/form/label', siblingPreserved: true,
+    pointerAction: nestedInitialAction, keyboardAction: nestedUpdatedAction});
+
   // Falsy JSON scalars are valid action-context values, not absent bindings.
   // Rebind a mounted Button to two additional model paths and exercise real
   // pointer and keyboard input against published React/core 0.14.
