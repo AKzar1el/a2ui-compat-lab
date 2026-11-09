@@ -12,6 +12,7 @@ const cli = fileURLToPath(new URL('../src/browser-trace-compare.mjs', import.met
 function trace() {
   return {
     schemaVersion: 1, protocol: 'v0.9', passed: true,
+    harness: 'real React A2uiSurface + published core Custom Elements; Playwright Chromium pointer and keyboard',
     fixtureSha256: 'a'.repeat(64),
     versions: {'@a2ui/react': '0.14.0', '@a2ui/web_core': '0.14.0'},
     checkpoints: [{step: 'render', data: {selection: 'hello', retained: 1}},
@@ -105,5 +106,34 @@ test('CLI strict drift and exclusive output keep prior evidence intact', () => {
     assert.doesNotMatch(malformed.stderr, /private-data-that-must-not-leak/);
   } finally {
     rmSync(dir, {recursive: true, force: true});
+  }
+});
+
+test('different rendering harnesses are incomparable, not a healthy match', () => {
+  const baseline = trace();
+  const different = structuredClone(baseline);
+  different.harness = 'Other renderer with identical serialized checkpoints';
+  assert.throws(() => compareBrowserTraces(baseline, different), /rendering harness differs/);
+  assert.throws(() => compareBrowserTraces(baseline, {...different, harness: ''}), /Invalid after browser trace schema/);
+});
+
+test('malformed browser evidence cannot produce a false MATCH or echo raw provenance', () => {
+  const baseline = trace();
+  const invalid = [
+    {...baseline, versions: {'@a2ui/react': {privateToken: 'DO_NOT_ECHO'}}},
+    {...baseline, versions: {}},
+    {...baseline, versions: {'@a2ui/react': 'DO_NOT_ECHO'}},
+    {...baseline, actions: [null]},
+    {...baseline, actions: [{name: ''}]},
+    {...baseline, checkpoints: [null]},
+    {...baseline, runtimeErrors: [null]},
+    {...baseline, consoleErrors: [{message: 'DO_NOT_ECHO'}]},
+    {...baseline, accessibilityFindings: [null]},
+    {...baseline, accessibilityFindings: [{severity: 'warning'}]},
+  ];
+  for (const candidate of invalid) {
+    assert.throws(() => compareBrowserTraces(baseline, candidate),
+      error => /Invalid after browser trace schema; input contents omitted/.test(error.message) &&
+        !error.message.includes('DO_NOT_ECHO'));
   }
 });
