@@ -56,7 +56,7 @@ node src/cli.mjs scan --out out/after.json
 node src/cli.mjs compare --before out/before.json --after out/after.json --strict --json --out out/comparison.json
 ```
 
-`compare` runs offline and never changes the source reports or the pinned baseline. With `--out`, comparison refuses to overwrite **any existing file**, including an input report or earlier comparison; choose a fresh output path for each run. This exclusive-create protection applies to comparison output, not to ordinary `scan` or `releases` output. It distinguishes **resolved**, **newly observed**, and **persistent** discrepancies; flips of a discrepancy's direction; reference-validator and SDK decision changes; changed reference configuration; and added/missing fixture IDs. A strict comparison exits nonzero on observed drift, making an upstream fix a **review gate**, not a silent baseline update. SDK and reference provenance appear in `before` and `after` metadata. Compare scan outputs from the same fixture suite; real Python A2UI parity remains a separate CI check and is not inferred from the comparison.
+`compare` runs offline and never changes the source reports or the pinned baseline. With `--out`, comparison refuses to overwrite **any existing file**, including an input report or earlier comparison; choose a fresh output path for each run. All CLI JSON report outputs now use exclusive creation; `scan`, `doctor`, `compare` and `releases` refuse to overwrite existing evidence. It distinguishes **resolved**, **newly observed**, and **persistent** discrepancies; flips of a discrepancy's direction; reference-validator and SDK decision changes; changed reference configuration; and added/missing fixture IDs. A strict comparison exits nonzero on observed drift, making an upstream fix a **review gate**, not a silent baseline update. SDK and reference provenance appear in `before` and `after` metadata. Compare scan outputs from the same fixture suite; real Python A2UI parity remains a separate CI check and is not inferred from the comparison.
 
 `doctor` is a fast, read-only, offline installation preflight. It checks the declared Node.js minimum, exact direct dependency pins, package-lock entries and the actual installed package versions. Use `doctor --json --strict --out out/doctor.json` for a machine-readable report (exit 1 on mismatch; exit 2 on invalid invocation). It checks *this workspace's direct packages*, not the npm registry, transitive dependency provenance, React's isolated renderer workspace or remote published-release compatibility. Run `npm ci --ignore-scripts --no-audit --no-fund` to repair a missing or stale installation before retrying.
 
@@ -122,6 +122,19 @@ Use `--verify-chunks` to replay the same local capture through the real SDK at 1
 The offline report includes a content SHA-256, event count and per-event component/data-model state from the **real pinned `@a2ui/web_core@0.15.0` MessageProcessor**. It does not perform browser rendering, trigger an agent or certify protocol conformance. Unsupported or malformed streams fail with a nonzero exit code; no report is written on replay failure. Existing output files are never overwritten, to avoid presenting stale evidence as a fresh run.
 
 Capture size is capped at 4 MiB, raw lines at 256 KiB and frames (including blank lines) at 10,000; malformed UTF-8 and non-newline-terminated input are rejected. **Reports reproduce captured data-model values, potentially including private information.** Keep real customer traces local and review or redact them before sharing CI artifacts.
+
+## Compare real Chromium replay evidence offline
+
+After two successful real-browser runs using the **same fixture**, compare their JSON traces before and after a deliberate published SDK or application update:
+
+```bash
+node src/browser-trace-compare.mjs --before before/react-browser-trace.json --after after/react-browser-trace.json
+node src/browser-trace-compare.mjs --before before/react-browser-trace.json --after after/react-browser-trace.json --strict --json --out out/browser-comparison.json
+```
+
+The comparator checks ordered **browser checkpoints, emitted agent actions, runtime errors, console errors, accessible-name findings and the replay pass flag**. It records pinned versions separately: a version change alone is *not* a behavior regression. Input must be a successful or failed schema-v1 Chromium trace with the same fixture SHA-256; mismatched fixtures or invalid JSON are rejected, not silently compared. Source trace files are never modified; --out refuses to overwrite an existing report. The JSON summary lists changed array indices and counts without embedding potentially private action contexts (the first 100 indices per category are shown). Each input is capped at 8 MiB. `--strict` exits 1 on drift or unhealthy candidate and 2 on invalid or incomparable evidence.
+
+This is a reproducible **local trace-diff tool**, not browser execution, an attestation that a trace is authentic, or official A2UI conformance. Generate both traces through the real Chromium harness separately, and keep any customer captures and artifacts private unless reviewed and redacted.
 
 ## Integration handoff and dependency security
 
