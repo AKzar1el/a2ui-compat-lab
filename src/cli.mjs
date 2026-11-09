@@ -109,7 +109,8 @@ async function main() {
       writeFileSync(target, JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
     } catch (error) {
       if (error?.code === 'EEXIST')
-        throw new Error('Report output already exists; choose a new --out path');
+        throw new Error((args.verb === 'compare' ? 'Comparison' : 'Report') +
+          ' output already exists; choose a new --out path');
       throw error;
     }
     console.error('Wrote ' + target);
