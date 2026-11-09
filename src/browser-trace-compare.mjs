@@ -5,9 +5,11 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
+const MAX_PNG_BYTES = 32 * 1024 * 1024;
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_REPORTED_INDICES = 100;
 const FIELDS = ['actions', 'checkpoints', 'runtimeErrors', 'consoleErrors', 'accessibilityFindings'];
-const USAGE = 'Usage: node src/browser-trace-compare.mjs --before OLD.json --after NEW.json [--strict] [--json] [--out NEW.json]';
+const USAGE = 'Usage: node src/browser-trace-compare.mjs --before OLD.json --after NEW.json [--before-png OLD.png --after-png NEW.png] [--strict] [--json] [--out NEW.json]';
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -102,6 +104,7 @@ export function compareBrowserTraces(before, after) {
     passedChanged,
     screenshotChanged,
     visualEvidence,
+    pngArtifactsVerified: false,
     changedFields,
     differences,
     ok: candidateHealthy && !passedChanged && changedFields.length === 0,
@@ -129,13 +132,35 @@ function readTrace(file, label) {
   }
 }
 
+/** Optional CLI integrity check: a trace digest alone cannot detect modified PNG files. */
+function verifyScreenshotFile(trace, file, label) {
+  if (!trace.screenshotSha256)
+    throw new Error('Missing ' + label + ' screenshot SHA-256; cannot verify PNG artifact');
+  let bytes;
+  try {
+    const path = resolve(file);
+    const metadata = lstatSync(path); // Reject symlinks and non-regular files.
+    if (!metadata.isFile() || metadata.size < PNG_SIGNATURE.length ||
+        metadata.size > MAX_PNG_BYTES) throw new Error('invalid size or file type');
+    bytes = readFileSync(path);
+    if (bytes.length < PNG_SIGNATURE.length || bytes.length > MAX_PNG_BYTES)
+      throw new Error('PNG changed size during read');
+  } catch {
+    throw new Error('Cannot read ' + label + ' PNG screenshot; path and contents omitted');
+  }
+  if (!bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE))
+    throw new Error('Invalid ' + label + ' PNG signature; contents omitted');
+  if (createHash('sha256').update(bytes).digest('hex') !== trace.screenshotSha256.toLowerCase())
+    throw new Error(label + ' PNG SHA-256 mismatch; file contents omitted');
+}
+
 function options(args) {
   if (args.length === 1 && args[0] === '--help') return {help: true};
   const result = {strict: false, json: false};
   const seen = new Set();
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
-    if (!['--before', '--after', '--out', '--strict', '--json'].includes(key) ||
+    if (!['--before', '--after', '--before-png', '--after-png', '--out', '--strict', '--json'].includes(key) ||
         seen.has(key)) throw new Error(USAGE);
     seen.add(key);
     if (key === '--strict') result.strict = true;
@@ -143,18 +168,27 @@ function options(args) {
     else {
       const value = args[++i];
       if (!value || value.startsWith('--')) throw new Error(USAGE);
-      result[key.slice(2)] = value;
+      const name = key === '--before-png' ? 'beforePng' :
+        key === '--after-png' ? 'afterPng' : key.slice(2);
+      result[name] = value;
     }
   }
-  if (!result.before || !result.after) throw new Error(USAGE);
+  if (!result.before || !result.after || Boolean(result.beforePng) !== Boolean(result.afterPng))
+    throw new Error(USAGE);
   return result;
 }
 
 function main() {
   const args = options(process.argv.slice(2));
   if (args.help) return console.log(USAGE);
-  const report = compareBrowserTraces(
-    readTrace(args.before, 'before'), readTrace(args.after, 'after'));
+  const before = readTrace(args.before, 'before');
+  const after = readTrace(args.after, 'after');
+  const report = compareBrowserTraces(before, after);
+  if (args.beforePng) {
+    verifyScreenshotFile(before, args.beforePng, 'before');
+    verifyScreenshotFile(after, args.afterPng, 'after');
+    report.pngArtifactsVerified = true;
+  }
   if (args.out) {
     const target = resolve(args.out);
     mkdirSync(dirname(target), {recursive: true});
@@ -171,7 +205,8 @@ function main() {
     (report.ok ? 'MATCH' : 'DRIFT') + '; changed fields: ' +
     (report.changedFields.join(', ') || 'none') +
     '; candidate healthy: ' + report.candidateHealthy +
-    '; PNG evidence: ' + report.visualEvidence);
+    '; PNG evidence: ' + report.visualEvidence +
+    '; PNG bytes verified: ' + report.pngArtifactsVerified);
   if (args.strict && !report.ok) process.exitCode = 1;
 }
 
