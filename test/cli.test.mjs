@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {existsSync, mkdtempSync, rmSync} from 'node:fs';
+import {existsSync, mkdtempSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -79,6 +79,31 @@ test('CLI refuses flag tokens used as file paths without creating artifacts', ()
       'A missing --out value must not create a file named --strict');
     assert.equal(existsSync(join(cwd, '--json')), false,
       'A missing --out value must not create a file named --json');
+  } finally {
+    rmSync(cwd, {recursive: true, force: true});
+  }
+});
+
+test('CLI scan and doctor never overwrite existing report evidence', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'a2ui-cli-evidence-'));
+  try {
+    for (const verb of ['scan', 'doctor']) {
+      const target = join(cwd, verb + '.json');
+      const args = [path, verb, '--out', target];
+      const first = spawnSync(process.execPath, args,
+        {cwd, encoding: 'utf8', timeout: 20000});
+      assert.equal(first.status, 0, verb + ': ' + first.stderr);
+      const original = readFileSync(target, 'utf8');
+      assert.ok(JSON.parse(original).reportVersion,
+        'The first run must produce a valid machine-readable report');
+      const second = spawnSync(process.execPath, args,
+        {cwd, encoding: 'utf8', timeout: 20000});
+      assert.equal(second.status, 2, verb + ': ' + second.stderr);
+      assert.match(second.stderr, /Report output already exists; choose a new --out path/);
+      assert.equal(second.stdout, '', 'A rejected overwrite must not report success');
+      assert.equal(readFileSync(target, 'utf8'), original,
+        verb + ' must preserve prior output byte-for-byte');
+    }
   } finally {
     rmSync(cwd, {recursive: true, force: true});
   }
