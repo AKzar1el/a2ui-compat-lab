@@ -8,7 +8,7 @@ import {
 } from '../src/browser-evidence.mjs';
 
 test('browser evidence output names reject ambiguous and escaping CLI arguments', () => {
-  const root = '/safe/renderer-react';
+  const root = join(tmpdir(), 'a2ui-browser-root');
   assert.equal(resolveBrowserEvidenceDir(root, []), join(root, 'out'));
   assert.equal(resolveBrowserEvidenceDir(root, ['--out-dir', 'run-2']), join(root, 'run-2'));
   for (const args of [
