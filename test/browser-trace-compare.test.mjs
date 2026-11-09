@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -256,6 +256,9 @@ test('Markdown browser comparison is reviewable, redacted, strict and never over
       [cli, ...flags, '--strict', '--out', output], {encoding: 'utf8'});
     assert.equal(drift.status, 1, drift.stderr);
     assert.equal(drift.stdout, readFileSync(output, 'utf8'));
+    assert.match(drift.stderr, /Wrote comparison report/);
+    assert.doesNotMatch(drift.stderr, /a2ui-browser-markdown-/,
+      'Successful Markdown export must not expose the local report path');
     assert.match(drift.stdout, /# A2UI real-browser regression comparison/);
     assert.match(drift.stdout, /\*\*Result:\*\* DRIFT/);
     assert.match(drift.stdout, /\| actions \| 1 \| 1 \| 1 \| 0 \|/);
@@ -284,6 +287,37 @@ test('Markdown browser comparison is reviewable, redacted, strict and never over
       [cli, ...flags, '--json'], {encoding: 'utf8'});
     assert.equal(exclusive.status, 2, 'Markdown and JSON must be exclusive');
     assert.match(exclusive.stderr, /Usage:/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
+test('failed report output never prints private paths or damages previous files', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-browser-output-redaction-'));
+  try {
+    const before = join(dir, 'baseline.json');
+    const after = join(dir, 'candidate.json');
+    writeFileSync(before, JSON.stringify(trace()));
+    writeFileSync(after, JSON.stringify(trace()));
+    const directoryTarget = join(dir, 'PRIVATE_REPORT_DIRECTORY');
+    mkdirSync(directoryTarget);
+    const blockedParent = join(dir, 'PRIVATE_BLOCKED_PARENT');
+    writeFileSync(blockedParent, 'original user file');
+    for (const [target, expected] of [
+      [directoryTarget, /Cannot write comparison output; path omitted/],
+      [join(blockedParent, 'report.md'),
+        /Cannot prepare comparison output directory; path omitted/],
+    ]) {
+      const result = spawnSync(process.execPath, [
+        cli, '--before', before, '--after', after, '--markdown', '--out', target,
+      ], {encoding: 'utf8'});
+      assert.equal(result.status, 2, result.stderr);
+      assert.equal(result.stdout, '', 'Do not publish a partial Markdown report');
+      assert.match(result.stderr, expected);
+      assert.doesNotMatch(result.stderr, /PRIVATE_|a2ui-browser-output-redaction-/,
+        'Filesystem failure must not leak an absolute output path');
+    }
+    assert.equal(readFileSync(blockedParent, 'utf8'), 'original user file');
   } finally {
     rmSync(dir, {recursive: true, force: true});
   }

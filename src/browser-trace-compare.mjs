@@ -240,15 +240,20 @@ function main() {
   }
   if (args.out) {
     const target = resolve(args.out);
-    mkdirSync(dirname(target), {recursive: true});
+    // Native filesystem errors can include full local paths and private names.
+    try {
+      mkdirSync(dirname(target), {recursive: true});
+    } catch {
+      throw new Error('Cannot prepare comparison output directory; path omitted');
+    }
     try {
       writeFileSync(target, args.markdown ? renderBrowserMarkdown(report) :
         JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
     } catch (error) {
       if (error?.code === 'EEXIST') throw new Error('Comparison output exists; choose a new --out path');
-      throw error;
+      throw new Error('Cannot write comparison output; path omitted');
     }
-    console.error('Wrote ' + target);
+    console.error('Wrote comparison report');
   }
   if (args.markdown) process.stdout.write(renderBrowserMarkdown(report));
   else if (args.json) console.log(JSON.stringify(report, null, 2));
