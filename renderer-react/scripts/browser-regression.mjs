@@ -961,6 +961,37 @@ try {
   checkpoints.push({step: 'nested-model-leaf-action-refresh', path: '/selection',
     siblingPreserved: true, action: leafAction});
 
+  // An explicit empty-string leaf must clear the visible label without
+  // retaining stale action context. This is distinct from deleting the field.
+  const actionsBeforeClear = expectedActions.length;
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {
+      surfaceId: 'action-replay', path: '/selection', value: '',
+    },
+  }));
+  await page.getByText(leafSelection, {exact: true}).waitFor({
+    state: 'hidden', timeout: 5000,
+  });
+  const clearedState = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(clearedState.data, {selection: '', confirmed: true},
+    'Clearing the selection must preserve the explicit empty value and sibling field');
+  assert.equal(clearedState.actions.length, actionsBeforeClear,
+    'Model clearing must never synthesize a Button action');
+
+  await restoredButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeClear + 1, {timeout: 5000});
+  const emptySelectionAction = {
+    name: 'confirm-restored', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {selection: ''},
+  };
+  expectedActions.push(emptySelectionAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Keyboard action must use empty selection, not the stale leaf value');
+  checkpoints.push({step: 'empty-string-leaf-action-refresh',
+    path: '/selection', siblingPreserved: true, action: emptySelectionAction});
   // A late action after surface deletion must not target a stale DOM Button.
   await page.evaluate(() => window.__a2uiLab.applyMessage({
     version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
