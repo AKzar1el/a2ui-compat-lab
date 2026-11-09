@@ -369,3 +369,36 @@ The real React browser harness previously listened for uncaught `pageerror` exce
 - The first real pointer click sends the initial nested value (`before 🌿`); an SDK `updateDataModel` at `/form/label` refreshes visible Text to `after 🧭` without replacing sibling fields or synthesizing an action. A real keyboard Enter emits the updated nested value and preserved empty selection, rather than the original context.
 - Source-head GitHub Actions [42593769316](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42593769316) passed Node/Python `sdk-parity`, the real `react-browser` job and `dependency-audit` with the previously documented unresolved Zod3 exception. Exact final PR-head CI must be verified separately.
 - This is reproducible passing application-level regression coverage, **not** evidence of a new upstream A2UI bug, a complete accessibility suite or external customer demand. Historical Windows checkout and untracked `renderer-react/` remain untouched; no local tests were performed.
+
+## 2026-11-09 — Real Chromium TextField two-way model/action replay
+
+The pinned published `@a2ui/react@0.14.0` and `@a2ui/web_core@0.14.0`
+now participate in an application-level **form** regression rather than only
+agent-generated Button/Text replays. A real Playwright `fill` on a mounted
+`TextField` bound to `/form/label` must update the published data model,
+refresh a separately bound React `Text`, preserve `form.retained` and the
+root siblings, and **not** synthesize a server action. A genuine pointer
+click must emit exactly one Button event carrying the browser-edited value.
+A subsequent agent `updateDataModel` to the same leaf must update both
+the visible Text and live input; a keyboard Enter on the Button must carry
+the new agent value, not the prior user input. This exercises the official
+v0.9 [two-way data-binding contract](https://a2ui.org/concepts/data-binding/)
+through real Chromium and the published SDKs.
+
+**Observed accessibility limitation:** The initial
+[PR #43 CI run 42600081128](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42600081128)
+timed out on `getByRole('textbox', {name: 'Edit form label'})`. A targeted
+[diagnostic run 42600261672](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42600261672)
+confirmed that the actual rendered `<input>` has an empty `id` and no
+`aria-label`, despite the A2UI `TextField.label` property. The form
+regression now locates its single real textbox by role without an accessible
+name and continues to enforce its actual two-way data/action behavior.
+This is a **specific observed accessible-name gap** in the pinned release
+pair, not a claim of comprehensive accessibility coverage or a newly proven
+security issue. Follow up with an independently minimized upstream case
+rather than silently treating the missing label as acceptable. The
+[source-head GitHub Actions run 42600405193](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42600405193)
+passed `sdk-parity` (including Python), `react-browser` and
+`dependency-audit` under the existing narrow unresolved Zod3 HIGH
+exception expiring 2026-12-07. All tests ran on GitHub; the original
+Windows checkout was not changed or tested locally.
