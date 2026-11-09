@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from '@playwright/test';
+import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEvidence} from '../../src/browser-evidence.mjs';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const outDir = resolveBrowserEvidenceDir(root, process.argv.slice(2));
+assertBrowserEvidenceUnused(outDir);
 const fixture = readFileSync(resolve(root, 'src/fixture.json'), 'utf8');
 const installed = Object.fromEntries([
   '@a2ui/react', '@a2ui/web_core', 'react', 'react-dom', 'vite', '@playwright/test',
@@ -883,9 +886,8 @@ try {
     remountedButtonCount: 1, pointerAction: restoredPointerAction,
     keyboardAction: restoredKeyboardAction});
 
-  const outDir = resolve(root, 'out');
-  mkdirSync(outDir, {recursive: true});
-  await page.screenshot({path: resolve(outDir, 'react-browser.png'), fullPage: true});
+  // Keep the mounted-surface screenshot in memory until all remaining assertions pass.
+  const screenshotBytes = await page.screenshot({fullPage: true});
 
   // Treat the data model as untrusted input, not executable HTML. This
   // exercises the rendered Text and a genuine Button action together; it
@@ -957,10 +959,9 @@ try {
     consoleErrors,
     passed: true,
   };
-  const target = resolve(outDir, 'react-browser-trace.json');
-  writeFileSync(target, JSON.stringify(report, null, 2) + '\n');
+  const {tracePath} = publishBrowserEvidence(outDir, screenshotBytes, report);
   console.log('Real A2UI React Chromium: ' + checkpoints.length + ' checkpoints / ' + trace.actions.length + ' agent events / no runtime errors / PASS');
-  console.log('Trace: ' + target);
+  console.log('Trace: ' + tracePath);
 } finally {
   if (browser) await browser.close();
   if (server) await server.close();

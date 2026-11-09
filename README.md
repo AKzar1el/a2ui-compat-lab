@@ -95,7 +95,7 @@ npm test
 npm run build
 ```
 
-The test runs Vite on loopback with deterministic fixture data, drives real headless Chromium pointer and keyboard input, and closes both the browser and server afterward. Inspect `renderer-react/out/react-browser-trace.json` and `renderer-react/out/react-browser.png`. No LLM, credentials, or external HTTP endpoint is involved after dependency and Chromium installation; GitHub CI installs the browser and uploads both artifacts.
+The test runs Vite on loopback with deterministic fixture data, drives real headless Chromium pointer and keyboard input, and closes both the browser and server afterward. Inspect `renderer-react/out/react-browser-trace.json` and `renderer-react/out/react-browser.png`. Browser artifacts are published only after all assertions pass, and a previous output directory is never overwritten. For another local run, use a fresh name from `renderer-react/`: `npm test -- --out-dir run-2` (one alphanumeric, dash or underscore directory name). GitHub CI uses the fresh default `out/` directory. No LLM, credentials, or external HTTP endpoint is involved after dependency and Chromium installation; GitHub CI installs the browser and uploads both artifacts.
 
 ## Fault/recovery replay (headless)
 
