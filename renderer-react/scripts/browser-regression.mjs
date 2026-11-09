@@ -1101,6 +1101,24 @@ try {
   assert.equal(await formInput.count(), 1, 'Exactly one real TextField must be mounted');
   await formInput.waitFor({state: 'visible', timeout: 5000});
   await nestedButton.waitFor({state: 'detached', timeout: 5000});
+  // The published catalog TextField declares a label. Record whether the
+  // *rendered browser role* exposes it rather than inferring from the schema.
+  const expectedTextFieldName = 'Edit form label';
+  const namedTextbox = page.getByRole('textbox', {name: expectedTextFieldName, exact: true});
+  const initialNamedTextboxCount = await namedTextbox.count();
+  assert.ok(initialNamedTextboxCount === 0 || initialNamedTextboxCount === 1,
+    'One TextField must not resolve to multiple identically named textboxes');
+  const initialTextboxRole = await formInput.ariaSnapshot();
+  assert.equal(typeof initialTextboxRole, 'string',
+    'Chromium must expose the TextField accessibility role snapshot');
+  const accessibilityFindings = [];
+  if (initialNamedTextboxCount === 0) {
+    accessibilityFindings.push({
+      id: 'textfield-missing-accessible-name', catalogComponentId: 'editor',
+      severity: 'warning', expectedName: expectedTextFieldName,
+      observedRoleSnapshot: initialTextboxRole,
+    });
+  }
   assert.equal(await formInput.inputValue(), 'after 🧭',
     'TextField must initially read the existing nested model value');
   assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
@@ -1143,6 +1161,17 @@ try {
     document.querySelector('input')?.value === value, agentEditedLabel, {timeout: 5000});
   assert.equal(await formInput.inputValue(), agentEditedLabel,
     'Agent leaf update must flow back into the live TextField');
+  const updatedNamedTextboxCount = await namedTextbox.count();
+  assert.equal(updatedNamedTextboxCount, initialNamedTextboxCount,
+    'Agent re-render must not change whether the TextField exposes its declared accessible name');
+  checkpoints.push({
+    step: 'textfield-accessible-name-probe',
+    expectedName: expectedTextFieldName,
+    browserRoleBefore: initialTextboxRole,
+    browserRoleAfter: await formInput.ariaSnapshot(),
+    accessibleNameMatched: initialNamedTextboxCount === 1,
+    accessibleNameStableAfterModelUpdate: true,
+  });
   const agentEditedTrace = await page.evaluate(() => window.__a2uiLab.trace());
   assert.deepEqual(agentEditedTrace.data,
     {selection: '', confirmed: true, form: {label: agentEditedLabel, retained: 7}},
@@ -1278,6 +1307,9 @@ try {
     actions: trace.actions,
     runtimeErrors,
     consoleErrors,
+    // Non-blocking observed renderer discrepancies are kept distinct from
+    // functional replay failures; newer published SDKs may resolve them.
+    accessibilityFindings,
     passed: true,
   };
   const {tracePath} = publishBrowserEvidence(outDir, screenshotBytes, report);
