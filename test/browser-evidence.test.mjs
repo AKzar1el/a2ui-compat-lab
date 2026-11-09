@@ -40,7 +40,10 @@ test('successful browser evidence is exclusive and preserves older artifacts', (
     assert.deepEqual(readFileSync(first.screenshotPath), screenshot);
     assert.deepEqual(JSON.parse(readFileSync(first.tracePath, 'utf8')), report);
     assert.throws(() => assertBrowserEvidenceUnused(target), /already exists/);
-    assert.throws(() => publishBrowserEvidence(target, Buffer.from('changed'), report),
+    const changedScreenshot = Buffer.concat([screenshot, Buffer.from('different')]);
+    const changedReport = {...report,
+      screenshotSha256: createHash('sha256').update(changedScreenshot).digest('hex')};
+    assert.throws(() => publishBrowserEvidence(target, changedScreenshot, changedReport),
       /already exists/);
     assert.deepEqual(readFileSync(first.screenshotPath), screenshot);
     assert.deepEqual(JSON.parse(readFileSync(first.tracePath, 'utf8')), report);
