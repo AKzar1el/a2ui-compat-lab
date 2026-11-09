@@ -1312,6 +1312,104 @@ try {
     peerPointerAction: peerFormAction, primaryPointerAction: primaryFormAction,
     survivorKeyboardAction: primaryFormAction});
 
+  // Recreating a deleted form under its old surface ID must allocate fresh
+  // model state and event bindings, rather than revive typed input or actions.
+  const rebornInitialLabel = 'reborn seed 🌳';
+  const rebornAgentLabel = 'reborn update 🌊';
+  const actionsBeforeRebirth = expectedActions.length;
+  await page.evaluate(({surfaceId, label}) => {
+    for (const message of [
+      {version: 'v0.9',
+        createSurface: {surfaceId, catalogId: '__BASIC_CATALOG__'}},
+      {version: 'v0.9',
+        updateComponents: {surfaceId, components: [
+          {id: 'root', component: 'Column', children: ['status', 'editor', 'new-submit']},
+          {id: 'status', component: 'Text', text: {path: '/form/label'}},
+          {id: 'editor', component: 'TextField', label: 'Edit form label',
+            value: {path: '/form/label'}, variant: 'shortText'},
+          {id: 'new-submit', component: 'Button', child: 'new-label',
+            variant: 'primary', action: {event: {name: 'submit-reborn-form',
+              context: {label: {path: '/form/label'}}}}},
+          {id: 'new-label', component: 'Text', text: 'Submit reborn form'},
+        ]}},
+      {version: 'v0.9',
+        updateDataModel: {surfaceId, path: '/', value: {
+          selection: 'reborn-only', form: {label, retained: 11},
+        }}},
+    ]) window.__a2uiLab.applyMessage(message);
+  }, {surfaceId: parallelFormSurfaceId, label: rebornInitialLabel});
+  const rebornButton = page.getByRole('button', {name: 'Submit reborn form', exact: true});
+  await rebornButton.waitFor({state: 'visible', timeout: 5000});
+  await page.getByText(rebornInitialLabel, {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await liveEditors.count(), 2,
+    'Recreated form must mount one new editor beside the surviving primary');
+  assert.equal(await peerEditor.inputValue(), rebornInitialLabel,
+    'Recreated editor must use its fresh agent value, not previously typed text');
+  assert.equal(await formInput.inputValue(), primaryTypedLabel,
+    'Recreating the peer must preserve the surviving editor');
+  const rebornSnapshot = await page.evaluate(id => window.__a2uiLab.trace(id),
+    parallelFormSurfaceId);
+  assert.deepEqual(rebornSnapshot.data,
+    {selection: 'reborn-only', form: {label: rebornInitialLabel, retained: 11}},
+    'Recreated surface must have fresh model state and a preserved sibling');
+  assert.deepEqual(rebornSnapshot.actions, expectedActions,
+    'Recreating a surface must not replay a stale action');
+
+  await rebornButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeRebirth + 1, {timeout: 5000});
+  const rebornKeyboardAction = {
+    name: 'submit-reborn-form', surfaceId: parallelFormSurfaceId,
+    sourceComponentId: 'new-submit', context: {label: rebornInitialLabel},
+  };
+  expectedActions.push(rebornKeyboardAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Reused surface ID must dispatch only the new event definition');
+
+  await page.evaluate(({surfaceId, label}) => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {surfaceId, path: '/form/label', value: label},
+  }), {surfaceId: parallelFormSurfaceId, label: rebornAgentLabel});
+  await page.getByText(rebornAgentLabel, {exact: true}).waitFor({state: 'visible'});
+  await page.waitForFunction(value =>
+    [...document.querySelectorAll('input')].some(node => node.value === value),
+    rebornAgentLabel, {timeout: 5000});
+  assert.equal(await peerEditor.inputValue(), rebornAgentLabel,
+    'Agent update must refresh a recreated TextField in the real browser');
+  assert.deepEqual((await page.evaluate(id => window.__a2uiLab.trace(id),
+    parallelFormSurfaceId)).data,
+    {selection: 'reborn-only', form: {label: rebornAgentLabel, retained: 11}},
+    'Recreated model leaf update must preserve unrelated nested data');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {selection: '', confirmed: true, form: {label: primaryTypedLabel, retained: 7}},
+    'Recreated peer agent update must not affect the primary surface');
+
+  await rebornButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeRebirth + 2, {timeout: 5000});
+  const rebornPointerAction = {
+    name: 'submit-reborn-form', surfaceId: parallelFormSurfaceId,
+    sourceComponentId: 'new-submit', context: {label: rebornAgentLabel},
+  };
+  expectedActions.push(rebornPointerAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Recreated pointer event must use fresh agent-updated context');
+
+  await page.evaluate(surfaceId => window.__a2uiLab.applyMessage({
+    version: 'v0.9', deleteSurface: {surfaceId},
+  }), parallelFormSurfaceId);
+  await rebornButton.waitFor({state: 'detached', timeout: 5000});
+  await peerEditor.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await liveEditors.count(), 1, 'Reborn editor must fully unmount');
+  assert.equal((await page.evaluate(id => window.__a2uiLab.trace(id).data,
+    parallelFormSurfaceId)), null, 'Second deletion must remove the recreated model');
+  assert.equal(await formInput.inputValue(), primaryTypedLabel,
+    'Second peer deletion must leave the surviving form intact');
+  checkpoints.push({step: 'textfield-surface-id-rebirth',
+    surfaceIdReused: true, freshModel: true, peerDeletedAgain: true,
+    keyboardAction: rebornKeyboardAction, agentUpdatedPointerAction: rebornPointerAction});
+
   // Falsy JSON scalars are valid action-context values, not absent bindings.
   // Rebind a mounted Button to two additional model paths and exercise real
   // pointer and keyboard input against published React/core 0.14.

@@ -25,12 +25,12 @@ initial.onError.subscribe(error => errors.push(structuredClone(error)));
 
 window.__a2uiLab = Object.freeze({
   applyMessage,
-  trace: () => ({
+  trace: (surfaceId = 'action-replay') => ({
     actions: structuredClone(emitted),
     errors: structuredClone(errors),
     surfaceIds: [...processor.model.surfacesMap.keys()].sort(),
-    data: structuredClone(processor.getSurface('action-replay')?.dataModel.get('/') ?? null),
-    components: [...(processor.getSurface('action-replay')?.componentsModel.keys ?? [])],
+    data: structuredClone(processor.getSurface(surfaceId)?.dataModel.get('/') ?? null),
+    components: [...(processor.getSurface(surfaceId)?.componentsModel.keys ?? [])],
   }),
 });
 
