@@ -930,6 +930,37 @@ try {
     executableHandlerAttributes: 0, injectedHandlerExecuted: false,
     action: markupAction});
 
+  // A leaf-level update must refresh rendered Text and event context without
+  // replacing unrelated fields in the same published-SDK data model.
+  const leafSelection = 'nested leaf 🌱';
+  const actionsBeforeLeaf = expectedActions.length;
+  await page.evaluate(value => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {
+      surfaceId: 'action-replay', path: '/selection', value,
+    },
+  }), leafSelection);
+  await page.getByText(leafSelection, {exact: true}).waitFor({state: 'visible', timeout: 5000});
+  const leafState = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(leafState.data, {selection: leafSelection, confirmed: true},
+    'Leaf data update must preserve the existing sibling model value');
+  assert.equal(leafState.actions.length, actionsBeforeLeaf,
+    'Leaf model update must never dispatch a synthetic Button event');
+
+  await restoredButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeLeaf + 1, {timeout: 5000});
+  const leafAction = {
+    name: 'confirm-restored', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {selection: leafSelection},
+  };
+  expectedActions.push(leafAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Real keyboard action must bind the latest nested leaf update');
+  checkpoints.push({step: 'nested-model-leaf-action-refresh', path: '/selection',
+    siblingPreserved: true, action: leafAction});
+
   // A late action after surface deletion must not target a stale DOM Button.
   await page.evaluate(() => window.__a2uiLab.applyMessage({
     version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
