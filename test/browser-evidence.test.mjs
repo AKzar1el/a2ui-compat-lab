@@ -33,7 +33,7 @@ test('successful browser evidence is exclusive and preserves older artifacts', (
     assert.throws(() => publishBrowserEvidence(join(root, 'not-published'),
       Buffer.alloc(0), report), /valid PNG/);
     assert.throws(() => publishBrowserEvidence(join(root, 'failed-run'),
-      screenshot, {passed: false}), /passing replay report/);
+      screenshot, {passed: false}), /passing replay/);
     assert.equal(existsSync(join(root, 'failed-run')), false);
 
     const first = publishBrowserEvidence(target, screenshot, report);
