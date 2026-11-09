@@ -1097,8 +1097,16 @@ try {
   }));
   const formInput = page.getByRole('textbox', {name: 'Edit form label'});
   const formButton = page.getByRole('button', {name: 'Submit edited form', exact: true});
-  await formInput.waitFor({state: 'visible', timeout: 5000});
   await formButton.waitFor({state: 'visible', timeout: 5000});
+  const formDomProbe = await page.evaluate(() => ({
+    controls: [...document.querySelectorAll('input,textarea')].map(el => ({
+      tag: el.tagName, label: el.getAttribute('aria-label'), id: el.id,
+      value: el.value, html: el.outerHTML.slice(0, 450),
+    })),
+    errors: window.__a2uiLab.trace().errors,
+  }));
+  console.log('A2UI TextField DOM probe: ' + JSON.stringify(formDomProbe));
+  await formInput.waitFor({state: 'visible', timeout: 5000});
   await nestedButton.waitFor({state: 'detached', timeout: 5000});
   assert.equal(await formInput.inputValue(), 'after 🧭',
     'TextField must initially read the existing nested model value');
