@@ -9,7 +9,7 @@ const MAX_PNG_BYTES = 32 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_REPORTED_INDICES = 100;
 const FIELDS = ['actions', 'checkpoints', 'runtimeErrors', 'consoleErrors', 'accessibilityFindings'];
-const USAGE = 'Usage: node src/browser-trace-compare.mjs --before OLD.json --after NEW.json [--before-png OLD.png --after-png NEW.png] [--strict] [--json] [--out NEW.json]';
+const USAGE = 'Usage: node src/browser-trace-compare.mjs --before OLD.json --after NEW.json [--before-png OLD.png --after-png NEW.png] [--strict] [--json | --markdown] [--out REPORT.json|REPORT.md]';
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -112,6 +112,54 @@ export function compareBrowserTraces(before, after) {
   };
 }
 
+
+/** Human-reviewable, content-redacted summary for saved real-browser evidence. */
+export function renderBrowserMarkdown(report) {
+  const versions = [...new Set([
+    ...Object.keys(report.beforeVersions), ...Object.keys(report.afterVersions),
+  ])].sort();
+  const rows = FIELDS.map(field => {
+    const diff = report.differences[field];
+    const indices = diff.changedIndices.join(', ') || '-';
+    return '| ' + field + ' | ' + diff.beforeCount + ' | ' + diff.afterCount +
+      ' | ' + diff.changedCount + ' | ' + indices +
+      (diff.indicesTruncated ? ' (first 100 only)' : '') + ' |';
+  });
+  return [
+    '# A2UI real-browser regression comparison',
+    '',
+    '**Result:** ' + (report.ok ? 'MATCH' : 'DRIFT'),
+    '**Candidate healthy:** ' + (report.candidateHealthy ? 'yes' : 'no'),
+    '**Replay passed:** ' + (report.beforePassed ? 'yes' : 'no') +
+      ' before / ' + (report.afterPassed ? 'yes' : 'no') + ' after',
+    '**Fixture SHA-256:** `' + report.fixtureSha256 + '`,
+    '**Changed fields:** ' + (report.changedFields.join(', ') || 'none'),
+    '**Screenshot bytes changed:** ' + (report.screenshotChanged ? 'yes' : 'no'),
+    '**PNG evidence:** ' + report.visualEvidence +
+      '; saved artifact bytes verified: ' + (report.pngArtifactsVerified ? 'yes' : 'no'),
+    '',
+    '## Published SDK versions (informational)',
+    '',
+    '| Package | Before | After |',
+    '| --- | --- | --- |',
+    ...versions.map(name => '| `' + name + '` | `' +
+      (report.beforeVersions[name] ?? '-') + '` | `' +
+      (report.afterVersions[name] ?? '-') + '` |'),
+    '',
+    '## Browser behavior evidence',
+    '',
+    '| Category | Before | After | Changed | Changed indices (zero-based) |',
+    '| --- | ---: | ---: | ---: | --- |',
+    ...rows,
+    '',
+    'Action contexts, DOM content, error messages and paths are intentionally omitted.',
+    'A PNG SHA-256 compares screenshot bytes, not decoded pixels or perceptual similarity.',
+    'This report is not official A2UI conformance certification or authenticated provenance.',
+    '',
+  ].join('
+');
+}
+
 function readTrace(file, label) {
   let bytes;
   try {
@@ -156,15 +204,16 @@ function verifyScreenshotFile(trace, file, label) {
 
 function options(args) {
   if (args.length === 1 && args[0] === '--help') return {help: true};
-  const result = {strict: false, json: false};
+  const result = {strict: false, json: false, markdown: false};
   const seen = new Set();
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
-    if (!['--before', '--after', '--before-png', '--after-png', '--out', '--strict', '--json'].includes(key) ||
+    if (!['--before', '--after', '--before-png', '--after-png', '--out', '--strict', '--json', '--markdown'].includes(key) ||
         seen.has(key)) throw new Error(USAGE);
     seen.add(key);
     if (key === '--strict') result.strict = true;
     else if (key === '--json') result.json = true;
+    else if (key === '--markdown') result.markdown = true;
     else {
       const value = args[++i];
       if (!value || value.startsWith('--')) throw new Error(USAGE);
@@ -173,7 +222,8 @@ function options(args) {
       result[name] = value;
     }
   }
-  if (!result.before || !result.after || Boolean(result.beforePng) !== Boolean(result.afterPng))
+  if (!result.before || !result.after || (result.json && result.markdown) ||
+      Boolean(result.beforePng) !== Boolean(result.afterPng))
     throw new Error(USAGE);
   return result;
 }
@@ -193,14 +243,16 @@ function main() {
     const target = resolve(args.out);
     mkdirSync(dirname(target), {recursive: true});
     try {
-      writeFileSync(target, JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
+      writeFileSync(target, args.markdown ? renderBrowserMarkdown(report) :
+        JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
     } catch (error) {
       if (error?.code === 'EEXIST') throw new Error('Comparison output exists; choose a new --out path');
       throw error;
     }
     console.error('Wrote ' + target);
   }
-  if (args.json) console.log(JSON.stringify(report, null, 2));
+  if (args.markdown) process.stdout.write(renderBrowserMarkdown(report));
+  else if (args.json) console.log(JSON.stringify(report, null, 2));
   else console.log('A2UI actual-browser trace comparison: ' +
     (report.ok ? 'MATCH' : 'DRIFT') + '; changed fields: ' +
     (report.changedFields.join(', ') || 'none') +
