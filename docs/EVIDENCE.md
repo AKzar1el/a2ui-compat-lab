@@ -402,3 +402,10 @@ passed `sdk-parity` (including Python), `react-browser` and
 `dependency-audit` under the existing narrow unresolved Zod3 HIGH
 exception expiring 2026-12-07. All tests ran on GitHub; the original
 Windows checkout was not changed or tested locally.
+
+## Real Chromium TextField accessible-name telemetry (2026-11-09)
+
+- Pinned published `@a2ui/react@0.14.0` and `@a2ui/web_core@0.14.0` stay unchanged. The real Chromium `TextField` fixture specifies `label: 'Edit form label'`; the browser regression now checks its actual named-textbox role using Playwright's accessible-name matching, retains the browser's `ariaSnapshot()`, and repeats the role check after an agent-driven `/form/label` update.
+- A missing accessible name is published as a **non-blocking** `accessibilityFindings[]` warning with expected name and observed role snapshot. The separate `textfield-accessible-name-probe` checkpoint records name resolution before and after the model update. The test fails if the naming behavior unexpectedly changes across that live re-render or multiple named inputs appear; it does not suppress functional replay failures. A successful overall functional test is **not** an accessibility pass.
+- Previous [PR #43](https://github.com/AKzar1el/a2ui-compat-lab/pull/43) exposed a real missing-name observation for this published React renderer. The new source-head [GitHub Actions run 42607567672](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42607567672) passed `sdk-parity` including Python, `react-browser` in real Chromium, and `dependency-audit` with only the time-bounded unresolved Zod3 exception. The browser artifact now carries the structured probe for downstream evidence consumers; no local tests are claimed.
+- This observes an integrated renderer accessibility discrepancy; it does not modify the upstream SDK, establish a security vulnerability, or prove that every input/catalog variant is mislabeled. Follow up with a minimized upstream reproduction and check a compatible release before considering a fix or stricter gate.
