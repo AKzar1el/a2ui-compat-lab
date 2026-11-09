@@ -9,6 +9,8 @@ const MAX_PNG_BYTES = 32 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_REPORTED_INDICES = 100;
 const FIELDS = ['actions', 'checkpoints', 'runtimeErrors', 'consoleErrors', 'accessibilityFindings'];
+const ACCESSIBILITY_SEVERITIES = new Set(['info', 'minor', 'moderate', 'warning', 'serious', 'error', 'critical', 'fatal']);
+const BLOCKING_ACCESSIBILITY_SEVERITIES = new Set(['serious', 'error', 'critical', 'fatal']);
 const USAGE = 'Usage: node src/browser-trace-compare.mjs --before OLD.json --after NEW.json [--before-png OLD.png --after-png NEW.png] [--strict] [--json | --markdown] [--out REPORT.json|REPORT.md]';
 
 function canonical(value) {
@@ -53,7 +55,8 @@ function checkTrace(trace, label) {
         typeof item.step !== 'string' || item.step.length === 0) ||
       [...trace.runtimeErrors, ...trace.consoleErrors].some(item => typeof item !== 'string') ||
       trace.accessibilityFindings.some(item => !isRecord(item) ||
-        typeof item.id !== 'string' || item.id.length === 0))
+        typeof item.id !== 'string' || item.id.length === 0 ||
+         !ACCESSIBILITY_SEVERITIES.has(item.severity)))
     throw new Error('Invalid ' + label + ' browser trace schema; input contents omitted');
 }
 
@@ -90,8 +93,11 @@ export function compareBrowserTraces(before, after) {
   const changedFields = FIELDS.filter(field => differences[field].changedCount > 0);
   if (screenshotChanged) changedFields.push('screenshotSha256');
   const passedChanged = before.passed !== after.passed;
+  // An unchanged serious accessibility defect is still a failed candidate, not MATCH.
+  const blockingAccessibilityCount = after.accessibilityFindings.filter(item =>
+    BLOCKING_ACCESSIBILITY_SEVERITIES.has(item.severity)).length;
   const candidateHealthy = after.passed && after.runtimeErrors.length === 0 &&
-    after.consoleErrors.length === 0;
+    after.consoleErrors.length === 0 && blockingAccessibilityCount === 0;
   return {
     schemaVersion: 1,
     kind: 'a2ui-real-browser-trace-comparison',
@@ -101,6 +107,7 @@ export function compareBrowserTraces(before, after) {
     beforePassed: before.passed,
     afterPassed: after.passed,
     candidateHealthy,
+    blockingAccessibilityCount,
     passedChanged,
     screenshotChanged,
     visualEvidence,
@@ -130,6 +137,7 @@ export function renderBrowserMarkdown(report) {
     '',
     '**Result:** ' + (report.ok ? 'MATCH' : 'DRIFT'),
     '**Candidate healthy:** ' + (report.candidateHealthy ? 'yes' : 'no'),
+    '**Blocking accessibility findings:** ' + report.blockingAccessibilityCount,
     '**Replay passed:** ' + (report.beforePassed ? 'yes' : 'no') +
       ' before / ' + (report.afterPassed ? 'yes' : 'no') + ' after',
     '**Fixture SHA-256:** `' + report.fixtureSha256 + '`',
@@ -261,6 +269,7 @@ function main() {
     (report.ok ? 'MATCH' : 'DRIFT') + '; changed fields: ' +
     (report.changedFields.join(', ') || 'none') +
     '; candidate healthy: ' + report.candidateHealthy +
+    '; blocking accessibility findings: ' + report.blockingAccessibilityCount +
     '; PNG evidence: ' + report.visualEvidence +
     '; PNG bytes verified: ' + report.pngArtifactsVerified);
   if (args.strict && !report.ok) process.exitCode = 1;

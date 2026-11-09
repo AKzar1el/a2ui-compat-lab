@@ -67,6 +67,51 @@ test('fixture mismatch and incomplete traces fail closed', () => {
     /Invalid after browser trace schema/);
 });
 
+test('unchanged serious accessibility findings fail strict comparison without leaking details', () => {
+  for (const severity of ['serious', 'error', 'critical', 'fatal']) {
+    const baseline = trace();
+    baseline.accessibilityFindings = [
+      {id: 'focus-regression', severity, privateContext: 'PRIVATE_FORM_CONTENT_DO_NOT_PRINT'},
+    ];
+    const report = compareBrowserTraces(baseline, structuredClone(baseline));
+    assert.equal(report.ok, false, 'Unchanged ' + severity + ' finding must not report MATCH');
+    assert.equal(report.candidateHealthy, false);
+    assert.equal(report.blockingAccessibilityCount, 1);
+    assert.deepEqual(report.changedFields, [], 'Unchanged evidence remains unchanged');
+    assert.doesNotMatch(JSON.stringify(report), /PRIVATE_FORM_CONTENT_DO_NOT_PRINT/);
+  }
+  for (const severity of ['info', 'minor', 'moderate', 'warning']) {
+    const baseline = trace();
+    baseline.accessibilityFindings = [{id: 'informational', severity}];
+    const report = compareBrowserTraces(baseline, structuredClone(baseline));
+    assert.equal(report.ok, true, 'Nonblocking ' + severity + ' should not fail on its own');
+    assert.equal(report.blockingAccessibilityCount, 0);
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-blocking-accessibility-'));
+  try {
+    const before = join(dir, 'before.json');
+    const after = join(dir, 'after.json');
+    const traceWithFinding = trace();
+    traceWithFinding.accessibilityFindings = [
+      {id: 'blocking', severity: 'critical', privateContext: 'PRIVATE_FORM_CONTENT_DO_NOT_PRINT'},
+    ];
+    writeFileSync(before, JSON.stringify(traceWithFinding));
+    writeFileSync(after, JSON.stringify(traceWithFinding));
+    const flags = ['--before', before, '--after', after, '--strict'];
+    const markdown = spawnSync(process.execPath, [cli, ...flags, '--markdown'], {encoding: 'utf8'});
+    assert.equal(markdown.status, 1, markdown.stderr);
+    assert.match(markdown.stdout, /\*\*Result:\*\* DRIFT/);
+    assert.match(markdown.stdout, /\*\*Blocking accessibility findings:\*\* 1/);
+    assert.doesNotMatch(markdown.stdout, /PRIVATE_FORM_CONTENT_DO_NOT_PRINT/);
+    const json = spawnSync(process.execPath, [cli, ...flags, '--json'], {encoding: 'utf8'});
+    assert.equal(json.status, 1, json.stderr);
+    assert.equal(JSON.parse(json.stdout).blockingAccessibilityCount, 1);
+    assert.doesNotMatch(json.stdout, /PRIVATE_FORM_CONTENT_DO_NOT_PRINT/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
 test('CLI strict drift and exclusive output keep prior evidence intact', () => {
   const dir = mkdtempSync(join(tmpdir(), 'a2ui-browser-diff-'));
   try {
@@ -131,6 +176,8 @@ test('malformed browser evidence cannot produce a false MATCH or echo raw proven
     {...baseline, consoleErrors: [{message: 'DO_NOT_ECHO'}]},
     {...baseline, accessibilityFindings: [null]},
     {...baseline, accessibilityFindings: [{severity: 'warning'}]},
+    {...baseline, accessibilityFindings: [{id: 'unknown', severity: 'DO_NOT_ECHO'}]},
+    {...baseline, accessibilityFindings: [{id: 'missing-severity'}]},
   ];
   for (const candidate of invalid) {
     assert.throws(() => compareBrowserTraces(baseline, candidate),
