@@ -1194,6 +1194,124 @@ try {
     path: '/form/label', siblingPreserved: true,
     pointerAction: editedFormAction, keyboardAction: agentUpdatedFormAction});
 
+  // Distinct live surfaces may reuse every component ID and the same model
+  // path. Real typing and actions must never cross the surface boundary.
+  const parallelFormSurfaceId = 'parallel-form-peer';
+  const primaryBeforePeer = (await page.evaluate(() => window.__a2uiLab.trace())).data;
+  const parallelFormsBefore = expectedActions.length;
+  await page.evaluate(surfaceId => {
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9',
+      createSurface: {surfaceId, catalogId: '__BASIC_CATALOG__'},
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9',
+      updateComponents: {
+        surfaceId,
+        components: [
+          {id: 'root', component: 'Column', children: ['status', 'editor', 'new-submit']},
+          {id: 'status', component: 'Text', text: {path: '/form/label'}},
+          {
+            id: 'editor', component: 'TextField', label: 'Edit form label',
+            value: {path: '/form/label'}, variant: 'shortText',
+          },
+          {
+            id: 'new-submit', component: 'Button', child: 'new-label',
+            variant: 'primary', action: {event: {name: 'submit-edited-form',
+              context: {label: {path: '/form/label'}}}},
+          },
+          {id: 'new-label', component: 'Text', text: 'Submit peer form'},
+        ],
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9',
+      updateDataModel: {
+        surfaceId, path: '/',
+        value: {selection: 'peer-only', form: {label: 'peer initial 🌱', retained: 9}},
+      },
+    });
+  }, parallelFormSurfaceId);
+  const liveEditors = page.getByRole('textbox');
+  const peerEditor = liveEditors.nth(1);
+  const peerFormButton = page.getByRole('button', {name: 'Submit peer form', exact: true});
+  await peerEditor.waitFor({state: 'visible', timeout: 5000});
+  await peerFormButton.waitFor({state: 'visible', timeout: 5000});
+  await page.getByText('peer initial 🌱', {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await liveEditors.count(), 2,
+    'Parallel surfaces with reused component IDs must mount two independent TextFields');
+  assert.equal(await peerEditor.inputValue(), 'peer initial 🌱');
+  assert.equal(await formInput.inputValue(), agentEditedLabel,
+    'Creating a peer TextField must not overwrite the primary input');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data, primaryBeforePeer,
+    'Creating a peer surface must not change the primary model');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    parallelFormsBefore, 'Mounting a peer form must not dispatch an action');
+
+  const peerTypedLabel = 'peer entered 🌸';
+  await peerEditor.fill(peerTypedLabel);
+  await page.getByText(peerTypedLabel, {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await formInput.inputValue(), agentEditedLabel,
+    'Typing into a peer TextField must not alter the primary TextField');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data, primaryBeforePeer,
+    'Peer input must not mutate the primary data model');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    parallelFormsBefore, 'Typing into the peer must not synthesize a Button event');
+
+  await peerFormButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    parallelFormsBefore + 1, {timeout: 5000});
+  const peerFormAction = {
+    name: 'submit-edited-form', surfaceId: parallelFormSurfaceId,
+    sourceComponentId: 'new-submit', context: {label: peerTypedLabel},
+  };
+  expectedActions.push(peerFormAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Peer Button must dispatch its own typed data under the peer surface ID');
+
+  const primaryTypedLabel = 'primary entered 🌟';
+  await formInput.fill(primaryTypedLabel);
+  await page.getByText(primaryTypedLabel, {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await peerEditor.inputValue(), peerTypedLabel,
+    'Typing in the primary form must preserve the peer input');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {selection: '', confirmed: true, form: {label: primaryTypedLabel, retained: 7}},
+    'Primary typing must update only its own nested model and preserve siblings');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    parallelFormsBefore + 1, 'Primary typing must not emit an unsolicited action');
+
+  await formButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    parallelFormsBefore + 2, {timeout: 5000});
+  const primaryFormAction = {
+    name: 'submit-edited-form', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {label: primaryTypedLabel},
+  };
+  expectedActions.push(primaryFormAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Primary Button must dispatch its own edited value without peer leakage');
+
+  await page.evaluate(surfaceId => window.__a2uiLab.applyMessage({
+    version: 'v0.9', deleteSurface: {surfaceId},
+  }), parallelFormSurfaceId);
+  await peerEditor.waitFor({state: 'detached', timeout: 5000});
+  await peerFormButton.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await liveEditors.count(), 1,
+    'Deleting the peer must remove its real input, not only its Button');
+  assert.equal(await formInput.inputValue(), primaryTypedLabel,
+    'Deleting the peer must not discard the surviving form input');
+  await formButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    parallelFormsBefore + 3, {timeout: 5000});
+  expectedActions.push(primaryFormAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'After peer deletion keyboard action must still use surviving form data');
+  checkpoints.push({step: 'parallel-textfield-model-action-isolation',
+    reusedComponentIds: true, mountedEditors: 1, peerDeleted: true,
+    peerPointerAction: peerFormAction, primaryPointerAction: primaryFormAction,
+    survivorKeyboardAction: primaryFormAction});
+
   // Falsy JSON scalars are valid action-context values, not absent bindings.
   // Rebind a mounted Button to two additional model paths and exercise real
   // pointer and keyboard input against published React/core 0.14.
