@@ -132,7 +132,7 @@ export function renderBrowserMarkdown(report) {
     '**Candidate healthy:** ' + (report.candidateHealthy ? 'yes' : 'no'),
     '**Replay passed:** ' + (report.beforePassed ? 'yes' : 'no') +
       ' before / ' + (report.afterPassed ? 'yes' : 'no') + ' after',
-    '**Fixture SHA-256:** `' + report.fixtureSha256 + '`,
+    '**Fixture SHA-256:** `' + report.fixtureSha256 + '`',
     '**Changed fields:** ' + (report.changedFields.join(', ') || 'none'),
     '**Screenshot bytes changed:** ' + (report.screenshotChanged ? 'yes' : 'no'),
     '**PNG evidence:** ' + report.visualEvidence +
@@ -156,8 +156,7 @@ export function renderBrowserMarkdown(report) {
     'A PNG SHA-256 compares screenshot bytes, not decoded pixels or perceptual similarity.',
     'This report is not official A2UI conformance certification or authenticated provenance.',
     '',
-  ].join('
-');
+  ].join('\n');
 }
 
 function readTrace(file, label) {
