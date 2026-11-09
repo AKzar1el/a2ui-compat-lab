@@ -68,13 +68,25 @@ try {
   checkpoints.push({step: 'browser-console-error-monitor', probeObserved: true});
   // Use a second LOOPBACK origin to exercise interception without network egress.
   const deniedProbe = 'http://127.0.0.1:1/__a2ui_browser_network_guard_probe__';
+  // Chromium also logs a resource error for this deliberately aborted request.
+  // Accept exactly that controlled diagnostic, not unrelated renderer errors.
+  const blockedProbeConsole = page.waitForEvent('console', {
+    predicate: message => message.type() === 'error' &&
+      message.text() === 'Failed to load resource: net::ERR_FAILED',
+    timeout: 5000,
+  });
   await page.evaluate(async url => {
     try { await fetch(url); } catch { /* The request must be aborted. */ }
   }, deniedProbe);
+  await blockedProbeConsole;
   assert.deepEqual(deniedRequests, [deniedProbe],
     'Chromium must abort an HTTP request outside the ephemeral Vite origin');
+  assert.deepEqual(consoleErrors, ['Failed to load resource: net::ERR_FAILED'],
+    'Only the deliberately aborted HTTP probe may log a resource failure');
+  consoleErrors.length = 0;
   checkpoints.push({step: 'browser-http-isolation',
-    offOriginProbeBlocked: true, unexpectedOffOriginRequests: 0});
+    offOriginProbeBlocked: true, expectedProbeConsoleError: true,
+    unexpectedOffOriginRequests: 0});
   const button = page.getByRole('button', {name: 'Confirm'});
   await button.waitFor({state: 'visible'});
   await page.getByText('alpha', {exact: true}).waitFor({state: 'visible'});
