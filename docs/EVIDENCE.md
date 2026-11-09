@@ -328,3 +328,9 @@ The pinned Zod3 advisory remains unresolved with its 2026-12-07 exception.
 - Real Chromium replay now uses an OS-assigned ephemeral Vite port on `127.0.0.1` instead of a fixed port 4181, avoiding avoidable port contention in parallel local runs.
 - The Playwright browser context blocks service workers and denies HTTP(S) page requests outside the active local Vite origin. A deterministic fetch to a **different loopback port** must be intercepted, and subsequent real Button/data/surface interactions must make no unexpected off-origin HTTP(S) requests.
 - The request guard is part of the pinned `@a2ui/react@0.14.0` / `@a2ui/web_core@0.14.0` Chromium regression. It does **not** prove general-purpose sandboxing or cover non-HTTP requests, external tools or all WebSocket traffic. No remote service is needed during test execution after installation.
+
+## Core CLI report provenance: no silent overwrite (2026-11-09)
+
+- The top-level `scan`, `doctor`, `compare` and opt-in network-dependent `releases` commands now use atomic exclusive creation for `--out` JSON evidence. Previously only `compare` refused to overwrite an existing report; the other three could silently erase prior evidence. This aligns the core CLI with the already-protected replay report CLIs.
+- Deterministic offline subprocess regressions run the real published-SDK `scan` and offline `doctor` twice with the same target, assert the second invocation rejects with exit code 2 and produces no success output, and require byte-for-byte preservation of the first JSON artifact. The shared write path also covers `releases` without invoking the npm registry during tests.
+- Scope: local JSON report provenance, not a new upstream A2UI defect. It does not attempt to protect arbitrary network/filesystem resources; no SDK, dependency, workflow, merger or security policy changes.

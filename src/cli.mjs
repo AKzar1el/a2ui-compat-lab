@@ -103,14 +103,14 @@ async function main() {
   if (args.out) {
     const target = resolve(args.out);
     mkdirSync(dirname(target), {recursive: true});
-    // Comparisons are evidence: never clobber an existing result or either input.
-    // The exclusive-create flag also rejects symlinks and closes the TOCTOU gap.
+    // Every CLI report is reproducible evidence: never clobber an earlier run.
+    // Exclusive creation also rejects symlink targets and closes the TOCTOU gap.
     try {
-      writeFileSync(target, JSON.stringify(report, null, 2) + '\n',
-        args.verb === 'compare' ? {flag: 'wx'} : undefined);
+      writeFileSync(target, JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
     } catch (error) {
-      if (args.verb === 'compare' && error?.code === 'EEXIST')
-        throw new Error('Comparison output already exists; choose a new --out path');
+      if (error?.code === 'EEXIST')
+        throw new Error((args.verb === 'compare' ? 'Comparison' : 'Report') +
+          ' output already exists; choose a new --out path');
       throw error;
     }
     console.error('Wrote ' + target);
