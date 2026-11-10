@@ -104,20 +104,49 @@ function replayCapture(raw, {verifyChunks = false} = {}) {
   return report;
 }
 
+// File-system errors can contain absolute paths, user names and capture names.
+// Keep the size diagnostics useful without exposing those paths in CLI output.
+function readCaptureFile(input) {
+  let metadata;
+  try {
+    metadata = statSync(input);
+  } catch {
+    throw new Error('Cannot inspect capture input; path omitted');
+  }
+  if (!metadata.isFile() || metadata.size === 0 || metadata.size > MAX_INPUT_BYTES)
+    throw new RangeError('Capture must be a regular file of 1 byte to 4 MiB');
+  try {
+    return readFileSync(input);
+  } catch {
+    throw new Error('Cannot read capture input; path omitted');
+  }
+}
+
+function writeCaptureReport(out, report) {
+  try {
+    mkdirSync(dirname(out), {recursive: true});
+  } catch {
+    throw new Error('Cannot prepare capture report directory; path omitted');
+  }
+  try {
+    // Exclusive creation prevents overwriting previous evidence and symlink targets.
+    writeFileSync(out, report, {flag: 'wx'});
+  } catch (error) {
+    if (error?.code === 'EEXIST')
+      throw new Error('Capture report already exists; choose a new --out path');
+    throw new Error('Cannot write capture report; path omitted');
+  }
+}
+
 try {
   const {input, out, help, verifyChunks} = options(process.argv.slice(2));
   if (help) {
     console.log(USAGE);
   } else {
-    const metadata = statSync(input);
-    if (!metadata.isFile() || metadata.size === 0 || metadata.size > MAX_INPUT_BYTES)
-      throw new RangeError('Capture must be a regular file of 1 byte to 4 MiB');
-    const report = JSON.stringify(replayCapture(readFileSync(input), {verifyChunks}), null, 2) + '\n';
+    const report = JSON.stringify(replayCapture(readCaptureFile(input), {verifyChunks}), null, 2) + '\n';
     if (out) {
-      mkdirSync(dirname(out), {recursive: true});
-      // Fail closed on an existing report instead of silently leaving stale evidence.
-      writeFileSync(out, report, {flag: 'wx'});
-      console.error('Wrote ' + out);
+      writeCaptureReport(out, report);
+      console.error('Wrote capture replay report');
     } else process.stdout.write(report);
   }
 } catch (error) {

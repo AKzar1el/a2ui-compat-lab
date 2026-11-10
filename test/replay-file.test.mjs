@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -57,8 +57,45 @@ test('writes deterministic reports explicitly and refuses to overwrite previous 
   assert.equal(JSON.parse(readFileSync(output, 'utf8')).events, 5);
   const again = invoke(['--input', input, '--out', output]);
   assert.equal(again.status, 1);
-  assert.match(again.stderr, /EEXIST/);
+  assert.match(again.stderr, /Capture report already exists/);
   assert.equal(JSON.parse(readFileSync(output, 'utf8')).events, 5);
+}));
+
+test('capture CLI redacts filesystem paths on success and failures', () => inTemp(dir => {
+  const secret = 'PRIVATE_A2UI_PATH_SENTINEL';
+  const missing = join(dir, secret, 'missing.jsonl');
+  let result = invoke(['--input', missing]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /Cannot inspect capture input; path omitted/);
+  assert.doesNotMatch(result.stderr, /PRIVATE_A2UI_PATH_SENTINEL|a2ui-capture-/);
+
+  const input = join(dir, 'input.jsonl');
+  writeFileSync(input, jsonl);
+  const output = join(dir, secret, 'report.json');
+  result = invoke(['--input', input, '--out', output]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr.trim(), 'Wrote capture replay report');
+  assert.doesNotMatch(result.stderr, /PRIVATE_A2UI_PATH_SENTINEL|a2ui-capture-/);
+  const original = readFileSync(output);
+  result = invoke(['--input', input, '--out', output]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Capture report already exists/);
+  assert.doesNotMatch(result.stderr, /PRIVATE_A2UI_PATH_SENTINEL|a2ui-capture-/);
+  assert.deepEqual(readFileSync(output), original, 'Existing evidence must not be overwritten');
+
+  const blockedParent = join(dir, secret + '-BLOCKED');
+  writeFileSync(blockedParent, 'not a directory');
+  result = invoke(['--input', input, '--out', join(blockedParent, 'report.json')]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Cannot prepare capture report directory; path omitted/);
+  assert.doesNotMatch(result.stderr, /PRIVATE_A2UI_PATH_SENTINEL|a2ui-capture-/);
+  const directoryTarget = join(dir, secret + '-DIRECTORY');
+  mkdirSync(directoryTarget);
+  result = invoke(['--input', input, '--out', directoryTarget]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Capture report already exists|Cannot write capture report/);
+  assert.doesNotMatch(result.stderr, /PRIVATE_A2UI_PATH_SENTINEL|a2ui-capture-/);
 }));
 
 test('rejects large whitespace-padded frames before the old text parser can trim them', () => inTemp(dir => {
