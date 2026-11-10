@@ -88,6 +88,18 @@ test('missing snapshot data cannot produce a false MATCH in identical incomplete
     /malformed replay snapshot/);
 });
 
+test('identically duplicated capture component IDs cannot falsely compare as MATCH', () => {
+  const observed = actualReport();
+  const index = observed.replay.snapshots.findIndex(s => s.exists && s.components.length > 0);
+  assert.ok(index >= 0, 'published SDK replay must expose a populated component Map');
+  const duplicate = structuredClone(observed);
+  const ids = duplicate.replay.snapshots[index].components;
+  ids.push(ids[0]);
+  assert.throws(() => compareCaptureReports(duplicate, structuredClone(duplicate)),
+    /malformed replay snapshot at index/,
+    'SDK Map keys are unique; two matching impossible captures must be refused');
+});
+
 test('CLI produces stable machine-readable results and distinguishes drift from refusal', () => withReports(dir => {
   const report = actualReport();
   const oldFile = join(dir, 'old.json');

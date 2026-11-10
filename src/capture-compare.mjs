@@ -31,6 +31,7 @@ function validateCaptureReport(report, label) {
         !Object.hasOwn(snapshot, 'data') || snapshot.data === undefined ||
         !Array.isArray(snapshot.components) ||
         snapshot.components.some(id => typeof id !== 'string' || !id) ||
+        new Set(snapshot.components).size !== snapshot.components.length ||
         !Number.isSafeInteger(snapshot.actionCount) ||
         snapshot.actionCount < previousActions || snapshot.actionCount > replay.actionCount)
       fail('malformed replay snapshot at index ' + index);
