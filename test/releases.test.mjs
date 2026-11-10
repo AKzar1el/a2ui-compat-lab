@@ -14,6 +14,34 @@ test('published release probes are fixed, isolated and semver-pinned', () => {
   }
 });
 
+
+test('release matrix rejects empty cases and probes that omit the actual SDK pair', () => {
+  const cases = getReleaseCases();
+  const manifest = rows => ({schemaVersion: 1, cases: rows});
+  const valid = structuredClone(cases[0]);
+  assert.throws(() => getReleaseCases(manifest([])), /release.matrix/i,
+    'an empty matrix must never be a vacuous green');
+  assert.throws(() => getReleaseCases(manifest([{
+    ...valid, packages: {'react': '19.2.0', 'react-dom': '19.2.0'},
+  }])), /release.matrix/i, 'an npm install without either SDK is not a valid A2UI probe');
+  assert.throws(() => getReleaseCases(manifest([{
+    ...valid, packages: {'@a2ui/react': '0.14.0', react: '19.2.0'},
+  }])), /release.matrix/i, 'both published SDKs must be present');
+  assert.throws(() => getReleaseCases(manifest([{...valid, packages: {}}])), /release.matrix/i);
+  assert.throws(() => getReleaseCases(manifest([{...valid, packages: null}])), /release.matrix/i);
+});
+
+test('release matrix rejects duplicate or malformed cases before npm is invoked', () => {
+  const cases = getReleaseCases();
+  const manifest = rows => ({schemaVersion: 1, cases: rows});
+  const first = structuredClone(cases[0]);
+  assert.throws(() => getReleaseCases(manifest([first, {...first}])), /release.matrix/i,
+    'duplicate IDs erase one-to-one baseline identity');
+  assert.throws(() => getReleaseCases(manifest([null])), /release.matrix/i);
+  assert.throws(() => getReleaseCases(manifest([{...first, id: ' '}])) , /release.matrix/i);
+  assert.throws(() => getReleaseCases(manifest([{...first, expected: 'unknown'}])), /release.matrix/i);
+});
+
 test('a real npm dependency-conflict code is distinguished from advisory text', () => {
   assert.deepEqual(classifyInstallResult({status: 1, stderr: 'npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree'}),
     {observed: 'ERESOLVE', failureKind: 'dependency-conflict', npmErrorCode: 'ERESOLVE'});
