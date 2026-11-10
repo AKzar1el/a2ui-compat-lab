@@ -1878,6 +1878,58 @@ try {
     firstAction: initialLeftAction, rightKeyboardAction: updatedRightAction,
     leftPointerAction: preservedLeftAction});
 
+  // An agent may replace a live Button's action while retaining its component ID.
+  // Prove that both physical input paths route to the new event and fresh model.
+  const reboundStart = expectedActions.length;
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateComponents: {
+      surfaceId: 'action-replay', components: [{
+        id: 'pick-right', component: 'Button', child: 'pick-right-label',
+        action: {event: {name: 'choose-right-rebound', context: {
+          value: {path: '/left'}, peer: {path: '/right'},
+        }}},
+      }],
+    },
+  }));
+  await rightSibling.waitFor({state: 'visible', timeout: 5000});
+  assert.equal(await page.getByRole('button').count(), 2,
+    'Rebinding one Button action must preserve both mounted siblings');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length, reboundStart,
+    'Agent component replacement must not synthesize an action');
+  await rightSibling.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    reboundStart + 1, {timeout: 5000});
+  const reboundPointerAction = {
+    name: 'choose-right-rebound', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-right', context: {value: 'west seed', peer: 'east updated'},
+  };
+  expectedActions.push(reboundPointerAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Pointer must use the replaced action name and context, not a stale closure');
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/left', value: 'west rebound',
+    },
+  }));
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {left: 'west rebound', right: 'east updated', retained: 'unchanged'},
+    'Action rebinding must not change unrelated model values');
+  await rightSibling.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    reboundStart + 2, {timeout: 5000});
+  const reboundKeyboardAction = {
+    name: 'choose-right-rebound', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-right', context: {value: 'west rebound', peer: 'east updated'},
+  };
+  expectedActions.push(reboundKeyboardAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Keyboard must dispatch the new action using the updated model');
+  checkpoints.push({step: 'mounted-button-action-name-rebind',
+    pointerAction: reboundPointerAction, keyboardAction: reboundKeyboardAction,
+    untouchedSiblingMounted: await leftSibling.count() === 1});
+
   // Hold both currently mounted sibling nodes: an earlier scalarButton
   // locator was already detached by the preceding component replacement.
   const mountedSiblingHandles = [
