@@ -23,7 +23,8 @@ function validated(report, label) {
   for (const [i, s] of t.snapshots.entries()) {
     if (!isObject(s) || s.index !== i || !['message','tap'].includes(s.kind) ||
         typeof s.surfaceId !== 'string' || !s.surfaceId ||
-        typeof s.exists !== 'boolean' || !Array.isArray(s.components) ||
+        typeof s.exists !== 'boolean' ||
+        !Object.hasOwn(s, 'data') || s.data === undefined || !Array.isArray(s.components) ||
         s.components.some(id => typeof id !== 'string' || !id) ||
         !Number.isSafeInteger(s.actionCount) ||
         s.actionCount !== count + (s.kind === 'tap' ? 1 : 0) ||
