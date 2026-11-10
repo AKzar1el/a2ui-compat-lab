@@ -100,6 +100,35 @@ test('tap snapshot must agree with emitted action target even in identical repor
   }
 });
 
+test('identical ghost taps and duplicate component IDs cannot falsely MATCH', () => {
+  const observed = actual();
+  const index = observed.trace.snapshots.findIndex(snapshot => snapshot.kind === 'tap');
+  assert.ok(index >= 0, 'published SDK fixture must contain a real Button tap');
+  const tap = observed.trace.snapshots[index];
+  assert.ok(tap.components.includes(tap.componentId),
+    'published SDK tap must reference a currently mounted component');
+
+  const ghost = structuredClone(observed);
+  ghost.trace.snapshots[index].componentId = 'not-mounted';
+  ghost.trace.actions[tap.actionCount - 1].sourceComponentId = 'not-mounted';
+  assert.throws(() => compareActionReports(ghost, structuredClone(ghost)),
+    /malformed action snapshot at index/,
+    'matching invented action and tap IDs cannot establish a real mounted Button');
+
+  const missing = structuredClone(observed);
+  missing.trace.snapshots[index].components =
+    missing.trace.snapshots[index].components.filter(id => id !== tap.componentId);
+  assert.throws(() => compareActionReports(missing, structuredClone(missing)),
+    /malformed action snapshot at index/,
+    'a real tap cannot disappear from the mounted component list');
+
+  const duplicated = structuredClone(observed);
+  duplicated.trace.snapshots[index].components.push(tap.componentId);
+  assert.throws(() => compareActionReports(duplicated, structuredClone(duplicated)),
+    /malformed action snapshot at index/,
+    'SDK Map keys cannot produce duplicate mounted component IDs');
+});
+
 test('CLI action mode is strict and redacts action payloads',()=>{
   const dir=mkdtempSync(join(tmpdir(),'a2ui-action-diff-'));
   try{
