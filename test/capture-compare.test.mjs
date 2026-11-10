@@ -72,6 +72,22 @@ test('refuses different captures and structurally invalid reports', () => {
   }
 });
 
+test('missing snapshot data cannot produce a false MATCH in identical incomplete capture reports', () => {
+  const observed = actualReport();
+  assert.ok(observed.replay.snapshots.every(s => Object.hasOwn(s, 'data')),
+    'published-SDK capture producer must serialize explicit data for each step');
+  for (const index of [0, 2, observed.replay.snapshots.length - 1]) {
+    const incomplete = structuredClone(observed);
+    delete incomplete.replay.snapshots[index].data;
+    assert.throws(() => compareCaptureReports(incomplete, structuredClone(incomplete)),
+      /malformed replay snapshot/, 'missing data at step ' + index + ' must fail closed');
+  }
+  const undefinedData = structuredClone(observed);
+  undefinedData.replay.snapshots[2].data = undefined;
+  assert.throws(() => compareCaptureReports(undefinedData, structuredClone(undefinedData)),
+    /malformed replay snapshot/);
+});
+
 test('CLI produces stable machine-readable results and distinguishes drift from refusal', () => withReports(dir => {
   const report = actualReport();
   const oldFile = join(dir, 'old.json');
