@@ -1518,6 +1518,93 @@ try {
     oldNodeDetached: true, oneRestoredEditor: true, staleDraftDiscarded: true,
     pointerAction: remountedPointerAction, keyboardAction: remountedKeyboardAction});
 
+  // Array-indexed model paths must bind the same value through actual React
+  // Text, TextField and Button actions without overwriting adjacent items.
+  const indexedActionsBefore = expectedActions.length;
+  const indexedInitial = 'first item 🐢';
+  const indexedPeer = 'second item 🐇';
+  await page.evaluate(({first, second}) => {
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateComponents: {
+        surfaceId: 'action-replay', components: [
+          {id: 'root', component: 'Column', children: ['status', 'editor', 'new-submit']},
+          {id: 'status', component: 'Text', text: {path: '/items/0/title'}},
+          {id: 'editor', component: 'TextField', label: 'Edit first item',
+            value: {path: '/items/0/title'}, variant: 'shortText'},
+          {id: 'new-submit', component: 'Button', child: 'new-label',
+            variant: 'primary', action: {event: {name: 'submit-indexed-item',
+              context: {first: {path: '/items/0/title'},
+                second: {path: '/items/1/title'}}}}},
+          {id: 'new-label', component: 'Text', text: 'Submit indexed item'},
+        ],
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateDataModel: {
+        surfaceId: 'action-replay', path: '/',
+        value: {items: [{title: first}, {title: second}], retained: false},
+      },
+    });
+  }, {first: indexedInitial, second: indexedPeer});
+  const indexedInput = page.getByRole('textbox');
+  const indexedButton = page.getByRole('button', {name: 'Submit indexed item', exact: true});
+  await indexedButton.waitFor({state: 'visible', timeout: 5000});
+  await indexedInput.waitFor({state: 'visible', timeout: 5000});
+  await page.getByText(indexedInitial, {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await indexedInput.count(), 1, 'Indexed form must mount exactly one TextField');
+  assert.equal(await indexedInput.inputValue(), indexedInitial);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {items: [{title: indexedInitial}, {title: indexedPeer}], retained: false});
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    indexedActionsBefore, 'Creating the array form must not emit an action');
+
+  const indexedTyped = 'edited item 🌻';
+  await indexedInput.fill(indexedTyped);
+  await page.getByText(indexedTyped, {exact: true}).waitFor({state: 'visible'});
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {items: [{title: indexedTyped}, {title: indexedPeer}], retained: false},
+    'Typing through index zero must preserve the adjacent item and root sibling');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    indexedActionsBefore, 'Typing alone must never emit an indexed Button event');
+  await indexedButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    indexedActionsBefore + 1, {timeout: 5000});
+  const indexedPointerAction = {
+    name: 'submit-indexed-item', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {first: indexedTyped, second: indexedPeer},
+  };
+  expectedActions.push(indexedPointerAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Indexed Button must resolve both array element values');
+
+  const indexedAgent = 'agent item 🧭';
+  await page.evaluate(value => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/items/0/title', value,
+    },
+  }), indexedAgent);
+  await page.getByText(indexedAgent, {exact: true}).waitFor({state: 'visible'});
+  assert.equal(await indexedInput.inputValue(), indexedAgent,
+    'Agent leaf update must update the real indexed TextField');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {items: [{title: indexedAgent}, {title: indexedPeer}], retained: false},
+    'Updating array index zero must preserve index one and root sibling');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    indexedActionsBefore + 1, 'Agent indexed update must not synthesize a Button action');
+  await indexedButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    indexedActionsBefore + 2, {timeout: 5000});
+  const indexedKeyboardAction = {
+    name: 'submit-indexed-item', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {first: indexedAgent, second: indexedPeer},
+  };
+  expectedActions.push(indexedKeyboardAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Keyboard submission must use the latest indexed model value');
+  checkpoints.push({step: 'indexed-array-textfield-action-replay', peerPreserved: true,
+    pointerAction: indexedPointerAction, keyboardAction: indexedKeyboardAction});
+
   // Falsy JSON scalars are valid action-context values, not absent bindings.
   // Rebind a mounted Button to two additional model paths and exercise real
   // pointer and keyboard input against published React/core 0.14.
