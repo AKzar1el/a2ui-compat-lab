@@ -2167,11 +2167,23 @@ try {
   expectedActions.push(recreatedAction);
   assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
     expectedActions, 'Recreated Button pointer and keyboard events must use only fresh bindings');
+  // Space activates a native Button on keyup. If the agent deletes the
+  // focused, recreated surface while Space is held, its pending native
+  // keyup must not dispatch a ghost action into the deleted generation.
+  await recreatedButton.focus();
+  await page.keyboard.down('Space');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Held Space keydown must not emit a premature action');
   await page.evaluate(() => window.__a2uiLab.applyMessage({
     version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
   }));
   await recreatedButton.waitFor({state: 'detached', timeout: 5000});
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Deleting the focused Button must not synthesize an action');
+  await page.keyboard.up('Space');
   trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions,
+    'Space keyup after deleting the focused recreated Button must not emit a ghost action');
   assert.equal(trace.data, null, 'Second deletion must clear recreated surface model');
   assert.deepEqual(trace.surfaceIds, [], 'Second deletion must remove reused surface ID');
   assert.deepEqual(trace.actions, expectedActions, 'Second deletion must not emit stale actions');
@@ -2183,6 +2195,8 @@ try {
   checkpoints.push({step: 'same-id-surface-recreate-action-isolation',
     newGenerationModel: true, recreatedPointerAndKeyboard: recreatedAction,
     secondTeardownComplete: true});
+  checkpoints.push({step: 'held-space-keyup-after-recreated-surface-delete',
+    focusedButtonDetached: true, noGhostAction: true});
 
   const report = {
     schemaVersion: 1,
