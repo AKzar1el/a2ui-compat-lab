@@ -2072,6 +2072,76 @@ try {
     'No later renderer action may require an unapproved browser HTTP(S) origin');
   checkpoints.push({step: 'deleted-surface', buttonCount: await page.getByRole('button').count(), actionCount: trace.actions.length});
 
+  // An agent may start a second session using the deleted surface and component
+  // IDs. Real Chromium must route only the new generation's model and actions.
+  const actionsBeforeRecreation = expectedActions.length;
+  await page.evaluate(() => {
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', createSurface: {
+        surfaceId: 'action-replay', catalogId: '__BASIC_CATALOG__',
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateComponents: {
+        surfaceId: 'action-replay', components: [
+          {id: 'root', component: 'Column', children: ['pick-right']},
+          {id: 'pick-right', component: 'Button', child: 'pick-right-label',
+            action: {event: {name: 'choose-right-recreated',
+              context: {value: {path: '/right'}}}}},
+          {id: 'pick-right-label', component: 'Text', text: 'Recreated choice'},
+        ],
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateDataModel: {
+        surfaceId: 'action-replay', path: '/',
+        value: {right: 'second generation', retained: 'fresh'},
+      },
+    });
+  });
+  const recreatedButton = page.getByRole('button', {name: 'Recreated choice', exact: true});
+  await recreatedButton.waitFor({state: 'visible', timeout: 5000});
+  assert.equal(await page.getByRole('button').count(), 1,
+    'Recreating a deleted surface must mount only its new Button');
+  const recreatedTrace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(recreatedTrace.surfaceIds, ['action-replay'],
+    'Recreating the same surface ID must not leave a duplicate surface');
+  assert.deepEqual(recreatedTrace.data, {right: 'second generation', retained: 'fresh'},
+    'Recreated surface must expose only the new generation data');
+  assert.equal(recreatedTrace.actions.length, actionsBeforeRecreation,
+    'Recreation and model initialization must not synthesize stale actions');
+  const recreatedAction = {
+    name: 'choose-right-recreated', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-right', context: {value: 'second generation'},
+  };
+  await recreatedButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeRecreation + 1, {timeout: 5000});
+  expectedActions.push(recreatedAction);
+  await recreatedButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforeRecreation + 2, {timeout: 5000});
+  expectedActions.push(recreatedAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Recreated Button pointer and keyboard events must use only fresh bindings');
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
+  }));
+  await recreatedButton.waitFor({state: 'detached', timeout: 5000});
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.equal(trace.data, null, 'Second deletion must clear recreated surface model');
+  assert.deepEqual(trace.surfaceIds, [], 'Second deletion must remove reused surface ID');
+  assert.deepEqual(trace.actions, expectedActions, 'Second deletion must not emit stale actions');
+  assert.deepEqual(trace.errors, [], 'Recreated surface must not trigger SDK errors');
+  assert.deepEqual(runtimeErrors, [], 'Recreated surface must not trigger browser runtime errors');
+  assert.deepEqual(consoleErrors, [], 'Recreated surface must not trigger browser console errors');
+  assert.deepEqual(deniedRequests, [deniedProbe], 'Recreation must not introduce network requests');
+  assert.deepEqual(deniedWebSockets, [deniedSocketProbe], 'Recreation must not open new WebSockets');
+  checkpoints.push({step: 'same-id-surface-recreate-action-isolation',
+    newGenerationModel: true, recreatedPointerAndKeyboard: recreatedAction,
+    secondTeardownComplete: true});
+
   const report = {
     schemaVersion: 1,
     protocol: 'v0.9',
