@@ -1830,13 +1830,27 @@ try {
     firstAction: initialLeftAction, rightKeyboardAction: updatedRightAction,
     leftPointerAction: preservedLeftAction});
 
-  // A late action after surface deletion must not target a stale DOM Button.
+  // Hold both currently mounted sibling nodes: an earlier scalarButton
+  // locator was already detached by the preceding component replacement.
+  const mountedSiblingHandles = [
+    await leftSibling.elementHandle(),
+    await rightSibling.elementHandle(),
+  ];
+  assert.ok(mountedSiblingHandles.every(Boolean),
+    'Both reordered sibling Buttons must still be mounted before surface deletion');
+  // A late action after surface deletion must not target either live DOM Button.
   await page.evaluate(() => window.__a2uiLab.applyMessage({
     version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
   }));
-  await scalarButton.waitFor({state: 'detached', timeout: 5000});
-  assert.equal(await scalarButton.count(), 0,
-    'Deleting the surface must remove the last live Button, not only an old locator');
+  await leftSibling.waitFor({state: 'detached', timeout: 5000});
+  await rightSibling.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await page.getByRole('button').count(), 0,
+    'Deleting the surface must remove both live reordered sibling Buttons');
+  for (const handle of mountedSiblingHandles) {
+    assert.equal(await handle.evaluate(element => element.isConnected), false,
+      'Deleted sibling Button nodes must be physically detached from the DOM');
+    await handle.dispose();
+  }
   await page.keyboard.press('Enter');
   trace = await page.evaluate(() => window.__a2uiLab.trace());
   assert.equal(trace.data, null);
@@ -1851,7 +1865,7 @@ try {
     'Real React browser replay must not hide console.error diagnostics');
   assert.deepEqual(deniedRequests, [deniedProbe],
     'No later renderer action may require an unapproved browser HTTP(S) origin');
-  checkpoints.push({step: 'deleted-surface', buttonCount: await scalarButton.count(), actionCount: trace.actions.length});
+  checkpoints.push({step: 'deleted-surface', buttonCount: await page.getByRole('button').count(), actionCount: trace.actions.length});
 
   const report = {
     schemaVersion: 1,
