@@ -57,6 +57,22 @@ test('state drift and bad action evidence are detected or refused',()=>{
     assert.throws(()=>compareActionReports(before,bad),/different fixtures|invalid|incomplete|inconsistent|malformed|disagrees/);
   }
 });
+test('missing data in both action reports is refused rather than MATCH', () => {
+  const observed = actual();
+  assert.ok(observed.trace.snapshots.every(s => Object.hasOwn(s, 'data')),
+    'published-SDK action producer must serialize data even before initialization');
+  for (const index of [0, 2, observed.trace.snapshots.length - 1]) {
+    const incomplete = structuredClone(observed);
+    delete incomplete.trace.snapshots[index].data;
+    assert.throws(() => compareActionReports(incomplete, structuredClone(incomplete)),
+      /malformed action snapshot/, 'missing action state at step ' + index);
+  }
+  const undefinedData = structuredClone(observed);
+  undefinedData.trace.snapshots[2].data = undefined;
+  assert.throws(() => compareActionReports(undefinedData, structuredClone(undefinedData)),
+    /malformed action snapshot/);
+});
+
 test('CLI action mode is strict and redacts action payloads',()=>{
   const dir=mkdtempSync(join(tmpdir(),'a2ui-action-diff-'));
   try{
