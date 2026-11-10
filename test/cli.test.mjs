@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {existsSync, mkdtempSync, readFileSync, rmSync} from 'node:fs';
+import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -104,6 +104,36 @@ test('CLI scan and doctor never overwrite existing report evidence', () => {
       assert.equal(readFileSync(target, 'utf8'), original,
         verb + ' must preserve prior output byte-for-byte');
     }
+  } finally {
+    rmSync(cwd, {recursive: true, force: true});
+  }
+});
+
+test('CLI redacts private --out paths on success and filesystem failure', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'a2ui-cli-path-private-'));
+  try {
+    for (const verb of ['scan', 'doctor']) {
+      const target = join(cwd, 'PRIVATE-' + verb + '-report.json');
+      const success = spawnSync(process.execPath, [path, verb, '--out', target],
+        {cwd, encoding: 'utf8', timeout: 20000});
+      assert.equal(success.status, 0, success.stderr);
+      assert.equal(existsSync(target), true);
+      assert.match(success.stderr, /Wrote report/);
+      assert.equal(success.stderr.includes(cwd), false,
+        'Successful report diagnostics must not reveal private output paths');
+    }
+
+    // A regular file as parent makes mkdirSync fail deterministically on every OS.
+    const parent = join(cwd, 'PRIVATE-blocked-parent');
+    writeFileSync(parent, 'cannot be a directory');
+    const failure = spawnSync(process.execPath,
+      [path, 'doctor', '--out', join(parent, 'report.json')],
+      {cwd, encoding: 'utf8', timeout: 5000});
+    assert.equal(failure.status, 2);
+    assert.match(failure.stderr, /Cannot write report; path omitted/);
+    assert.equal(failure.stderr.includes(cwd), false,
+      'Filesystem errors must not reveal private report locations');
+    assert.equal(failure.stdout, '');
   } finally {
     rmSync(cwd, {recursive: true, force: true});
   }

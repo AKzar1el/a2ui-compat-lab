@@ -102,18 +102,23 @@ async function main() {
   const ok = args.verb === 'scan' ? report.baseline.ok : report.ok;
   if (args.out) {
     const target = resolve(args.out);
-    mkdirSync(dirname(target), {recursive: true});
-    // Every CLI report is reproducible evidence: never clobber an earlier run.
-    // Exclusive creation also rejects symlink targets and closes the TOCTOU gap.
+    // Keep distinct stages: EEXIST during parent creation is NOT an existing
+    // output report. Never include filesystem paths in either diagnostic.
+    try {
+      mkdirSync(dirname(target), {recursive: true});
+    } catch {
+      throw new Error('Cannot write report; path omitted');
+    }
+    // Exclusive creation prevents overwriting old evidence or symlink targets.
     try {
       writeFileSync(target, JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
     } catch (error) {
       if (error?.code === 'EEXIST')
         throw new Error((args.verb === 'compare' ? 'Comparison' : 'Report') +
           ' output already exists; choose a new --out path');
-      throw error;
+      throw new Error('Cannot write report; path omitted');
     }
-    console.error('Wrote ' + target);
+    console.error('Wrote report');
   }
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else if (args.verb === 'scan') {
@@ -160,6 +165,6 @@ async function main() {
   if (args.strict && !ok) process.exitCode = 1;
 }
 main().catch(error => {
-  console.error('a2ui-compat-lab: ' + (error?.stack || error));
+  console.error('a2ui-compat-lab: ' + (error?.message || 'Unexpected failure'));
   process.exitCode = 2;
 });
