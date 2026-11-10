@@ -49,6 +49,18 @@ try {
     }
     await route.continue();
   });
+  // Playwright's HTTP route does not cover WebSocket handshakes. Keep Vite's
+  // same-origin HMR socket, but never connect an off-origin socket to a server.
+  const deniedWebSockets = [];
+  const allowedSocketOrigin = origin.replace(/^http:/, 'ws:');
+  await context.routeWebSocket('**/*', socket => {
+    if (new URL(socket.url()).origin === allowedSocketOrigin) {
+      socket.connectToServer();
+      return;
+    }
+    deniedWebSockets.push(socket.url());
+    return socket.close({code: 1008, reason: 'A2UI offline browser replay'});
+  });
   const page = await context.newPage();
   page.on('pageerror', error => runtimeErrors.push(error.message));
   page.on('console', message => {
@@ -90,6 +102,27 @@ try {
   checkpoints.push({step: 'browser-http-isolation',
     offOriginProbeBlocked: true, expectedProbeConsoleError: true,
     unexpectedOffOriginRequests: 0});
+  // A second localhost port is intentionally off-origin, even on loopback.
+  // RouteWebSocket must close the synthetic socket without reaching that port.
+  const deniedSocketProbe = 'ws://127.0.0.1:1/__a2ui_browser_websocket_guard_probe__';
+  const blockedSocket = await page.evaluate(url => new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    const timeout = setTimeout(() => reject(new Error('WebSocket guard probe timed out')), 5000);
+    socket.addEventListener('error', () => {});
+    socket.addEventListener('close', event => {
+      clearTimeout(timeout);
+      resolve({code: event.code});
+    }, {once: true});
+  }), deniedSocketProbe);
+  assert.notEqual(blockedSocket.code, 1000,
+    'Off-origin WebSocket must not complete a normal successful connection');
+  assert.deepEqual(deniedWebSockets, [deniedSocketProbe],
+    'Playwright must intercept the off-origin WebSocket before any network connection');
+  assert.ok(consoleErrors.every(message => message.includes(deniedSocketProbe)),
+    'Only diagnostics from the controlled WebSocket probe may be ignored');
+  consoleErrors.length = 0;
+  checkpoints.push({step: 'browser-websocket-isolation',
+    offOriginProbeBlocked: true, unexpectedOffOriginSockets: 0});
   const button = page.getByRole('button', {name: 'Confirm'});
   await button.waitFor({state: 'visible'});
   await page.getByText('alpha', {exact: true}).waitFor({state: 'visible'});
@@ -1700,6 +1733,10 @@ try {
   trace = await page.evaluate(() => window.__a2uiLab.trace());
   assert.equal(trace.data, null);
   assert.deepEqual(trace.actions, expectedActions);
+  assert.deepEqual(deniedRequests, [deniedProbe],
+    'Entire browser replay must not attempt any other off-origin HTTP request');
+  assert.deepEqual(deniedWebSockets, [deniedSocketProbe],
+    'Entire browser replay must not attempt any other off-origin WebSocket');
   assert.deepEqual(trace.errors, []);
   assert.deepEqual(runtimeErrors, []);
   assert.deepEqual(consoleErrors, [],
