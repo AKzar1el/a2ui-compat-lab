@@ -11,14 +11,18 @@ export function emitReplayReport(report, args, usage) {
       !args[1] || args[1].startsWith('--'))
     throw new Error(usage);
   const output = resolve(args[1]);
-  mkdirSync(dirname(output), {recursive: true});
+  try {
+    mkdirSync(dirname(output), {recursive: true});
+  } catch {
+    throw new Error('Cannot prepare replay report directory; path omitted');
+  }
   try {
     // Atomic exclusive creation rejects existing evidence and symlink targets.
     writeFileSync(output, JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
   } catch (error) {
     if (error?.code === 'EEXIST')
       throw new Error('Replay report already exists; choose a new --out path');
-    throw error;
+    throw new Error('Cannot write replay report; path omitted');
   }
-  console.error('Wrote ' + output);
+  console.error('Wrote replay report');
 }
