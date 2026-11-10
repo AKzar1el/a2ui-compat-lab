@@ -2027,6 +2027,17 @@ try {
   ];
   assert.ok(mountedSiblingHandles.every(Boolean),
     'Both reordered sibling Buttons must still be mounted before surface deletion');
+  // Releasing a physical pointer press after the agent deletes its Button
+  // must not emit a stale click or resurrect the component.
+  const pressedButtonBox = await rightSibling.boundingBox();
+  assert.ok(pressedButtonBox && pressedButtonBox.width > 0 && pressedButtonBox.height > 0,
+    'The live right sibling needs nonzero bounds before a physical pointer press');
+  await page.mouse.move(pressedButtonBox.x + pressedButtonBox.width / 2,
+    pressedButtonBox.y + pressedButtonBox.height / 2);
+  const beforeInterruptedPointer = expectedActions.length;
+  await page.mouse.down();
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    beforeInterruptedPointer, 'Pointer down alone must not emit a Button click');
   // A late action after surface deletion must not target either live DOM Button.
   await page.evaluate(() => window.__a2uiLab.applyMessage({
     version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
@@ -2035,6 +2046,11 @@ try {
   await rightSibling.waitFor({state: 'detached', timeout: 5000});
   assert.equal(await page.getByRole('button').count(), 0,
     'Deleting the surface must remove both live reordered sibling Buttons');
+  await page.mouse.up();
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Pointer release after deleting the pressed Button must not emit a stale action');
+  checkpoints.push({step: 'pointer-up-after-pressed-surface-delete',
+    deletedButtons: 2, actionCount: expectedActions.length});
   for (const handle of mountedSiblingHandles) {
     assert.equal(await handle.evaluate(element => element.isConnected), false,
       'Deleted sibling Button nodes must be physically detached from the DOM');
