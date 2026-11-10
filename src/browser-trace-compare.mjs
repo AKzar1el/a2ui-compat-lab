@@ -49,8 +49,12 @@ function checkTrace(trace, label) {
           !/^[a-f0-9]{64}$/i.test(trace.screenshotSha256))) ||
       !validVersions(trace.versions) || typeof trace.passed !== 'boolean' ||
       FIELDS.some(field => !Array.isArray(trace[field])) ||
+      trace.checkpoints.length === 0 ||
       trace.actions.some(item => !isRecord(item) ||
-        typeof item.name !== 'string' || item.name.length === 0) ||
+        typeof item.name !== 'string' || item.name.length === 0 ||
+        typeof item.surfaceId !== 'string' || item.surfaceId.length === 0 ||
+        typeof item.sourceComponentId !== 'string' || item.sourceComponentId.length === 0 ||
+        !isRecord(item.context)) ||
       trace.checkpoints.some(item => !isRecord(item) ||
         typeof item.step !== 'string' || item.step.length === 0) ||
       [...trace.runtimeErrors, ...trace.consoleErrors].some(item => typeof item !== 'string') ||
