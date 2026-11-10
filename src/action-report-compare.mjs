@@ -2,6 +2,11 @@ import {isDeepStrictEqual} from 'node:util';
 
 const FIELDS = ['kind','surfaceId','componentId','exists','components','data','actionCount'];
 const isObject = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+const hasText = value => typeof value === 'string' && value.trim().length > 0;
+// A report with empty action objects cannot prove a renderer emitted usable events.
+const isCompleteAction = action => isObject(action) &&
+  hasText(action.name) && hasText(action.surfaceId) &&
+  hasText(action.sourceComponentId) && isObject(action.context);
 
 function validated(report, label) {
   const refuse = reason => { throw Error(label + ': ' + reason); };
@@ -14,7 +19,7 @@ function validated(report, label) {
   if (!isObject(t) || t.protocol !== 'v0.9' ||
       !Array.isArray(t.snapshots) || t.snapshots.length !== report.steps ||
       !Array.isArray(t.actions) || t.actions.length > report.steps ||
-      t.actions.some(action => !isObject(action)) ||
+      t.actions.some(action => !isCompleteAction(action)) ||
       report.actionCount !== t.actions.length ||
       report.allMatch !== true || !Array.isArray(report.chunkTrials) ||
       !report.chunkTrials.length || report.chunkTrials.some(x => !isObject(x) || x.matches !== true))
@@ -31,6 +36,11 @@ function validated(report, label) {
         (s.kind === 'tap' && (!s.exists || typeof s.componentId !== 'string' || !s.componentId)) ||
         (!s.exists && (s.components.length !== 0 || s.data !== null)))
       refuse('malformed action snapshot at index ' + i);
+    if (s.kind === 'tap') {
+      const action = t.actions[count];
+      if (action.surfaceId !== s.surfaceId || action.sourceComponentId !== s.componentId)
+        refuse('action routing disagrees with tap at index ' + i);
+    }
     count = s.actionCount;
   }
   if (count !== t.actions.length) refuse('final action count disagrees with trace');
