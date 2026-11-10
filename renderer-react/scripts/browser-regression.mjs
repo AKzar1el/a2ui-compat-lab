@@ -1781,11 +1781,13 @@ try {
         children: ['pick-right', 'pick-left']}],
     },
   }));
-  await page.waitForFunction(() => {
-    const buttons = [...document.querySelectorAll('a2ui-surface')];
-    return buttons.length >= 0; // DOM visibility is asserted below by Playwright.
-  });
-  const swappedPositions = [await leftSibling.boundingBox(), await rightSibling.boundingBox()];
+  let swappedPositions;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    swappedPositions = [await leftSibling.boundingBox(), await rightSibling.boundingBox()];
+    if (swappedPositions[0] && swappedPositions[1] &&
+        swappedPositions[1].y < swappedPositions[0].y) break;
+    await page.waitForTimeout(50);
+  }
   assert.ok(swappedPositions[0] && swappedPositions[1] &&
     swappedPositions[1].y < swappedPositions[0].y,
   'Reordering only the root must swap actual sibling Button visual positions');
