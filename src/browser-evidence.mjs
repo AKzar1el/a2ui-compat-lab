@@ -20,9 +20,9 @@ export function assertBrowserEvidenceUnused(outputDir) {
     lstatSync(outputDir); // lstat also detects a pre-existing symlink.
   } catch (error) {
     if (error?.code === 'ENOENT') return;
-    throw error;
+    throw new Error('Cannot inspect browser evidence output directory; path omitted');
   }
-  throw new Error('Browser evidence directory already exists; use --out-dir with a fresh name: ' + outputDir);
+  throw new Error('Browser evidence directory already exists; use --out-dir with a fresh name');
 }
 
 /** Publish only an entirely successful browser replay; never clobber prior evidence. */
@@ -45,17 +45,27 @@ export function publishBrowserEvidence(outputDir, screenshot, report) {
     throw new Error('Browser evidence report is not JSON-serializable');
   }
   assertBrowserEvidenceUnused(outputDir);
-  mkdirSync(dirname(outputDir), {recursive: true});
+  try {
+    mkdirSync(dirname(outputDir), {recursive: true});
+  } catch {
+    throw new Error('Cannot prepare browser evidence parent directory; path omitted');
+  }
   try {
     // Exclusive directory creation prevents overwrites even if another run raced preflight.
     mkdirSync(outputDir);
   } catch (error) {
-    if (error?.code === 'EEXIST') assertBrowserEvidenceUnused(outputDir);
-    throw error;
+    if (error?.code === 'EEXIST')
+      throw new Error('Browser evidence directory already exists; use --out-dir with a fresh name');
+    throw new Error('Cannot create browser evidence output directory; path omitted');
   }
   const screenshotPath = resolve(outputDir, 'react-browser.png');
   const tracePath = resolve(outputDir, 'react-browser-trace.json');
-  writeFileSync(screenshotPath, screenshot, {flag: 'wx'});
-  writeFileSync(tracePath, traceJson, {flag: 'wx'});
+  try {
+    writeFileSync(screenshotPath, screenshot, {flag: 'wx'});
+    writeFileSync(tracePath, traceJson, {flag: 'wx'});
+  } catch {
+    // Keep partial files for postmortem without reporting false publication success.
+    throw new Error('Cannot write browser evidence artifacts; path omitted');
+  }
   return {screenshotPath, tracePath};
 }
