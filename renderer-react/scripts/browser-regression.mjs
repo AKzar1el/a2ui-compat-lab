@@ -2019,6 +2019,48 @@ try {
   checkpoints.push({step: 'held-space-keyup-after-live-action-swap',
     retainedPhysicalFocus: true, keyboardAction: heldSpaceAction});
 
+  // An agent can change a Button's action while its physical mouse button
+  // remains down. The browser's later click must use the live handler, not
+  // the event definition that existed when the pointer press began.
+  const pointerRebindHandle = await rightSibling.elementHandle();
+  assert.ok(pointerRebindHandle, 'Right Button must exist before held pointer rebind');
+  const pointerRebindBox = await rightSibling.boundingBox();
+  assert.ok(pointerRebindBox && pointerRebindBox.width > 0 && pointerRebindBox.height > 0,
+    'Held-pointer target must have visible nonzero bounds');
+  await page.mouse.move(pointerRebindBox.x + pointerRebindBox.width / 2,
+    pointerRebindBox.y + pointerRebindBox.height / 2);
+  const actionsBeforePointerRebind = expectedActions.length;
+  await page.mouse.down();
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforePointerRebind, 'Physical pointer down must not dispatch a click');
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateComponents: {
+      surfaceId: 'action-replay', components: [{
+        id: 'pick-right', component: 'Button', child: 'pick-right-label',
+        action: {event: {name: 'choose-right-on-pointer-release', context: {
+          value: {path: '/right'}, peer: {path: '/left'},
+        }}},
+      }],
+    },
+  }));
+  assert.equal(await pointerRebindHandle.evaluate(element => element.isConnected), true,
+    'Action-only update during held pointer must preserve the pressed DOM Button');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforePointerRebind, 'Agent update during a held pointer must not synthesize an action');
+  await page.mouse.up();
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    actionsBeforePointerRebind + 1, {timeout: 5000});
+  const pointerReleaseAction = {
+    name: 'choose-right-on-pointer-release', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-right', context: {value: 'east updated', peer: 'west rebound'},
+  };
+  expectedActions.push(pointerReleaseAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Physical mouse release must dispatch exactly one newly bound action');
+  await pointerRebindHandle.dispose();
+  checkpoints.push({step: 'held-pointer-up-after-live-action-swap',
+    retainedPressedDomNode: true, pointerAction: pointerReleaseAction});
+
   // Hold both currently mounted sibling nodes: an earlier scalarButton
   // locator was already detached by the preceding component replacement.
   const mountedSiblingHandles = [
