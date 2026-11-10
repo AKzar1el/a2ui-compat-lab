@@ -28,6 +28,7 @@ function validateCaptureReport(report, label) {
         snapshot.index !== index ||
         typeof snapshot.surfaceId !== 'string' || !snapshot.surfaceId ||
         typeof snapshot.exists !== 'boolean' ||
+        !Object.hasOwn(snapshot, 'data') || snapshot.data === undefined ||
         !Array.isArray(snapshot.components) ||
         snapshot.components.some(id => typeof id !== 'string' || !id) ||
         !Number.isSafeInteger(snapshot.actionCount) ||
