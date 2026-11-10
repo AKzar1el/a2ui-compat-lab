@@ -91,7 +91,7 @@ export function replayV09(messages) {
         index, surfaceId,
         exists: Boolean(surface),
         components: surface ? [...surface.componentsModel.keys] : [],
-        data: surface ? structuredClone(surface.dataModel.get('/')) : null,
+        data: surface ? (structuredClone(surface.dataModel.get('/')) ?? null) : null,
         actionCount: actions.length,
       });
     }
@@ -138,7 +138,7 @@ export async function replayV09Actions(steps) {
         snapshots.push({
           index, kind: 'message', surfaceId, exists: Boolean(surface),
           components: surface ? [...surface.componentsModel.keys] : [],
-          data: surface ? structuredClone(surface.dataModel.get('/')) : null,
+          data: surface ? (structuredClone(surface.dataModel.get('/')) ?? null) : null,
           actionCount: actions.length,
         });
         continue;
@@ -169,7 +169,7 @@ export async function replayV09Actions(steps) {
       snapshots.push({
         index, kind: 'tap', surfaceId, componentId, exists: true,
         components: [...surface.componentsModel.keys],
-        data: structuredClone(surface.dataModel.get('/')),
+        data: structuredClone(surface.dataModel.get('/')) ?? null,
         actionCount: actions.length,
       });
     }
@@ -194,7 +194,7 @@ export function replayV09Recoverable(messages) {
     return {
       exists: Boolean(surface),
       components: surface ? [...surface.componentsModel.keys] : [],
-      data: surface ? structuredClone(surface.dataModel.get('/')) : null,
+      data: surface ? (structuredClone(surface.dataModel.get('/')) ?? null) : null,
     };
   }
 
