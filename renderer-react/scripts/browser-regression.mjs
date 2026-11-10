@@ -1942,6 +1942,44 @@ try {
     pointerAction: reboundPointerAction, keyboardAction: reboundKeyboardAction,
     unaffectedSiblingAction});
 
+  // A focused Button should keep its physical node and keyboard route when
+  // the agent replaces only its event definition under the same component ID.
+  await rightSibling.focus();
+  const focusedRightHandle = await rightSibling.elementHandle();
+  assert.ok(focusedRightHandle, 'The live right Button must exist before focused rebinding');
+  assert.equal(await focusedRightHandle.evaluate(element => document.activeElement === element),
+    true, 'Keyboard focus must be on the right Button before rebinding');
+  const beforeFocusedRebind = expectedActions.length;
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateComponents: {
+      surfaceId: 'action-replay', components: [{
+        id: 'pick-right', component: 'Button', child: 'pick-right-label',
+        action: {event: {name: 'choose-right-focused', context: {
+          value: {path: '/right'}, peer: {path: '/left'},
+        }}},
+      }],
+    },
+  }));
+  await rightSibling.waitFor({state: 'visible', timeout: 5000});
+  assert.equal(await focusedRightHandle.evaluate(element =>
+    element.isConnected && document.activeElement === element), true,
+  'Action-only update must preserve the same connected, focused DOM Button');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    beforeFocusedRebind, 'Rebinding a focused Button must not synthesize an action');
+  await page.keyboard.press('Space');
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    beforeFocusedRebind + 1, {timeout: 5000});
+  const focusedRebindAction = {
+    name: 'choose-right-focused', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-right', context: {value: 'east updated', peer: 'west rebound'},
+  };
+  expectedActions.push(focusedRebindAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Space without refocusing must dispatch only the newly bound action');
+  await focusedRightHandle.dispose();
+  checkpoints.push({step: 'focused-button-action-rebind-no-refocus',
+    retainedPhysicalFocus: true, keyboardAction: focusedRebindAction});
+
   // Hold both currently mounted sibling nodes: an earlier scalarButton
   // locator was already detached by the preceding component replacement.
   const mountedSiblingHandles = [
