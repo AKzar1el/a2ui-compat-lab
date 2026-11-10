@@ -73,6 +73,33 @@ test('missing data in both action reports is refused rather than MATCH', () => {
     /malformed action snapshot/);
 });
 
+test('identically incomplete action events cannot falsely compare as MATCH', () => {
+  const observed = actual();
+  assert.ok(observed.trace.actions.length > 0, 'published SDK must emit Button actions');
+  for (const key of ['name', 'surfaceId', 'sourceComponentId', 'context']) {
+    const incomplete = structuredClone(observed);
+    delete incomplete.trace.actions[0][key];
+    assert.throws(() => compareActionReports(incomplete, structuredClone(incomplete)),
+      /incomplete or inconsistent action evidence/, 'missing ' + key + ' must be rejected');
+  }
+  for (const value of [null, 'not-an-object', []]) {
+    const invalid = structuredClone(observed);
+    invalid.trace.actions[0].context = value;
+    assert.throws(() => compareActionReports(invalid, structuredClone(invalid)),
+      /incomplete or inconsistent action evidence/);
+  }
+});
+
+test('tap snapshot must agree with emitted action target even in identical reports', () => {
+  const observed = actual();
+  for (const field of ['surfaceId', 'sourceComponentId']) {
+    const misrouted = structuredClone(observed);
+    misrouted.trace.actions[0][field] = 'other-valid-target';
+    assert.throws(() => compareActionReports(misrouted, structuredClone(misrouted)),
+      /action routing disagrees with tap at index 3/);
+  }
+});
+
 test('CLI action mode is strict and redacts action payloads',()=>{
   const dir=mkdtempSync(join(tmpdir(),'a2ui-action-diff-'));
   try{
