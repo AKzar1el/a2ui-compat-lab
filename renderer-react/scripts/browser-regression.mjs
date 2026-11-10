@@ -1722,6 +1722,112 @@ try {
   checkpoints.push({step: 'falsy-scalar-context-rebind',
     pointerAction: falsyScalarAction, keyboardAction: updatedScalarAction,
     siblingPreserved: true, mountedButtons: 1});
+  // Reordering two mounted sibling Buttons must update the actual DOM order
+  // without swapping their stable component IDs or action data bindings.
+  const reorderBefore = expectedActions.length;
+  await page.evaluate(() => {
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateComponents: {
+        surfaceId: 'action-replay', components: [
+          {id: 'root', component: 'Column', children: ['pick-left', 'pick-right']},
+          {id: 'pick-left', component: 'Button', child: 'pick-left-label',
+            action: {event: {name: 'choose-left',
+              context: {value: {path: '/left'}}}}},
+          {id: 'pick-left-label', component: 'Text', text: 'Pick left'},
+          {id: 'pick-right', component: 'Button', child: 'pick-right-label',
+            action: {event: {name: 'choose-right',
+              context: {value: {path: '/right'}}}}},
+          {id: 'pick-right-label', component: 'Text', text: 'Pick right'},
+        ],
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateDataModel: {
+        surfaceId: 'action-replay', path: '/',
+        value: {left: 'west seed', right: 'east seed', retained: 'unchanged'},
+      },
+    });
+  });
+  const leftSibling = page.getByRole('button', {name: 'Pick left', exact: true});
+  const rightSibling = page.getByRole('button', {name: 'Pick right', exact: true});
+  await leftSibling.waitFor({state: 'visible', timeout: 5000});
+  await rightSibling.waitFor({state: 'visible', timeout: 5000});
+  await scalarButton.waitFor({state: 'detached', timeout: 5000});
+  assert.equal(await page.getByRole('button').count(), 2,
+    'Rebinding the surface must mount exactly two sibling Buttons');
+  const originalPositions = [await leftSibling.boundingBox(), await rightSibling.boundingBox()];
+  assert.ok(originalPositions[0] && originalPositions[1] &&
+    originalPositions[0].y < originalPositions[1].y,
+  'The first sibling Button must render before its peer in the Column');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    reorderBefore, 'Mounting sibling Buttons must not emit a synthetic action');
+
+  await leftSibling.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    reorderBefore + 1, {timeout: 5000});
+  const initialLeftAction = {
+    name: 'choose-left', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-left', context: {value: 'west seed'},
+  };
+  expectedActions.push(initialLeftAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'First sibling pointer action must use its own component and model path');
+
+  // Only the parent changes: both published SDK child nodes retain their IDs.
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateComponents: {
+      surfaceId: 'action-replay',
+      components: [{id: 'root', component: 'Column',
+        children: ['pick-right', 'pick-left']}],
+    },
+  }));
+  await page.waitForFunction(() => {
+    const buttons = [...document.querySelectorAll('a2ui-surface')];
+    return buttons.length >= 0; // DOM visibility is asserted below by Playwright.
+  });
+  const swappedPositions = [await leftSibling.boundingBox(), await rightSibling.boundingBox()];
+  assert.ok(swappedPositions[0] && swappedPositions[1] &&
+    swappedPositions[1].y < swappedPositions[0].y,
+  'Reordering only the root must swap actual sibling Button visual positions');
+  assert.equal(await page.getByRole('button').count(), 2,
+    'Sibling reorder must not duplicate or drop either Button');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    reorderBefore + 1, 'Reordering components must not emit a synthetic action');
+
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/right', value: 'east updated',
+    },
+  }));
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {left: 'west seed', right: 'east updated', retained: 'unchanged'},
+    'Updating a reordered sibling path must preserve the peer and root model field');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    reorderBefore + 1, 'Agent data updates must not dispatch a sibling action');
+  await rightSibling.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    reorderBefore + 2, {timeout: 5000});
+  const updatedRightAction = {
+    name: 'choose-right', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-right', context: {value: 'east updated'},
+  };
+  expectedActions.push(updatedRightAction);
+  await leftSibling.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    reorderBefore + 3, {timeout: 5000});
+  const preservedLeftAction = {
+    name: 'choose-left', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-left', context: {value: 'west seed'},
+  };
+  expectedActions.push(preservedLeftAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Reordered pointer and keyboard events must retain component-specific fresh data');
+  checkpoints.push({step: 'sibling-buttons-reorder-action-isolation',
+    realDomOrderChanged: true, oneReorderedModelLeaf: true,
+    firstAction: initialLeftAction, rightKeyboardAction: updatedRightAction,
+    leftPointerAction: preservedLeftAction});
+
   // A late action after surface deletion must not target a stale DOM Button.
   await page.evaluate(() => window.__a2uiLab.applyMessage({
     version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
