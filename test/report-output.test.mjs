@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {existsSync, mkdtempSync, readFileSync, rmSync} from 'node:fs';
+import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -45,6 +45,9 @@ for (const script of scripts) {
       const first = invoke(script, ['--out', output]);
       assert.equal(first.status, 0, first.stderr);
       assert.equal(first.stdout, '');
+      assert.equal(first.stderr.includes(dir), false,
+        'Successful writes must not disclose the private report directory');
+      assert.match(first.stderr, /Wrote replay report/);
       assert.equal(readFileSync(output, 'utf8'), stdout.stdout,
         'CLI stdout and file output must contain the same published SDK trace');
 
@@ -52,8 +55,19 @@ for (const script of scripts) {
       assert.equal(second.status, 1);
       assert.equal(second.stdout, '');
       assert.match(second.stderr, /already exists/);
+      assert.equal(second.stderr.includes(dir), false,
+        'Existing-output failures must not disclose the private report directory');
       assert.equal(readFileSync(output, 'utf8'), stdout.stdout,
         'A repeated replay must not replace existing evidence');
+
+      const blockedParent = join(dir, 'blocking-file');
+      writeFileSync(blockedParent, 'block directory creation');
+      const blocked = invoke(script, ['--out', join(blockedParent, 'report.json')]);
+      assert.equal(blocked.status, 1);
+      assert.equal(blocked.stdout, '');
+      assert.equal(blocked.stderr.includes(dir), false,
+        'Parent-directory failures must not disclose the private report directory');
+      assert.match(blocked.stderr, /Cannot prepare replay report directory/);
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }
