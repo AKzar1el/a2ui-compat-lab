@@ -1638,6 +1638,54 @@ try {
   checkpoints.push({step: 'indexed-array-textfield-action-replay', peerPreserved: true,
     pointerAction: indexedPointerAction, keyboardAction: indexedKeyboardAction});
 
+  // The agent may structurally replace the items array after the user has
+  // edited it. Existing mounted React bindings and action contexts must
+  // follow the NEW indices rather than retain the previous values.
+  const indexedNodeBeforeReorder = await indexedInput.elementHandle();
+  assert.ok(indexedNodeBeforeReorder, 'Indexed input must be mounted before array replacement');
+  await page.evaluate(({first, second}) => window.__a2uiLab.applyMessage({
+    version: 'v0.9',
+    updateDataModel: {
+      surfaceId: 'action-replay', path: '/items',
+      value: [{title: second}, {title: first}],
+    },
+  }), {first: indexedAgent, second: indexedPeer});
+  await page.getByText(indexedPeer, {exact: true}).waitFor({state: 'visible', timeout: 5000});
+  await page.waitForFunction(expected => document.querySelector('input')?.value === expected,
+    indexedPeer, {timeout: 5000});
+  assert.equal(await indexedInput.inputValue(), indexedPeer,
+    'Mounted TextField must follow the new index-zero value after an array reorder');
+  assert.equal(await indexedNodeBeforeReorder.evaluate(node => node.isConnected), true,
+    'Data-only array replacement should preserve the mounted input node');
+  assert.equal(await indexedInput.count(), 1,
+    'Array replacement must not duplicate or drop the mounted editor');
+  await indexedNodeBeforeReorder.dispose();
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {items: [{title: indexedPeer}, {title: indexedAgent}], retained: false},
+    'Array replacement must reorder both items without losing unrelated root data');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    indexedActionsBefore + 2, 'Agent array replacement must not dispatch a synthetic action');
+
+  const indexedReorderedAction = {
+    name: 'submit-indexed-item', surfaceId: 'action-replay',
+    sourceComponentId: 'new-submit', context: {first: indexedPeer, second: indexedAgent},
+  };
+  await indexedButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    indexedActionsBefore + 3, {timeout: 5000});
+  expectedActions.push(indexedReorderedAction);
+  await indexedButton.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    indexedActionsBefore + 4, {timeout: 5000});
+  expectedActions.push(indexedReorderedAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Reordered array indices must resolve fresh context on pointer and keyboard actions');
+  checkpoints.push({step: 'indexed-array-structural-reorder-rebind',
+    sameInputNode: true, peerAndRootPreserved: true,
+    reorderedPointerAction: indexedReorderedAction,
+    reorderedKeyboardAction: indexedReorderedAction});
+
   // Falsy JSON scalars are valid action-context values, not absent bindings.
   // Rebind a mounted Button to two additional model paths and exercise real
   // pointer and keyboard input against published React/core 0.14.
