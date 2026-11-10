@@ -102,10 +102,15 @@ async function main() {
   const ok = args.verb === 'scan' ? report.baseline.ok : report.ok;
   if (args.out) {
     const target = resolve(args.out);
-    // Preserve exclusive no-overwrite evidence, but never reveal local paths in
-    // success or filesystem error diagnostics (including failed parent creation).
+    // Keep distinct stages: EEXIST during parent creation is NOT an existing
+    // output report. Never include filesystem paths in either diagnostic.
     try {
       mkdirSync(dirname(target), {recursive: true});
+    } catch {
+      throw new Error('Cannot write report; path omitted');
+    }
+    // Exclusive creation prevents overwriting old evidence or symlink targets.
+    try {
       writeFileSync(target, JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});
     } catch (error) {
       if (error?.code === 'EEXIST')
@@ -160,6 +165,6 @@ async function main() {
   if (args.strict && !ok) process.exitCode = 1;
 }
 main().catch(error => {
-  console.error('a2ui-compat-lab: ' + (error?.stack || error));
+  console.error('a2ui-compat-lab: ' + (error?.message || 'Unexpected failure'));
   process.exitCode = 2;
 });
