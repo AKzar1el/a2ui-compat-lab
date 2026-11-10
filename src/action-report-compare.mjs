@@ -31,9 +31,11 @@ function validated(report, label) {
         typeof s.exists !== 'boolean' ||
         !Object.hasOwn(s, 'data') || s.data === undefined || !Array.isArray(s.components) ||
         s.components.some(id => typeof id !== 'string' || !id) ||
+        new Set(s.components).size !== s.components.length ||
         !Number.isSafeInteger(s.actionCount) ||
         s.actionCount !== count + (s.kind === 'tap' ? 1 : 0) ||
-        (s.kind === 'tap' && (!s.exists || typeof s.componentId !== 'string' || !s.componentId)) ||
+        (s.kind === 'tap' && (!s.exists || typeof s.componentId !== 'string' ||
+          !s.componentId || !s.components.includes(s.componentId))) ||
         (!s.exists && (s.components.length !== 0 || s.data !== null)))
       refuse('malformed action snapshot at index ' + i);
     if (s.kind === 'tap') {
