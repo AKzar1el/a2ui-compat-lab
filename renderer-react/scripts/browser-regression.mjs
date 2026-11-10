@@ -1980,6 +1980,45 @@ try {
   checkpoints.push({step: 'focused-button-action-rebind-no-refocus',
     retainedPhysicalFocus: true, keyboardAction: focusedRebindAction});
 
+  // Native Space activation happens on keyup, but an agent may replace the
+  // focused Button's action between keydown and keyup. The release must route
+  // exactly one current action rather than a stale pre-update event.
+  const heldSpaceButton = await rightSibling.elementHandle();
+  assert.ok(heldSpaceButton, 'Right Button must be mounted before held Space');
+  await rightSibling.focus();
+  const actionsBeforeHeldSpace = expectedActions.length;
+  await page.keyboard.down('Space');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeHeldSpace, 'Space keydown must not activate the Button before keyup');
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateComponents: {
+      surfaceId: 'action-replay', components: [{
+        id: 'pick-right', component: 'Button', child: 'pick-right-label',
+        action: {event: {name: 'choose-right-on-release', context: {
+          value: {path: '/right'}, peer: {path: '/left'},
+        }}},
+      }],
+    },
+  }));
+  assert.equal(await heldSpaceButton.evaluate(element =>
+    element.isConnected && document.activeElement === element), true,
+  'Agent action update during a held Space must preserve physical DOM focus');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    actionsBeforeHeldSpace, 'Agent update during a held key must not synthesize a click');
+  await page.keyboard.up('Space');
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    actionsBeforeHeldSpace + 1, {timeout: 5000});
+  const heldSpaceAction = {
+    name: 'choose-right-on-release', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-right', context: {value: 'east updated', peer: 'west rebound'},
+  };
+  expectedActions.push(heldSpaceAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Held Space release must dispatch one newly bound action with fresh data');
+  await heldSpaceButton.dispose();
+  checkpoints.push({step: 'held-space-keyup-after-live-action-swap',
+    retainedPhysicalFocus: true, keyboardAction: heldSpaceAction});
+
   // Hold both currently mounted sibling nodes: an earlier scalarButton
   // locator was already detached by the preceding component replacement.
   const mountedSiblingHandles = [
