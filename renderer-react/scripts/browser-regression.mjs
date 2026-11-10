@@ -1894,6 +1894,8 @@ try {
   await rightSibling.waitFor({state: 'visible', timeout: 5000});
   assert.equal(await page.getByRole('button').count(), 2,
     'Rebinding one Button action must preserve both mounted siblings');
+  assert.equal(await leftSibling.count(), 1,
+    'An unaffected sibling must remain independently mounted after rebinding');
   assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length, reboundStart,
     'Agent component replacement must not synthesize an action');
   await rightSibling.click({timeout: 7000});
@@ -1926,9 +1928,19 @@ try {
   expectedActions.push(reboundKeyboardAction);
   assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
     expectedActions, 'Keyboard must dispatch the new action using the updated model');
+  await leftSibling.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    reboundStart + 3, {timeout: 5000});
+  const unaffectedSiblingAction = {
+    name: 'choose-left', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-left', context: {value: 'west rebound'},
+  };
+  expectedActions.push(unaffectedSiblingAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Rebinding the peer must not replace the untouched sibling action');
   checkpoints.push({step: 'mounted-button-action-name-rebind',
     pointerAction: reboundPointerAction, keyboardAction: reboundKeyboardAction,
-    untouchedSiblingMounted: await leftSibling.count() === 1});
+    unaffectedSiblingAction});
 
   // Hold both currently mounted sibling nodes: an earlier scalarButton
   // locator was already detached by the preceding component replacement.
