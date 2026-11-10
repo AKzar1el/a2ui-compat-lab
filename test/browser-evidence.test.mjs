@@ -61,6 +61,44 @@ test('successful browser evidence is exclusive and preserves older artifacts', (
   }
 });
 
+test('browser evidence filesystem failures redact private paths and never overwrite user files', () => {
+  const root = mkdtempSync(join(tmpdir(), 'a2ui-browser-private-'));
+  try {
+    const screenshot = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==',
+      'base64');
+    const report = {passed: true,
+      screenshotSha256: createHash('sha256').update(screenshot).digest('hex')};
+    const expectRedacted = (operation, diagnostic) => {
+      assert.throws(operation, error => {
+        assert.match(error.message, diagnostic);
+        assert.equal(error.message.includes(root), false, 'No absolute path may leak');
+        assert.equal(error.message.includes('private-'), false, 'No private name may leak');
+        return true;
+      });
+    };
+
+    const existing = join(root, 'private-existing-output');
+    mkdirSync(existing);
+    writeFileSync(join(existing, 'important.txt'), 'keep');
+    expectRedacted(() => assertBrowserEvidenceUnused(existing), /already exists/);
+    expectRedacted(() => publishBrowserEvidence(existing, screenshot, report),
+      /already exists/);
+    assert.equal(readFileSync(join(existing, 'important.txt'), 'utf8'), 'keep');
+
+    // ENOTDIR is a native path-bearing error, unlike the ordinary ENOENT case.
+    const blockedParent = join(root, 'private-ancestor-is-file');
+    writeFileSync(blockedParent, 'retain');
+    const blocked = join(blockedParent, 'run');
+    expectRedacted(() => assertBrowserEvidenceUnused(blocked), /Cannot inspect/);
+    expectRedacted(() => publishBrowserEvidence(blocked, screenshot, report),
+      /Cannot inspect/);
+    assert.equal(readFileSync(blockedParent, 'utf8'), 'retain');
+  } finally {
+    rmSync(root, {recursive: true, force: true});
+  }
+});
+
 test('PNG and digest preflight refuses invalid evidence without creating output paths', () => {
   const root = mkdtempSync(join(tmpdir(), 'a2ui-png-preflight-'));
   try {
