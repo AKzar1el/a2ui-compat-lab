@@ -2061,6 +2061,52 @@ try {
   checkpoints.push({step: 'held-pointer-up-after-live-action-swap',
     retainedPressedDomNode: true, pointerAction: pointerReleaseAction});
 
+  // A streaming agent model update can arrive between native pointerdown and
+  // pointerup. The eventual click must resolve current data, never the model
+  // that was present when the physical button was pressed.
+  const modelPressHandle = await rightSibling.elementHandle();
+  assert.ok(modelPressHandle, 'Right Button must exist before held-pointer model update');
+  const modelPressBox = await rightSibling.boundingBox();
+  assert.ok(modelPressBox && modelPressBox.width > 0 && modelPressBox.height > 0,
+    'Held-pointer model-update target must have nonzero visible bounds');
+  await page.mouse.move(modelPressBox.x + modelPressBox.width / 2,
+    modelPressBox.y + modelPressBox.height / 2);
+  const beforeHeldModelUpdate = expectedActions.length;
+  await page.mouse.down();
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    beforeHeldModelUpdate, 'Pointer down before model update must not dispatch an action');
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/right', value: 'east during press',
+    },
+  }));
+  assert.equal(await modelPressHandle.evaluate(element => element.isConnected), true,
+    'Model-only update during pointerdown must retain the pressed DOM Button');
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).data,
+    {left: 'west rebound', right: 'east during press', retained: 'unchanged'},
+    'Model update must be visible to the action binder before pointer release');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    beforeHeldModelUpdate, 'Streaming data update must not synthesize a Button action');
+  await page.mouse.up();
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    beforeHeldModelUpdate + 1, {timeout: 5000});
+  const modelPressAction = {
+    name: 'choose-right-on-pointer-release', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-right',
+    context: {value: 'east during press', peer: 'west rebound'},
+  };
+  expectedActions.push(modelPressAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Pointer release must use freshly streamed model state exactly once');
+  await modelPressHandle.dispose();
+  checkpoints.push({step: 'held-pointer-up-after-model-stream',
+    retainedPressedDomNode: true, pointerAction: modelPressAction});
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/right', value: 'east updated',
+    },
+  }));
+
   // Hold both currently mounted sibling nodes: an earlier scalarButton
   // locator was already detached by the preceding component replacement.
   const mountedSiblingHandles = [
