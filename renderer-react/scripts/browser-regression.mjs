@@ -2019,6 +2019,75 @@ try {
   checkpoints.push({step: 'held-space-keyup-after-live-action-swap',
     retainedPhysicalFocus: true, keyboardAction: heldSpaceAction});
 
+  // A transport message may finish while the user holds Space. The native
+  // keyup action must consume the complete UTF-8 model update, not the value
+  // captured before keydown or a partial JSONL frame.
+  const heldStreamButton = await rightSibling.elementHandle();
+  assert.ok(heldStreamButton, 'Streamed Space test requires a mounted Button');
+  await rightSibling.focus();
+  const beforeHeldStream = expectedActions.length;
+  await page.keyboard.down('Space');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    beforeHeldStream, 'Held Space keydown must not prematurely dispatch');
+  const heldStreamValue = 'east while Space held 🌐';
+  const heldStreamLine = JSON.stringify({version: 'v0.9', updateDataModel: {
+    surfaceId: 'action-replay', path: '/right', value: heldStreamValue,
+  }}) + '\n';
+  const heldStreamResult = await page.evaluate(bytes => {
+    const decoder = new TextDecoder('utf-8', {fatal: true});
+    let carry = '';
+    let applied = 0;
+    let premature = false;
+    for (let offset = 0; offset < bytes.length; offset += 2) {
+      const end = Math.min(offset + 2, bytes.length);
+      carry += decoder.decode(Uint8Array.from(bytes.slice(offset, end)),
+        {stream: end < bytes.length});
+      const newline = carry.indexOf('\n');
+      if (newline !== -1) {
+        const line = carry.slice(0, newline);
+        carry = carry.slice(newline + 1);
+        if (line) {
+          window.__a2uiLab.applyMessage(JSON.parse(line));
+          applied++;
+        }
+      }
+      if (end < bytes.length && window.__a2uiLab.trace().data.right !== 'east updated')
+        premature = true;
+    }
+    return {applied, carry, premature, data: window.__a2uiLab.trace().data};
+  }, Array.from(new TextEncoder().encode(heldStreamLine)));
+  assert.deepEqual({applied: heldStreamResult.applied, carry: heldStreamResult.carry,
+    premature: heldStreamResult.premature}, {applied: 1, carry: '', premature: false},
+  'Only the complete UTF-8 JSONL frame may mutate a held-key model');
+  assert.deepEqual(heldStreamResult.data,
+    {left: 'west rebound', right: heldStreamValue, retained: 'unchanged'},
+    'Agent model must be current before the keyup action');
+  assert.equal(await heldStreamButton.evaluate(node =>
+    node.isConnected && document.activeElement === node), true,
+  'Streamed model update must preserve native focus and the same live Button');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    beforeHeldStream, 'Streaming during a held key must not synthesize an action');
+  await page.keyboard.up('Space');
+  await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+    beforeHeldStream + 1, {timeout: 5000});
+  const heldStreamAction = {
+    name: 'choose-right-on-release', surfaceId: 'action-replay',
+    sourceComponentId: 'pick-right',
+    context: {value: heldStreamValue, peer: 'west rebound'},
+  };
+  expectedActions.push(heldStreamAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Native Space release must dispatch exactly one fully streamed Unicode value');
+  await heldStreamButton.dispose();
+  checkpoints.push({step: 'held-space-keyup-after-utf8-jsonl-model-stream',
+    chunkBytes: 2, retainedPhysicalFocus: true, keyboardAction: heldStreamAction});
+  await page.evaluate(() => window.__a2uiLab.applyMessage({
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/right', value: 'east updated',
+    },
+  }));
+
+
   // An agent can change a Button's action while its physical mouse button
   // remains down. The browser's later click must use the live handler, not
   // the event definition that existed when the pointer press began.
