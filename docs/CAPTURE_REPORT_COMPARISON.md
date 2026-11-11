@@ -81,3 +81,28 @@ escapes or embedded newlines from leaking into CI output and shared review
 summaries. Markdown continues to omit the identifier entirely. Normalization
 does **not** authenticate the installed SDK or prove any report was generated
 by that version; inspect your pinned environment separately.
+
+## Share a value-free single-capture summary (2026-11-11)
+
+The complete `replay-file.mjs` JSON trace includes **raw data-model values** and
+component/surface IDs. For a developer triage note that does not copy those values:
+
+```sh
+node src/replay-file.mjs --input capture.jsonl --summary --out out/summary.json
+node src/replay-file.mjs --input capture.jsonl --summary --verify-chunks --out out/verified-summary.json
+```
+
+`--summary` returns JSON with `schemaVersion`, `kind`, `protocol`, total
+`events`, a `chunksVerified` boolean and ordered `steps`. Each step has only
+an index, `surfacePresent`, `componentCount` and cumulative `actionCount`.
+The summary omits raw action/model values, surface and component IDs, producer
+implementation strings, capture bytes and SHA-256. `chunksVerified: false`
+means verification was **not run**, not that a mismatch was observed.
+
+This is an **opt-in, local-only structural summary**, not an anonymization
+certificate: event counts and patterns may disclose private workflow details.
+Inspect before sharing, keep the input capture/private full report local, and
+use the separate two-report comparator to detect actual cross-SDK drift.
+Without `--summary`, full-report behavior is unchanged. Existing input-size
+and chunk-verification limits, path-free diagnostics and exclusive `--out`
+creation remain in force.
