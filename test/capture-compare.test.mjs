@@ -243,3 +243,25 @@ test('Markdown action report shows changed event indices but not captured contex
   assert.match(result.stdout, /0/);
   assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE_ACTION_MARKDOWN_SENTINEL/);
 }));
+
+
+test('CLI does not disclose inaccessible paths in capture Markdown workflows', () => withReports(dir => {
+  const report = actualReport();
+  const good = join(dir, 'good.json');
+  const privateName = join(dir, 'PRIVATE_CAPTURE_PATH_SENTINEL.json');
+  writeFileSync(good, JSON.stringify(report));
+  let result = run(diffCli, ['--before', privateName, '--after', good, '--markdown']);
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /Cannot read comparison report/);
+  assert.doesNotMatch(result.stderr, /PRIVATE_CAPTURE_PATH_SENTINEL|a2ui-compare-/);
+
+  const blockedParent = join(dir, 'PRIVATE_OUTPUT_PARENT_SENTINEL');
+  writeFileSync(blockedParent, 'existing regular file');
+  result = run(diffCli, ['--before', good, '--after', good,
+    '--markdown', '--out', join(blockedParent, 'review.md')]);
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /Cannot write comparison report/);
+  assert.doesNotMatch(result.stderr, /PRIVATE_OUTPUT_PARENT_SENTINEL|a2ui-compare-/);
+}));
