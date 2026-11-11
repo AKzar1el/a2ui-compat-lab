@@ -181,3 +181,65 @@ test('capture comparison refuses lossy UTF-8 replacement in either input', () =>
     assert.doesNotMatch(result.stderr, /RIVATE_CAPTURE_UTF8_MARKER/);
   }
 }));
+
+
+test('CLI exports redacted Markdown artifacts without overwriting prior evidence', () => withReports(dir => {
+  const before = actualReport();
+  const after = structuredClone(before);
+  after.replay.snapshots[2].data = {secret: 'PRIVATE_MARKDOWN_VALUE_SENTINEL'};
+  const oldFile = join(dir, 'before.json');
+  const newFile = join(dir, 'after.json');
+  const output = join(dir, 'reports', 'capture-review.md');
+  writeFileSync(oldFile, JSON.stringify(before));
+  writeFileSync(newFile, JSON.stringify(after));
+
+  let result = run(diffCli, ['--before', oldFile, '--after', newFile,
+    '--markdown', '--strict', '--out', output]);
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /Wrote comparison report/);
+  const saved = readFileSync(output, 'utf8');
+  assert.match(saved, /# A2UI capture replay comparison/);
+  assert.match(saved, /DRIFT/);
+  assert.match(saved, /step 2/i);
+  assert.match(saved, /data/);
+  assert.doesNotMatch(saved + result.stderr, /PRIVATE_MARKDOWN_VALUE_SENTINEL/);
+  assert.doesNotMatch(saved + result.stderr, new RegExp(dir.replace(/[.*+?^$\u007b}()|[\]\\]/g, '\\$&')));
+
+  result = run(diffCli, ['--before', oldFile, '--after', newFile,
+    '--markdown', '--strict', '--out', output]);
+  assert.equal(result.status, 2, 'existing evidence must not be overwritten');
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /already exists/);
+  assert.equal(readFileSync(output, 'utf8'), saved);
+
+  result = run(diffCli, ['--before', oldFile, '--after', newFile,
+    '--json', '--markdown']);
+  assert.equal(result.status, 2, 'mutually exclusive formats must be rejected');
+  assert.equal(result.stdout, '');
+
+  result = run(diffCli, ['--before', oldFile, '--after', newFile,
+    '--markdown', '--out', oldFile]);
+  assert.equal(result.status, 2, 'comparison must never overwrite an input');
+  assert.equal(readFileSync(oldFile, 'utf8'), JSON.stringify(before));
+}));
+
+test('Markdown action report shows changed event indices but not captured context', () => withReports(dir => {
+  const actionCli = fileURLToPath(new URL('../src/replay-action-report.mjs', import.meta.url));
+  const observed = run(actionCli, []);
+  assert.equal(observed.status, 0, observed.stderr);
+  const before = JSON.parse(observed.stdout);
+  const after = structuredClone(before);
+  after.trace.actions[0].context = {private: 'PRIVATE_ACTION_MARKDOWN_SENTINEL'};
+  const a = join(dir, 'before.json');
+  const b = join(dir, 'after.json');
+  writeFileSync(a, JSON.stringify(before));
+  writeFileSync(b, JSON.stringify(after));
+  const result = run(diffCli, ['--actions', '--before', a, '--after', b,
+    '--markdown', '--strict']);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /# A2UI action replay comparison/);
+  assert.match(result.stdout, /Changed action indices/);
+  assert.match(result.stdout, /0/);
+  assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE_ACTION_MARKDOWN_SENTINEL/);
+}));
