@@ -753,3 +753,16 @@ The opt-in `src/summary-compare.mjs --before baseline-summary.json --after-captu
 - A new deterministic Node-exported `runBrowserCapture` test uncovered a consumer-visible failure-mode weakness: a capture with only an update for an absent surface produced an `A2uiIntegrityError` whose message exposed the caller-supplied surface ID to **programmatic callers**. The command-line entrypoint already caught errors generically; do not claim it printed the ID. The deliberately failing test-only SHA `145a943db5df0c8e1a547f5fdd0644dbc956a2ab` and [CI #43019456963](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/43019456963) provide the observed exception evidence.
 - The fix rejects captures without a createSurface event before opening a browser, verifies that a createSurface actually mounted, and converts SDK page-evaluation errors into fixed text. New real-Chromium assertions also check unsupported custom-catalog creation and a missing-surface update after a valid create, with anchored messages that cannot contain producer IDs. Source-fix SHA `b2341c228e068f01fdae01cf44b780a58fbb4f90` passed all three required jobs in [CI #43019675795](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/43019675795). Later test and docs commits require final-head CI before merger handoff.
 - This improves fail-closed diagnostics for the local tool, **not** upstream A2UI semantics, support for custom renderer catalogs, strict end-to-end transcript verification or anonymization. No paying user, direct external product feedback or revenue observed. Zod3 HIGH remains unresolved under the exact temporary exception until 2026-12-07.
+
+## 2026-11-11 - Developer-owned capture keyboard activation (PR pending)
+
+The opt-in private JSONL React/Chromium runner now has a mutually exclusive
+`--press-single-button-enter` path. The acceptance check feeds the existing
+published-SDK v0.9 fixture through real Chromium, uses a physical Tab key to
+reach the sole rendered Button, asserts keyboard focus, then presses Enter and
+requires one emitted action. It compares against the established pointer-click
+control, keeps event/model values out of the structural report, and rejects
+conflicting activation modes. This tests a specific developer capture and
+browser keyboard interaction, **not** all keyboard patterns, WCAG compliance,
+custom catalogs or other SDK versions. Exact CI result/PR receipt should be
+recorded only after CI and guarded integration have actually finished.
