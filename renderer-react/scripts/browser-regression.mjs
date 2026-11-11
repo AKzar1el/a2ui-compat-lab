@@ -2313,6 +2313,100 @@ try {
   checkpoints.push({step: 'held-space-keyup-after-recreated-surface-delete',
     focusedButtonDetached: true, noGhostAction: true});
 
+  // A pointer press can outlive an entire A2UI surface generation. If an
+  // agent deletes and immediately recreates the same surface/component IDs
+  // before mouseup, the release must not activate either generation.
+  const beforeGenerationRace = expectedActions.length;
+  await page.evaluate(() => {
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', createSurface: {
+        surfaceId: 'action-replay', catalogId: '__BASIC_CATALOG__',
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateComponents: {
+        surfaceId: 'action-replay', components: [
+          {id: 'root', component: 'Column', children: ['submit']},
+          {id: 'submit', component: 'Button', child: 'label',
+            action: {event: {name: 'old-generation',
+              context: {value: {path: '/selection'}}}}},
+          {id: 'label', component: 'Text', text: 'Retiring choice'},
+        ],
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateDataModel: {
+        surfaceId: 'action-replay', path: '/', value: {selection: 'retired'},
+      },
+    });
+  });
+  const retiringButton = page.getByRole('button', {name: 'Retiring choice', exact: true});
+  await retiringButton.waitFor({state: 'visible', timeout: 5000});
+  const retiringHandle = await retiringButton.elementHandle();
+  assert.ok(retiringHandle, 'Retiring Button must exist before physical pointerdown');
+  const retiringBox = await retiringButton.boundingBox();
+  assert.ok(retiringBox && retiringBox.width > 0 && retiringBox.height > 0,
+    'Retiring Button must have visible nonzero bounds');
+  await page.mouse.move(retiringBox.x + retiringBox.width / 2,
+    retiringBox.y + retiringBox.height / 2);
+  await page.mouse.down();
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    beforeGenerationRace, 'Old-generation pointerdown alone must not dispatch');
+  await page.evaluate(() => {
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', deleteSurface: {surfaceId: 'action-replay'},
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', createSurface: {
+        surfaceId: 'action-replay', catalogId: '__BASIC_CATALOG__',
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateComponents: {
+        surfaceId: 'action-replay', components: [
+          {id: 'root', component: 'Column', children: ['submit']},
+          {id: 'submit', component: 'Button', child: 'label',
+            action: {event: {name: 'new-generation',
+              context: {value: {path: '/selection'}}}}},
+          {id: 'label', component: 'Text', text: 'Replacement choice'},
+        ],
+      },
+    });
+    window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateDataModel: {
+        surfaceId: 'action-replay', path: '/', value: {selection: 'fresh 🌱'},
+      },
+    });
+  });
+  const replacementGenerationButton = page.getByRole('button',
+    {name: 'Replacement choice', exact: true});
+  await retiringButton.waitFor({state: 'detached', timeout: 5000});
+  await replacementGenerationButton.waitFor({state: 'visible', timeout: 5000});
+  assert.equal(await retiringHandle.evaluate(element => element.isConnected), false,
+    'Old-generation DOM Button must be physically detached');
+  assert.equal(await page.getByRole('button').count(), 1,
+    'Recreated generation must mount one, not two Buttons');
+  assert.equal((await page.evaluate(() => window.__a2uiLab.trace())).actions.length,
+    beforeGenerationRace, 'Recreation during pointerhold must not synthesize an action');
+  await page.mouse.up();
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Mouseup after replacement must not activate old or new generation');
+  await retiringHandle.dispose();
+  await replacementGenerationButton.click({timeout: 7000});
+  await page.waitForFunction(n => window.__a2uiLab.trace().actions.length === n,
+    beforeGenerationRace + 1, {timeout: 5000});
+  const generationAction = {
+    name: 'new-generation', surfaceId: 'action-replay', sourceComponentId: 'submit',
+    context: {value: 'fresh 🌱'},
+  };
+  expectedActions.push(generationAction);
+  assert.deepEqual((await page.evaluate(() => window.__a2uiLab.trace())).actions,
+    expectedActions, 'Fresh pointerdown/click must route only to new-generation model');
+  assert.deepEqual(runtimeErrors, [], 'Generation replacement must not throw in Chromium');
+  assert.deepEqual(consoleErrors, [], 'Generation replacement must not log React errors');
+  checkpoints.push({step: 'pointerup-after-same-id-generation-replacement',
+    noGhostAction: true, oldNodeDetached: true, newPointerAction: generationAction});
+
   const report = {
     schemaVersion: 1,
     protocol: 'v0.9',
