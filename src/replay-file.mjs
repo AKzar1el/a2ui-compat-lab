@@ -9,15 +9,21 @@ const MAX_LINE_BYTES = 256 * 1024;
 const MAX_FRAMES = 10000;
 // Keep the opt-in 1-byte transport replay bounded on real-world captures.
 const MAX_CHUNK_VERIFY_BYTES = 512 * 1024;
-const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks]';
+const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks] [--summary]';
 
 // This CLI handles local captures only: never fetch, upload or run supplied code.
 function options(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const result = {};
   let verifyChunks = false;
+  let summary = false;
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
+    if (key === '--summary') {
+      if (summary) throw new Error(USAGE);
+      summary = true;
+      continue;
+    }
     if (key === '--verify-chunks') {
       if (verifyChunks) throw new Error(USAGE);
       verifyChunks = true;
@@ -33,6 +39,7 @@ function options(argv) {
     input: resolve(result['--input']),
     out: result['--out'] ? resolve(result['--out']) : null,
     verifyChunks,
+    summary,
   };
 }
 
@@ -139,11 +146,27 @@ function writeCaptureReport(out, report) {
 }
 
 try {
-  const {input, out, help, verifyChunks} = options(process.argv.slice(2));
+  const {input, out, help, verifyChunks, summary} = options(process.argv.slice(2));
   if (help) {
     console.log(USAGE);
   } else {
-    const report = JSON.stringify(replayCapture(readCaptureFile(input), {verifyChunks}), null, 2) + '\n';
+    const observed = replayCapture(readCaptureFile(input), {verifyChunks});
+    // A shareable structural summary never includes capture values, IDs, or its
+    // digest; raw evidence remains private unless the caller explicitly omits --summary.
+    const view = summary ? {
+      schemaVersion: 1,
+      kind: 'a2ui-capture-safe-summary',
+      protocol: observed.protocol,
+      events: observed.events,
+      chunksVerified: observed.allChunksMatch === true,
+      steps: observed.replay.snapshots.map(snapshot => ({
+        index: snapshot.index,
+        surfacePresent: snapshot.exists,
+        componentCount: snapshot.components.length,
+        actionCount: snapshot.actionCount,
+      })),
+    } : observed;
+    const report = JSON.stringify(view, null, 2) + '\n';
     if (out) {
       writeCaptureReport(out, report);
       console.error('Wrote capture replay report');

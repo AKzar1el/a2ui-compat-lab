@@ -60,6 +60,23 @@ node src/cli.mjs compare --before out/before.json --after out/after.json --stric
 
 `doctor` is a fast, read-only, offline installation preflight. It checks the declared Node.js minimum, exact direct dependency pins, package-lock entries and the actual installed package versions. Use `doctor --json --strict --out out/doctor.json` for a machine-readable report (exit 1 on mismatch; exit 2 on invalid invocation). It checks *this workspace's direct packages*, not the npm registry, transitive dependency provenance, React's isolated renderer workspace or remote published-release compatibility. Run `npm ci --ignore-scripts --no-audit --no-fund` to repair a missing or stale installation before retrying.
 
+### Share a structural capture summary without raw values
+
+A raw `replay-file` JSON report contains all observed A2UI model values and IDs.
+For issue triage or review, opt into a **value-free, offline** summary:
+
+```sh
+node src/replay-file.mjs --input capture.jsonl --summary --verify-chunks --out out/capture-summary.json
+```
+
+The summary records ordered step indices, surface presence, component/action
+counts, and whether byte-chunk replay was verified. It excludes model values,
+surface/component identifiers, implementation labels and the input digest.
+The source capture remains local and the output refuses to overwrite existing
+evidence. Counts and event patterns can still be sensitive: inspect before
+sharing. This summary is not a complete SDK trace, browser test, cryptographic
+attestation or proof of anonymity. See [capture comparison guidance](docs/CAPTURE_REPORT_COMPARISON.md).
+
 ## Non-goals and scope
 
 The browser harness is a **narrow React v0.14 integration regression**, not proof of a novel upstream bug. It does not test incompatible React 0.15, other renderers, arbitrary agent output, complete failure recovery, commercial demand, or official A2UI conformance. See [Evidence](docs/EVIDENCE.md) and [Roadmap](docs/ROADMAP.md).
