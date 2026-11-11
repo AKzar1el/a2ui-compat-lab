@@ -62,12 +62,12 @@ node src/cli.mjs compare --before out/before.json --after out/after.json --stric
 
 ### Share a structural capture summary without raw values
 
-A raw \`replay-file\` JSON report contains all observed A2UI model values and IDs.
+A raw `replay-file` JSON report contains all observed A2UI model values and IDs.
 For issue triage or review, opt into a **value-free, offline** summary:
 
-\`\`\`sh
+```sh
 node src/replay-file.mjs --input capture.jsonl --summary --verify-chunks --out out/capture-summary.json
-\`\`\`
+```
 
 The summary records ordered step indices, surface presence, component/action
 counts, and whether byte-chunk replay was verified. It excludes model values,
