@@ -126,6 +126,33 @@ capture without saving a second summary:
 node src/summary-compare.mjs --before before-summary.json --after-capture private-new.jsonl --strict --out structural-diff.json
 ```
 
+### Compare two private JSONL captures directly
+
+When neither side has a saved structural baseline, the same CLI accepts two private
+A2UI v0.9 captures, eliminating both intermediate summary files:
+
+```sh
+node src/summary-compare.mjs --before-capture previous.jsonl --after-capture candidate.jsonl --strict --out out/structural-diff.json
+node src/summary-compare.mjs --before-capture previous.jsonl --after-capture candidate.jsonl --verify-chunks --strict
+```
+
+Each input is independently replayed by the actual pinned published headless SDK
+in a bounded shell-free child. Only its exact allowlisted safe summary reaches
+the comparator; the source files and raw-value reports are not written or
+included in errors. A saved `--before` summary may still be compared against
+a new `--after-capture` capture, and vice versa. Exactly one input type is
+required for **each** side (`--before` versus `--before-capture`, and
+`--after` versus `--after-capture`). The optional `--verify-chunks`
+verifies every supplied raw-capture side; without it, neither side is falsely
+labeled verified.
+
+Tests exercise actual published A2UI v0.9 replay: changing private model
+values without changing structure MATCHES by design, an additional valid
+lifecycle update DRIFTS, malformed private captures fail without showing the
+path/contents, and no intermediate artifacts are created. This is not
+same-input SDK equivalence, value-level validation, browser execution or
+anonymization; event ordering and counts can still be sensitive.
+
 The `--after-capture` path is replayed by the existing pinned published
 v0.9 SDK capture CLI in a bounded shell-free child process, emitting only its
 allowlisted safe summary in memory. Use `--verify-chunks` with this mode if
