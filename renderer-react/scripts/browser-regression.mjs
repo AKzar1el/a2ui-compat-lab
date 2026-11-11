@@ -2468,14 +2468,26 @@ await assert.rejects(
   runBrowserCapture([{version: 'v0.9', updateDataModel: {
     surfaceId: 'unmounted', path: '/', value: {privateValue: 'do-not-echo'},
   }}]),
-  /Browser capture requires a createSurface event/,
+  /^Browser capture requires a createSurface event$/,
   'A partial capture that mounts no surface must not report a successful replay',
 );
 await assert.rejects(
   runBrowserCapture([{version: 'v0.9', createSurface: {
     surfaceId: 'custom-only', catalogId: 'unknown-custom-catalog',
   }}]),
-  /Browser capture createSurface was not mounted/,
+  /^Browser capture createSurface was not mounted$/,
   'Unsupported custom catalogs must not produce a green Chromium replay report',
+);
+await assert.rejects(
+  runBrowserCapture([
+    {version: 'v0.9', createSurface: {
+      surfaceId: 'valid-mounted', catalogId: '__BASIC_CATALOG__',
+    }},
+    {version: 'v0.9', updateDataModel: {
+      surfaceId: 'not-created-private-id', path: '/', value: {secret: 'private-marker'},
+    }},
+  ]),
+  /^Browser capture SDK rejected an event$/,
+  'Published SDK exception text with private surface IDs must be redacted for programmatic callers',
 );
 console.log('Developer JSONL capture -> React Chromium + real Button: PASS');
