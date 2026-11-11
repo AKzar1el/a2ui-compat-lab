@@ -116,7 +116,7 @@ export async function runBrowserCapture(messages, {clickSingleButton = false} = 
       if (message.type() === 'error') consoleErrors.push('console');
     });
     await page.goto(origin + '/?capture=1', {waitUntil: 'domcontentloaded'});
-    await page.locator('section[aria-label="Real A2UI surface"]').waitFor({timeout: 10000});
+    await page.locator('section[aria-label="Real A2UI surface"]').waitFor({state: 'attached', timeout: 10000});
     await page.waitForFunction(() => Boolean(window.__a2uiLab?.trace), null, {timeout: 10000});
     // React useEffect subscribes to surface creation after initial paint.
     await page.evaluate(() => new Promise(resolve =>
