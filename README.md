@@ -176,6 +176,13 @@ not anonymization or proof of complete renderer correctness. React/core 0.15
 remains blocked separately by published npm peer constraints. The CI acceptance
 uses the synthetic fixture; external developer adoption remains unverified.
 
+Captures must contain a `createSurface` event. An unsupported catalog or
+failed surface creation is rejected, **not** reported as a passing empty
+render. Both CLI and programmatic replay failures use fixed messages rather
+than quoting private capture identifiers or SDK diagnostics. The basic
+catalog is the tested target; arbitrary custom catalogs are not supported
+by this harness.
+
 ## Fault/recovery replay (headless)
 
 Run `npm run replay:recovery` to create `out/recovery.json` using the published `@a2ui/web_core@0.15.0` v0.9 MessageProcessor, without any network access after installation. The fixture exercises updates before surface creation, an invalid catalog, and a stale update after deletion while checking that a second live surface still works and a deleted surface can be recreated with fresh data.
