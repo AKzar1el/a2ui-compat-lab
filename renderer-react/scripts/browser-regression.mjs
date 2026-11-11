@@ -2407,6 +2407,15 @@ try {
   checkpoints.push({step: 'pointerup-after-same-id-generation-replacement',
     noGhostAction: true, oldNodeDetached: true, newPointerAction: generationAction});
 
+  trace = await page.evaluate(() => window.__a2uiLab.trace());
+  assert.deepEqual(trace.actions, expectedActions,
+    'Published replay report must include the final recreated-generation action');
+  assert.deepEqual(trace.errors, [], 'Final generation must leave no SDK errors');
+  assert.deepEqual(deniedRequests, [deniedProbe],
+    'Recreation must not trigger off-origin HTTP requests');
+  assert.deepEqual(deniedWebSockets, [deniedSocketProbe],
+    'Recreation must not open off-origin WebSockets');
+
   const report = {
     schemaVersion: 1,
     protocol: 'v0.9',
