@@ -40,13 +40,28 @@ function nextAction(kind) {
   return null;
 }
 
-export function getReleaseCases() {
-  const manifest = JSON.parse(readFileSync(path, 'utf8'));
-  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.cases)) throw new Error('Unsupported release-matrix manifest');
+export function getReleaseCases(manifest = JSON.parse(readFileSync(path, 'utf8'))) {
+  // A zero-case matrix would make probeAllReleases().ok true without probing any SDK.
+  if (!manifest || manifest.schemaVersion !== 1 || !Array.isArray(manifest.cases) ||
+      manifest.cases.length < 1 || manifest.cases.length > 32)
+    throw new Error('Invalid release-matrix manifest: require 1 to 32 cases');
+  const seenIds = new Set();
   for (const item of manifest.cases) {
-    if (!item.id || !['resolves', 'ERESOLVE'].includes(item.expected)) throw new Error('Invalid release-matrix case');
-    for (const [pkg, ver] of Object.entries(item.packages)) {
-      if (!/^[@a-zA-Z0-9/._-]+$/.test(pkg) || !/^\d+\.\d+\.\d+$/.test(ver)) throw new Error('Package probes require pinned names and semver');
+    if (!item || typeof item !== 'object' || Array.isArray(item) ||
+        typeof item.id !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/i.test(item.id) ||
+        seenIds.has(item.id) || !['resolves', 'ERESOLVE'].includes(item.expected) ||
+        !item.packages || typeof item.packages !== 'object' || Array.isArray(item.packages))
+      throw new Error('Invalid release-matrix case');
+    seenIds.add(item.id);
+    const entries = Object.entries(item.packages);
+    // A successful npm install without the published SDK pair proves nothing.
+    if (entries.length > 16 || !Object.hasOwn(item.packages, '@a2ui/react') ||
+        !Object.hasOwn(item.packages, '@a2ui/web_core'))
+      throw new Error('Invalid release-matrix case: published A2UI SDK pair required');
+    for (const [pkg, ver] of entries) {
+      if (!/^[@a-zA-Z0-9/._-]+$/.test(pkg) || typeof ver !== 'string' ||
+          !/^\d+\.\d+\.\d+$/.test(ver))
+        throw new Error('Package probes require pinned names and semver');
     }
   }
   return manifest.cases;
