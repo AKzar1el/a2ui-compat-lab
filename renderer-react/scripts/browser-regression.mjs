@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from '@playwright/test';
 import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEvidence} from '../../src/browser-evidence.mjs';
 import {createServer} from 'vite';
-import {decodeBrowserCapture, runBrowserCapture} from './browser-capture-replay.mjs';
+import {decodeBrowserCapture, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = resolveBrowserEvidenceDir(root, process.argv.slice(2));
@@ -2467,6 +2467,42 @@ assert.equal(keyboardCaptureReport.actionsEmitted, 1,
 assert.equal(keyboardCaptureReport.pressSingleButtonEnter, true);
 assert.equal(keyboardCaptureReport.keyboardFocusVerified, true);
 assert.equal(keyboardCaptureReport.clickSingleButton, false);
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl', '--click-button-index', '0']).clickButtonIndex, 0);
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl', '--press-button-index-enter', '1']).pressButtonIndexEnter, 1);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl', '--click-button-index', '01']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl', '--click-button-index', '32']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--click-single-button', '--click-button-index', '0']), /Usage:/);
+// A real two-Button capture exercises targeted pointer and physical keyboard input.
+const twoButtonMessages = structuredClone(decodedExample);
+const twoButtonComponents = twoButtonMessages[1].updateComponents.components;
+twoButtonComponents.find(component => component.id === 'root').children.push('submit-second');
+const secondButton = structuredClone(twoButtonComponents.find(component => component.id === 'submit'));
+secondButton.id = 'submit-second';
+secondButton.child = 'label-second';
+secondButton.action.event.name = 'private-second-action';
+twoButtonComponents.push(secondButton, {id: 'label-second', component: 'Text', text: 'Private second label'});
+const indexedPointerReport = await runBrowserCapture(twoButtonMessages, {clickButtonIndex: 1});
+assert.equal(indexedPointerReport.steps.at(-1).visibleButtonCount, 2);
+assert.equal(indexedPointerReport.actionsEmitted, 1,
+  'Indexed pointer activation must emit exactly one real SDK action');
+assert.equal(indexedPointerReport.clickButtonIndex, 1);
+const indexedKeyboardReport = await runBrowserCapture(twoButtonMessages, {pressButtonIndexEnter: 1});
+assert.equal(indexedKeyboardReport.steps.at(-1).visibleButtonCount, 2);
+assert.equal(indexedKeyboardReport.actionsEmitted, 1,
+  'Indexed Tab/Enter activation must emit exactly one real SDK action');
+assert.equal(indexedKeyboardReport.keyboardFocusVerified, true);
+assert.equal(indexedKeyboardReport.pressButtonIndexEnter, 1);
+assert.doesNotMatch(JSON.stringify(indexedKeyboardReport),
+  /private-second-action|Private second label|submit-second|action-replay|alpha|surfaceId/,
+  'Indexed replay report must not leak private IDs, values or button labels');
+await assert.rejects(runBrowserCapture(twoButtonMessages, {clickButtonIndex: 2}),
+  {message: 'Action mode button index is outside rendered range'});
+await assert.rejects(runBrowserCapture(twoButtonMessages, {clickButtonIndex: -1}),
+  {message: 'Invalid browser button index'});
+await assert.rejects(runBrowserCapture(twoButtonMessages,
+  {clickButtonIndex: 1, pressButtonIndexEnter: 0}),
+  {message: 'Choose exactly one browser action mode'});
 assert.doesNotMatch(JSON.stringify(keyboardCaptureReport), /action-replay|alpha|Confirm|selection|surfaceId/,
   'Keyboard browser capture evidence must exclude model values and identifiers');
 await assert.rejects(
