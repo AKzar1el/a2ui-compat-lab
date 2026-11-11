@@ -173,6 +173,18 @@ then presses **Enter** and requires exactly one emitted action. The pointer and
 keyboard modes are mutually exclusive. For multi-Button captures use
 `--click-button-index N` or `--press-button-index-enter N` to select
 a zero-based rendered-Button position in DOM order (N = 0 through 31).
+To activate a Button **after an earlier JSONL event but before subsequent
+updates or deletion**, add `--action-after-event-index N` (event positions are
+zero-based, 0 through 99; requires exactly one Button action mode):
+
+```sh
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --click-button-index 0 --action-after-event-index 2 --out ../out/timed-action.json
+```
+
+Without this option, actions execute after the final capture event as before.
+The Button must exist and be reachable at the selected step; invalid or
+unreachable steps fail closed. This is a single synthetic user activation at
+a message boundary, not a recorded user event or complete agent round-trip.
 Indexed keyboard mode physically Tabs to the selected Button (at most 64
 transitions), failing closed if it is not reachable. Invalid or out-of-range
 indices and simultaneous action modes fail closed without fallback.
