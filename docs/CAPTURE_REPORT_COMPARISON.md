@@ -109,3 +109,32 @@ use the separate two-report comparator to detect actual cross-SDK drift.
 Without `--summary`, full-report behavior is unchanged. Existing input-size
 and chunk-verification limits, path-free diagnostics and exclusive `--out`
 creation remain in force.
+
+## Compare privacy-reduced workflow structures (2026-11-11)
+
+Use `src/summary-compare.mjs` to compare the **structure** of two
+`replay-file --summary` outputs without retaining private full replay reports:
+
+```sh
+node src/summary-compare.mjs --before before-summary.json --after after-summary.json --strict --out structural-diff.json
+```
+
+The offline CLI accepts only the exact allowlisted `a2ui-capture-safe-summary`
+schema (v0.9), bounded to 10,000 steps and a 4 MiB input file. It validates
+consecutive indices, cumulative action-count monotonicity and exact action deltas,
+then reports changing protocol operation labels, surface presence, component counts,
+cumulative and per-step action counts, inserted/removed steps and whether byte-chunk
+verification coverage changed. Up to 100 changed step indices are included; the
+remaining count is reported without copying their inputs. Unknown keys, malformed
+input, invalid UTF-8 and inconsistent counters are refused with path-free errors.
+
+`--strict` exits 1 for structural drift; invalid inputs or output errors exit 2;
+otherwise it exits 0. An optional `--out` writes only to a fresh file and
+never overwrites evidence. The output has no raw model values, surface/component
+IDs, capture digests or implementation descriptions.
+
+**Interpretation:** this is not same-capture SDK parity testing. Two entirely
+different captures can produce identical structural summaries, and a changed
+model value with unchanged structure will not count as drift. Treat a MATCH as
+equivalent **observed shape only**. Counts, operation sequences and timing order
+can still be sensitive workflow metadata; review before sharing.
