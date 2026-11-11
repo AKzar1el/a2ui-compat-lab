@@ -148,6 +148,34 @@ npm run build
 
 The test runs Vite on loopback with deterministic fixture data, drives real headless Chromium pointer and keyboard input, and closes both the browser and server afterward. Inspect `renderer-react/out/react-browser-trace.json` and `renderer-react/out/react-browser.png`. Browser artifacts are published only after all assertions pass, and a previous output directory is never overwritten. For another local run, use a fresh name from `renderer-react/`: `npm test -- --out-dir run-2` (one alphanumeric, dash or underscore directory name). GitHub CI uses the fresh default `out/` directory. No LLM, credentials, or external HTTP endpoint is involved after dependency and Chromium installation; GitHub CI installs the browser and uploads both artifacts.
 
+## Replay a private capture in actual React/Chromium (experimental)
+
+The fixed browser regression does not accept a developer's own JSONL. An opt-in
+local tool now mounts a real published React A2UI surface and replays a private
+v0.9 JSONL capture in offline Chromium. From renderer-react/ after installing
+the documented pinned dependencies and Chromium:
+
+```sh
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --click-single-button --out ../out/browser-summary.json
+```
+
+Each line must contain one **raw v0.9 A2UI message** (not a message wrapper)
+and the file must end with a newline. Limits: 512 KiB total, 64 KiB per line,
+100 events. The opt-in click checks exactly one rendered Button at the end
+and verifies that a genuine browser pointer action emits exactly one agent
+event. Browser HTTP and WebSocket traffic is limited to the ephemeral loopback
+Vite origin; no external service or inference endpoint is contacted.
+
+Reports show only fixed lifecycle operation labels, per-step mounted-surface,
+visible-Button and emitted-action counts, and pinned React/core 0.14.0
+provenance. They exclude captured values, action contexts, surface/component
+identifiers, input paths and screenshots. The --out option never overwrites
+existing files. **Workflow structure can still be sensitive**, so this is
+not anonymization or proof of complete renderer correctness. React/core 0.15
+remains blocked separately by published npm peer constraints. The CI acceptance
+uses the synthetic fixture; external developer adoption remains unverified.
+
 ## Fault/recovery replay (headless)
 
 Run `npm run replay:recovery` to create `out/recovery.json` using the published `@a2ui/web_core@0.15.0` v0.9 MessageProcessor, without any network access after installation. The fixture exercises updates before surface creation, an invalid catalog, and a stale update after deletion while checking that a second live surface still works and a deleted surface can be recreated with fresh data.

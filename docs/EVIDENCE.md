@@ -724,3 +724,25 @@ The opt-in `src/summary-compare.mjs --before baseline-summary.json --after-captu
 - Source implementation commit `874f08b9f5225c16aae6fab5aa2d59f631a4b41a` passed all three checks in [CI #42994565049](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42994565049): SDK/real Python parity, actual React/Chromium tests and dependency audit with only the documented unresolved Zod3 HIGH exception to 2026-12-07. These are GitHub CI claims only; the historical Windows checkout was preserved and no local tests were run.
 - Acceptance: value-only edits MATCH, an inserted valid lifecycle update DRIFTS with strict exit 1, optional byte-chunk verification runs on both private sides, contradictory flags and invalid private JSONL fail without leaking paths or values, and no intermediate report is materialized. Outputs still expose workflow pattern and event counts, so they are not anonymized. No external adoption/revenue or new SDK defect claimed.
 - PR [#87](https://github.com/AKzar1el/a2ui-compat-lab/pull/87) is a guarded-merger candidate only after its complete docs/log-inclusive head passes all three CI jobs and a single exact-SHA body handoff is verified. No dependency, workflow, security-policy or merger configuration change.
+
+## Private-capture React/Chromium replay (2026-11-11)
+
+- Developer workflow gap: the 49-checkpoint Playwright regression was tied to
+  a fixed fixture. A separate bounded local JSONL runner now applies actual
+  v0.9 capture messages to the published React/core 0.14.0 renderer, observes
+  live DOM surface/Button counts, and can opt into one real pointer action.
+  Values, IDs, action contexts and paths are excluded from the report.
+- The capture query mode starts from an empty surface so the synthetic fixture
+  does not contaminate a developer-provided session. Normal browser regression
+  startup and its 49 checkpoints are unchanged.
+- CI #43011185289 reproduced a malformed test fixture newline; #43011325725
+  then showed an initially empty React section is attached but hidden before
+  the first createSurface event. Both were harness implementation mistakes,
+  not new A2UI published-SDK defects. Fix head
+  b00069ccebb484f458795c306f50a8c25ea621c1 passed CI #43011497182:
+  sdk-parity including pinned Python, real React/Chromium browser replay and
+  dependency-audit with the known unresolved Zod3 exception ending 2026-12-07.
+- The verified synthetic browser acceptance replays three messages, mounts
+  one Button, and sends one genuine Chromium pointer event. It does NOT prove
+  arbitrary external capture compatibility, pixel visual equivalence, all
+  renderer versions, customer adoption, revenue or anonymization.
