@@ -2463,4 +2463,19 @@ assert.equal(browserCaptureReport.actionsEmitted, 1,
 assert.equal(browserCaptureReport.clickSingleButton, true);
 assert.doesNotMatch(JSON.stringify(browserCaptureReport), /action-replay|alpha|Confirm|selection|surfaceId/,
   'A browser capture structural report must not publish model values or identifiers');
+// A capture with no initial surface cannot establish a real renderer replay.
+await assert.rejects(
+  runBrowserCapture([{version: 'v0.9', updateDataModel: {
+    surfaceId: 'unmounted', path: '/', value: {privateValue: 'do-not-echo'},
+  }}]),
+  /Browser capture requires a createSurface event/,
+  'A partial capture that mounts no surface must not report a successful replay',
+);
+await assert.rejects(
+  runBrowserCapture([{version: 'v0.9', createSurface: {
+    surfaceId: 'custom-only', catalogId: 'unknown-custom-catalog',
+  }}]),
+  /Browser capture createSurface was not mounted/,
+  'Unsupported custom catalogs must not produce a green Chromium replay report',
+);
 console.log('Developer JSONL capture -> React Chromium + real Button: PASS');
