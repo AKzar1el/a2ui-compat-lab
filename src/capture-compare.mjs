@@ -1,4 +1,5 @@
 import {isDeepStrictEqual} from 'node:util';
+import {safeImplementationLabel} from './implementation-provenance.mjs';
 
 const MAX_CAPTURE_BYTES = 4 * 1024 * 1024;
 const MAX_EVENTS = 10000;
@@ -70,8 +71,8 @@ export function compareCaptureReports(before, after) {
     protocol: 'v0.9',
     captureSha256: previous.captureSha256,
     events: previous.events,
-    beforeImplementation: previous.implementation,
-    afterImplementation: current.implementation,
+    beforeImplementation: safeImplementationLabel(previous.implementation),
+    afterImplementation: safeImplementationLabel(current.implementation),
     differingSteps: differences.length,
     differences,
     actionCountChanged,
