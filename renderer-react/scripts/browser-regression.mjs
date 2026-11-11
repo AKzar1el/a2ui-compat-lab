@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from '@playwright/test';
 import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEvidence} from '../../src/browser-evidence.mjs';
 import {createServer} from 'vite';
+import {decodeBrowserCapture, runBrowserCapture} from './browser-capture-replay.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = resolveBrowserEvidenceDir(root, process.argv.slice(2));
@@ -2442,3 +2443,24 @@ try {
   if (browser) await browser.close();
   if (server) await server.close();
 }
+
+// Exercise the same private-JSONL user path with real Chromium, not a mocked DOM.
+const exampleMessages = JSON.parse(fixture).map(entry => entry.message);
+const encodedExample = Buffer.from(exampleMessages.map(message => JSON.stringify(message)).join('\\n') + '\\n');
+const decodedExample = decodeBrowserCapture(encodedExample);
+assert.deepEqual(decodedExample, exampleMessages);
+assert.throws(() => decodeBrowserCapture(Buffer.from('{"version":"v0.9"}')), /Invalid browser capture/,
+  'Non-newline-terminated captures must fail closed');
+const browserCaptureReport = await runBrowserCapture(decodedExample, {clickSingleButton: true});
+assert.equal(browserCaptureReport.kind, 'a2ui-react-capture-browser-replay');
+assert.equal(browserCaptureReport.events, 3);
+assert.deepEqual(browserCaptureReport.steps.map(step => step.operation),
+  ['createSurface', 'updateComponents', 'updateDataModel']);
+assert.equal(browserCaptureReport.steps.at(-1).surfaceCount, 1);
+assert.equal(browserCaptureReport.steps.at(-1).visibleButtonCount, 1);
+assert.equal(browserCaptureReport.actionsEmitted, 1,
+  'One real Chromium pointer action must reach the published SDK');
+assert.equal(browserCaptureReport.clickSingleButton, true);
+assert.doesNotMatch(JSON.stringify(browserCaptureReport), /action-replay|alpha|Confirm|selection|surfaceId/,
+  'A browser capture structural report must not publish model values or identifiers');
+console.log('Developer JSONL capture -> React Chromium + real Button: PASS');
