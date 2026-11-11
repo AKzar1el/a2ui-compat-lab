@@ -41,3 +41,31 @@ includes captured action payloads or data values. Input action reports are
 actual published MessageProcessor/GenericBinder; it is headless and does not
 establish browser-DOM parity or a new upstream defect. The test mutates
 reports synthetically after an actual pinned-SDK replay.
+
+
+## Save a redacted Markdown review artifact
+
+The CLI can emit a human-readable, value-redacted review note for use in an
+issue or pull-request review without uploading the private input captures:
+
+```sh
+node src/capture-compare-cli.mjs --before before.json --after after.json --markdown --strict --out out/capture-review.md
+node src/capture-compare-cli.mjs --actions --before before-actions.json --after after-actions.json --markdown --strict --out out/action-review.md
+```
+
+Markdown contains the match/drift decision, step counts, changed step indices,
+field names and changed action indices (bounded to 100 per category). It omits
+captured values, full action contexts and untrusted implementation descriptions.
+Use `--json` instead for complete machine-readable indices; `--markdown` and `--json` are mutually exclusive.
+
+`--out` creates a fresh file exclusively, including parent directories,
+and refuses to overwrite existing files, symlinks or input reports. It writes a
+drifting comparison before returning exit **1** with `--strict`; invalid inputs
+or failed writes return **2** without emitting a new report. A matching report
+returns **0**. Missing-file and output errors omit absolute paths.
+
+Only publish the redacted review artifact after checking its contents. It still
+reveals a capture digest (JSON mode only), comparison shape, step counts and
+which fields changed; the raw captures and full replay reports must remain
+private. This is an application workflow aid, not evidence of new published-SDK
+defects, browser behavior or external adoption.
