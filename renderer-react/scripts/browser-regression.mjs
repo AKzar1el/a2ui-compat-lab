@@ -2482,6 +2482,37 @@ secondButton.id = 'submit-second';
 secondButton.child = 'label-second';
 secondButton.action.event.name = 'private-second-action';
 twoButtonComponents.push(secondButton, {id: 'label-second', component: 'Text', text: 'Private second label'});
+// A valid action before deletion must be testable even when no Button survives.
+const timedMessages = [...structuredClone(decodedExample), {
+  version: 'v0.9', deleteSurface: {surfaceId: decodedExample[0].createSurface.surfaceId},
+}];
+await assert.rejects(runBrowserCapture(timedMessages, {clickButtonIndex: 0}),
+  {message: 'Action mode button index is outside rendered range'});
+const timedPointer = await runBrowserCapture(timedMessages,
+  {clickButtonIndex: 0, actionAfterEventIndex: 2});
+assert.equal(timedPointer.actionsEmitted, 1);
+assert.equal(timedPointer.actionAfterEventIndex, 2);
+assert.equal(timedPointer.steps.at(-1).surfaceCount, 0);
+assert.equal(timedPointer.steps[2].actionCount, 0);
+assert.equal(timedPointer.steps[3].actionCount, 1);
+const timedKeyboard = await runBrowserCapture(timedMessages,
+  {pressButtonIndexEnter: 0, actionAfterEventIndex: 2});
+assert.equal(timedKeyboard.actionsEmitted, 1);
+assert.equal(timedKeyboard.keyboardFocusVerified, true);
+assert.doesNotMatch(JSON.stringify(timedKeyboard),
+  /action-replay|alpha|Confirm|selection|surfaceId/,
+  'Timed browser evidence must not expose private capture values or IDs');
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--click-button-index', '0', '--action-after-event-index', '2']).actionAfterEventIndex, 2);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--action-after-event-index', '2']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--click-button-index', '0', '--action-after-event-index', '100']), /Usage:/);
+await assert.rejects(runBrowserCapture(timedMessages,
+  {clickButtonIndex: 0, actionAfterEventIndex: timedMessages.length}),
+  {message: 'Invalid browser action event index or missing action mode'});
+await assert.rejects(runBrowserCapture(timedMessages, {actionAfterEventIndex: 2}),
+  {message: 'Invalid browser action event index or missing action mode'});
 const indexedPointerReport = await runBrowserCapture(twoButtonMessages, {clickButtonIndex: 1});
 assert.equal(indexedPointerReport.steps.at(-1).visibleButtonCount, 2);
 assert.equal(indexedPointerReport.actionsEmitted, 1,
