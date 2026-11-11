@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {mkdtempSync, readFileSync, writeFileSync, rmSync} from 'node:fs';
+import {mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -104,6 +104,79 @@ test('rejects untrusted fields and invalid action counters without disclosing se
   result = compareReports(malformed);
   assert.equal(result.status, 2);
   assert.doesNotMatch(result.stderr, /PRIVATE_SUMMARY_SECRET_SENTINEL/);
+}));
+
+
+test('compares a new private JSONL capture directly to its saved structural baseline', () => withReports(({before, beforePath, dir}) => {
+  writeFileSync(beforePath, JSON.stringify(before));
+  const messages = readFileSync(sample, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  messages[2].updateDataModel.value.title = 'PRIVATE_DIRECT_CAPTURE_SENTINEL';
+  const capture = join(dir, 'new-private-capture.jsonl');
+  writeFileSync(capture, messages.map(JSON.stringify).join('\n') + '\n');
+
+  let result = run(compare, ['--before', beforePath, '--after-capture', capture, '--strict']);
+  assert.equal(result.status, 0, result.stderr);
+  const match = JSON.parse(result.stdout);
+  assert.equal(match.result, 'MATCH', 'Value changes alone are intentionally invisible');
+  assert.equal(match.changedSteps, 0);
+  assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE_DIRECT_CAPTURE_SENTINEL|new-private-capture|surfaceId|dataModel/);
+  assert.deepEqual(readdirSync(dir).sort(), ['before.json', 'new-private-capture.jsonl'].sort(),
+    'The direct compare must not create intermediate raw or summary reports');
+
+  const out = join(dir, 'result.json');
+  result = run(compare, ['--before', beforePath, '--after-capture', capture, '--out', out]);
+  assert.equal(result.status, 0, result.stderr);
+  const original = readFileSync(out, 'utf8');
+  assert.equal(JSON.parse(original).result, 'MATCH');
+  result = run(compare, ['--before', beforePath, '--after-capture', capture, '--out', out]);
+  assert.equal(result.status, 2);
+  assert.equal(readFileSync(out, 'utf8'), original, 'Existing comparison evidence is immutable');
+}));
+
+test('direct capture comparison detects an inserted lifecycle message via real SDK replay', () => withReports(({before, beforePath, dir}) => {
+  writeFileSync(beforePath, JSON.stringify(before));
+  const messages = readFileSync(sample, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  messages.splice(4, 0, structuredClone(messages[3]));
+  const capture = join(dir, 'drifting.jsonl');
+  writeFileSync(capture, messages.map(JSON.stringify).join('\n') + '\n');
+  const result = run(compare, ['--before', beforePath, '--after-capture', capture, '--strict']);
+  assert.equal(result.status, 1, result.stderr);
+  const diff = JSON.parse(result.stdout);
+  assert.equal(diff.result, 'DRIFT');
+  assert.equal(diff.beforeEvents, 5);
+  assert.equal(diff.afterEvents, 6);
+  assert.deepEqual(diff.differences.map(item => item.index), [4, 5]);
+  assert.doesNotMatch(result.stdout, /\"data\"|\"components\"|surfaceId|captureSha256/);
+}));
+
+test('direct capture comparison verifies optional chunks and redacts rejected inputs', () => withReports(({beforePath, dir}) => {
+  const verified = run(replay, ['--input', sample, '--summary', '--verify-chunks']);
+  assert.equal(verified.status, 0, verified.stderr);
+  writeFileSync(beforePath, verified.stdout);
+  let result = run(compare, ['--before', beforePath, '--after-capture', sample,
+    '--verify-chunks', '--strict']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).result, 'MATCH');
+  assert.equal(JSON.parse(result.stdout).afterChunksVerified, true);
+
+  const secret = 'PRIVATE_DIRECT_ERROR_SENTINEL';
+  const invalid = join(dir, secret + '.jsonl');
+  writeFileSync(invalid, '{\"version\":\"v0.9\",\"token\":' + secret + '}\n');
+  result = run(compare, ['--before', beforePath, '--after-capture', invalid]);
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, '');
+  assert.doesNotMatch(result.stderr, /PRIVATE_DIRECT_ERROR_SENTINEL|a2ui-safe-diff-/);
+  assert.match(result.stderr, /Cannot replay capture with pinned SDK/);
+
+  for (const invalidArgs of [
+    ['--before', beforePath, '--after', beforePath, '--after-capture', sample],
+    ['--before', beforePath, '--after', beforePath, '--verify-chunks'],
+    ['--before', beforePath, '--after-capture', sample, '--after-capture', sample],
+  ]) {
+    result = run(compare, invalidArgs);
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Usage:/);
+  }
 }));
 
 test('writes drift evidence exclusively, preserves it on retries and hides paths', () => withReports(({dir, before, beforePath, afterPath, compareReports}) => {

@@ -712,3 +712,7 @@ evidence of an observed failing test. No Windows-local tests were run.
 This is a local developer capability and acceptance proof, **not** a new
 published SDK defect, equivalence of confidential captures, cross-renderer
 certification, verified customer use or revenue.
+
+## Direct structural baseline check from a private JSONL capture (2026-11-11)
+
+The opt-in `src/summary-compare.mjs --before baseline-summary.json --after-capture private-new.jsonl --strict` path replays the new local JSONL using the existing **pinned published** `@a2ui/web_core@0.15.0` headless CLI and compares the safe structural summary in memory. It creates no intermediate report, preserving the private capture locally and emitting only allowlisted operation labels, step indices, counts and coverage flags. `--verify-chunks` opt-in remains bounded by the existing 512 KiB replay limit. A deterministic test changes private model values (MATCH by design), inserts an additional legal model update (DRIFT), exercises chunk-verified equality, refuses malformed private capture data, mutually exclusive flags and evidence overwrite. This is **structural workflow** regression detection, not value-level same-capture SDK parity or browser evidence. GitHub Actions receipts and exact head SHA must be recorded only after independent verification; no Windows-local test pass is asserted.
