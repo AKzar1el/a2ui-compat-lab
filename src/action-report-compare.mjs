@@ -1,4 +1,5 @@
 import {isDeepStrictEqual} from 'node:util';
+import {safeImplementationLabel} from './implementation-provenance.mjs';
 
 const FIELDS = ['kind','surfaceId','componentId','exists','components','data','actionCount'];
 const isObject = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -68,7 +69,7 @@ export function compareActionReports(before, after) {
   return {
     schemaVersion: 1, kind: 'a2ui-action-observation-comparison', protocol: 'v0.9',
     fixtureSha256: a.fixtureSha256, steps: a.steps,
-    beforeImplementation: a.implementation, afterImplementation: b.implementation,
+    beforeImplementation: safeImplementationLabel(a.implementation), afterImplementation: safeImplementationLabel(b.implementation),
     differingSteps: differences.length, differences,
     differingActions: changedActionIndices.length, changedActionIndices,
     ok: differences.length === 0 && changedActionIndices.length === 0,

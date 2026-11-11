@@ -265,3 +265,36 @@ test('CLI does not disclose inaccessible paths in capture Markdown workflows', (
   assert.match(result.stderr, /Cannot write comparison report/);
   assert.doesNotMatch(result.stderr, /PRIVATE_OUTPUT_PARENT_SENTINEL|a2ui-compare-/);
 }));
+
+
+test('capture/action comparison refuses to echo untrusted implementation metadata', () => withReports(dir => {
+  const actionCli = fileURLToPath(new URL('../src/replay-action-report.mjs', import.meta.url));
+  const actualActions = run(actionCli, []);
+  assert.equal(actualActions.status, 0, actualActions.stderr);
+  const samples = [
+    {mode: [], report: actualReport()},
+    {mode: ['--actions'], report: JSON.parse(actualActions.stdout)},
+  ];
+  for (const {mode, report} of samples) {
+    const before = structuredClone(report);
+    const after = structuredClone(report);
+    before.implementation = 'PRIVATE_IMPLEMENTATION_METADATA_SENTINEL\nINJECTED_LOG_LINE';
+    const original = join(dir, mode.length ? 'action-before.json' : 'capture-before.json');
+    const candidate = join(dir, mode.length ? 'action-after.json' : 'capture-after.json');
+    writeFileSync(original, JSON.stringify(before));
+    writeFileSync(candidate, JSON.stringify(after));
+    for (const format of [[], ['--json'], ['--markdown']]) {
+      const result = run(diffCli, [...mode, '--before', original, '--after', candidate, ...format]);
+      assert.equal(result.status, 0, result.stderr);
+      assert.doesNotMatch(result.stdout + result.stderr,
+        /PRIVATE_IMPLEMENTATION_METADATA_SENTINEL|INJECTED_LOG_LINE/,
+        'comparison output must redact untrusted producer-supplied identifiers');
+      if (format.includes('--json')) {
+        const parsed = JSON.parse(result.stdout);
+        assert.equal(parsed.ok, true);
+        assert.equal(parsed.afterImplementation, report.implementation,
+          'known published SDK provenance should remain useful');
+      }
+    }
+  }
+}));
