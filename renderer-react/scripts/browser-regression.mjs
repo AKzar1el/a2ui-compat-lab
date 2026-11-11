@@ -2446,7 +2446,7 @@ try {
 
 // Exercise the same private-JSONL user path with real Chromium, not a mocked DOM.
 const exampleMessages = JSON.parse(fixture).map(entry => entry.message);
-const encodedExample = Buffer.from(exampleMessages.map(message => JSON.stringify(message)).join('\\n') + '\\n');
+const encodedExample = Buffer.from(exampleMessages.map(message => JSON.stringify(message)).join('\n') + '\n');
 const decodedExample = decodeBrowserCapture(encodedExample);
 assert.deepEqual(decodedExample, exampleMessages);
 assert.throws(() => decodeBrowserCapture(Buffer.from('{"version":"v0.9"}')), /Invalid browser capture/,
