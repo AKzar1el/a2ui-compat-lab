@@ -69,3 +69,15 @@ reveals a capture digest (JSON mode only), comparison shape, step counts and
 which fields changed; the raw captures and full replay reports must remain
 private. This is an application workflow aid, not evidence of new published-SDK
 defects, browser behavior or external adoption.
+
+## Implementation identifier safety
+
+A replay report's `implementation` is producer-controlled text, not trusted
+package provenance. Comparison **text and JSON** outputs retain only a bounded,
+well-formed published `@a2ui/web_core@x.y.z` label (optionally followed by the
+literal `MessageProcessor` role). Any other identifier is displayed as
+`unverified implementation`, preventing arbitrary report metadata, terminal
+escapes or embedded newlines from leaking into CI output and shared review
+summaries. Markdown continues to omit the identifier entirely. Normalization
+does **not** authenticate the installed SDK or prove any report was generated
+by that version; inspect your pinned environment separately.
