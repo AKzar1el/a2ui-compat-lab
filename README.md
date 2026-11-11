@@ -69,8 +69,10 @@ For issue triage or review, opt into a **value-free, offline** summary:
 node src/replay-file.mjs --input capture.jsonl --summary --verify-chunks --out out/capture-summary.json
 ```
 
-The summary records ordered step indices, surface presence, component/action
-counts, and whether byte-chunk replay was verified. It excludes model values,
+The summary records ordered step indices, fixed v0.9 message operation names
+(`createSurface`, `updateComponents`, `updateDataModel`, `deleteSurface`, or
+`unclassified`), surface presence, component/action counts, actions emitted
+at each step, and whether byte-chunk replay was verified. It excludes model values,
 surface/component identifiers, implementation labels and the input digest.
 The source capture remains local and the output refuses to overwrite existing
 evidence. Counts and event patterns can still be sensitive: inspect before

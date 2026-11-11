@@ -11,6 +11,14 @@ const MAX_FRAMES = 10000;
 const MAX_CHUNK_VERIFY_BYTES = 512 * 1024;
 const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks] [--summary]';
 
+// Emit only protocol-defined operation names; never copy producer-controlled keys.
+const EVENT_OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
+function safeOperation(message) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return 'unclassified';
+  const names = EVENT_OPERATIONS.filter(name => Object.hasOwn(message, name));
+  return names.length === 1 ? names[0] : 'unclassified';
+}
+
 // This CLI handles local captures only: never fetch, upload or run supplied code.
 function options(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
@@ -57,7 +65,7 @@ function redactCaptureError(stage, run) {
   }
 }
 
-function replayCapture(raw, {verifyChunks = false} = {}) {
+function replayCapture(raw, {verifyChunks = false, summary = false} = {}) {
   if (raw.length === 0 || raw.length > MAX_INPUT_BYTES)
     throw new RangeError('Capture must be 1 byte to 4 MiB');
   if (verifyChunks && raw.length > MAX_CHUNK_VERIFY_BYTES)
@@ -92,6 +100,7 @@ function replayCapture(raw, {verifyChunks = false} = {}) {
     events: messages.length,
     replay,
   };
+  if (summary) report.eventOperations = messages.map(safeOperation);
   if (verifyChunks) {
     const baseline = JSON.stringify(replay);
     const chunkSizes = [1, 7, 57, raw.length];
@@ -150,7 +159,7 @@ try {
   if (help) {
     console.log(USAGE);
   } else {
-    const observed = replayCapture(readCaptureFile(input), {verifyChunks});
+    const observed = replayCapture(readCaptureFile(input), {verifyChunks, summary});
     // A shareable structural summary never includes capture values, IDs, or its
     // digest; raw evidence remains private unless the caller explicitly omits --summary.
     const view = summary ? {
@@ -159,11 +168,13 @@ try {
       protocol: observed.protocol,
       events: observed.events,
       chunksVerified: observed.allChunksMatch === true,
-      steps: observed.replay.snapshots.map(snapshot => ({
+      steps: observed.replay.snapshots.map((snapshot, index) => ({
         index: snapshot.index,
+        operation: observed.eventOperations[index],
         surfacePresent: snapshot.exists,
         componentCount: snapshot.components.length,
         actionCount: snapshot.actionCount,
+        actionsEmitted: snapshot.actionCount - (index === 0 ? 0 : observed.replay.snapshots[index - 1].actionCount),
       })),
     } : observed;
     const report = JSON.stringify(view, null, 2) + '\n';
