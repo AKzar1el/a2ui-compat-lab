@@ -2461,6 +2461,18 @@ assert.equal(browserCaptureReport.steps.at(-1).visibleButtonCount, 1);
 assert.equal(browserCaptureReport.actionsEmitted, 1,
   'One real Chromium pointer action must reach the published SDK');
 assert.equal(browserCaptureReport.clickSingleButton, true);
+const keyboardCaptureReport = await runBrowserCapture(decodedExample, {pressSingleButtonEnter: true});
+assert.equal(keyboardCaptureReport.actionsEmitted, 1,
+  'One Tab-to-Button Enter activation must reach the real published renderer');
+assert.equal(keyboardCaptureReport.pressSingleButtonEnter, true);
+assert.equal(keyboardCaptureReport.keyboardFocusVerified, true);
+assert.equal(keyboardCaptureReport.clickSingleButton, false);
+assert.doesNotMatch(JSON.stringify(keyboardCaptureReport), /action-replay|alpha|Confirm|selection|surfaceId/,
+  'Keyboard browser capture evidence must exclude model values and identifiers');
+await assert.rejects(
+  runBrowserCapture(decodedExample, {clickSingleButton: true, pressSingleButtonEnter: true}),
+  {message: 'Choose exactly one browser action mode'},
+  'Mutually exclusive action modes must be enforced');
 assert.doesNotMatch(JSON.stringify(browserCaptureReport), /action-replay|alpha|Confirm|selection|surfaceId/,
   'A browser capture structural report must not publish model values or identifiers');
 // A capture with no initial surface cannot establish a real renderer replay.
