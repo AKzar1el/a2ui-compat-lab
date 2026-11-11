@@ -191,6 +191,39 @@ test('oversized opt-in byte replay fails closed without writing an artifact', ()
   assert.equal(existsSync(output), false);
 }));
 
+test('opt-in safe capture summary is useful for sharing without replay values or identifiers', () => inTemp(dir => {
+  const localized = structuredClone(fixture);
+  localized[2].updateDataModel.value.title = 'PRIVATE_SUMMARY_VALUE_SENTINEL';
+  const input = join(dir, 'private-capture.jsonl');
+  const output = join(dir, 'review', 'safe-summary.json');
+  writeFileSync(input, Buffer.from(localized.map(message => JSON.stringify(message)).join('\n') + '\n'));
+
+  let result = invoke(['--input', input, '--summary', '--verify-chunks']);
+  assert.equal(result.status, 0, result.stderr);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.schemaVersion, 1);
+  assert.equal(summary.kind, 'a2ui-capture-safe-summary');
+  assert.equal(summary.protocol, 'v0.9');
+  assert.equal(summary.events, 5);
+  assert.equal(summary.chunksVerified, true);
+  assert.equal(summary.steps.length, summary.events);
+  assert.deepEqual(summary.steps.map(step => step.index), [0, 1, 2, 3, 4]);
+  assert.equal(summary.steps.at(-1).surfacePresent, false);
+  assert.ok(summary.steps.every(step => Number.isInteger(step.componentCount) &&
+    Number.isInteger(step.actionCount)));
+  assert.doesNotMatch(result.stdout, /PRIVATE_SUMMARY_VALUE_SENTINEL|captureSha256|implementation|surfaceId|updateDataModel|\"data\"|\"components\"/);
+
+  result = invoke(['--input', input, '--summary', '--out', output]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.equal(JSON.parse(readFileSync(output, 'utf8')).chunksVerified, false);
+  const saved = readFileSync(output, 'utf8');
+  result = invoke(['--input', input, '--summary', '--out', output]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Capture report already exists/);
+  assert.equal(readFileSync(output, 'utf8'), saved);
+}));
+
 test('unknown, duplicate or absent flags exit with usage and no output', () => {
   for (const args of [[], ['--input'], ['--unknown', 'x'], ['--input', 'a', '--input', 'b'], ['--input', 'a', '--verify-chunks', '--verify-chunks']]) {
     const result = invoke(args);
