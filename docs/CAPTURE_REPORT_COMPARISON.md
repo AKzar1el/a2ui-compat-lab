@@ -119,6 +119,21 @@ Use `src/summary-compare.mjs` to compare the **structure** of two
 node src/summary-compare.mjs --before before-summary.json --after after-summary.json --strict --out structural-diff.json
 ```
 
+Alternatively, compare a saved safe baseline against a fresh private JSONL
+capture without saving a second summary:
+
+```sh
+node src/summary-compare.mjs --before before-summary.json --after-capture private-new.jsonl --strict --out structural-diff.json
+```
+
+The `--after-capture` path is replayed by the existing pinned published
+v0.9 SDK capture CLI in a bounded shell-free child process, emitting only its
+allowlisted safe summary in memory. Use `--verify-chunks` with this mode if
+you want the same bounded UTF-8 transport verification as the baseline.
+`--after` and `--after-capture` are mutually exclusive. Input and processing
+errors do not disclose file paths or capture contents; a failed comparison does
+not write a report. This command is headless, not Chromium/UI replay.
+
 The offline CLI accepts only the exact allowlisted `a2ui-capture-safe-summary`
 schema (v0.9), bounded to 10,000 steps and a 4 MiB input file. It validates
 consecutive indices, cumulative action-count monotonicity and exact action deltas,

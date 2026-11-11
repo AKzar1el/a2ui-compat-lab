@@ -90,6 +90,19 @@ node src/replay-file.mjs --input after.jsonl --summary --out after-summary.json
 node src/summary-compare.mjs --before before-summary.json --after after-summary.json --strict --out structural-diff.json
 ```
 
+For a one-command CI check against a saved baseline, pass the **new private
+capture directly**; no intermediate summary or raw replay report is written:
+
+```sh
+node src/summary-compare.mjs --before before-summary.json --after-capture new-private.jsonl --strict --out structural-diff.json
+```
+
+Add `--verify-chunks` when the baseline was generated with chunk verification.
+This internally runs the pinned published SDK in a bounded child process, never
+calls a hosted service, and refuses invalid captures with path-free diagnostics.
+The original private JSONL stays local. This checks observed v0.9 **structure**,
+not value-level parity, user intent, or browser behavior.
+
 The comparison reports changed operation labels, surface presence, component and
 action counts, and chunk-verification coverage with a bounded list of affected
 step indices. Exit codes: 0 match, 1 drift with `--strict`, 2 invalid inputs

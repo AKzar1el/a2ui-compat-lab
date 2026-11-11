@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+import {execFileSync} from 'node:child_process';
 import {mkdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 
-const USAGE = 'Usage: node src/summary-compare.mjs --before before-summary.json --after after-summary.json [--strict] [--out result.json]';
+const USAGE = 'Usage: node src/summary-compare.mjs --before baseline-summary.json (--after summary.json | --after-capture capture.jsonl) [--verify-chunks] [--strict] [--out result.json]';
 const MAX_REPORT_BYTES = 4 * 1024 * 1024;
 const MAX_STEPS = 10000;
 const MAX_REVIEW_INDICES = 100;
@@ -50,19 +52,24 @@ function validateSummary(report) {
 
 function parseArgs(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const options = {strict: false};
+  const options = {strict: false, verifyChunks: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !options.strict) {
       options.strict = true;
-    } else if ((arg === '--before' || arg === '--after' || arg === '--out') &&
-        !options[arg.slice(2)] && argv[i + 1] && !argv[i + 1].startsWith('--')) {
-      options[arg.slice(2)] = resolve(argv[++i]);
+    } else if (arg === '--verify-chunks' && !options.verifyChunks) {
+      options.verifyChunks = true;
+    } else if (['--before', '--after', '--after-capture', '--out'].includes(arg) &&
+        argv[i + 1] && !argv[i + 1].startsWith('--')) {
+      const key = arg === '--after-capture' ? 'afterCapture' : arg.slice(2);
+      if (options[key]) throw new Error(USAGE);
+      options[key] = resolve(argv[++i]);
     } else {
       throw new Error(USAGE);
     }
   }
-  if (!options.before || !options.after) throw new Error(USAGE);
+  if (!options.before || Boolean(options.after) === Boolean(options.afterCapture) ||
+      (options.verifyChunks && !options.afterCapture)) throw new Error(USAGE);
   return options;
 }
 
@@ -85,6 +92,27 @@ function readSummary(path) {
     throw new Error('Invalid summary encoding or JSON; input contents omitted');
   }
   return validateSummary(value);
+}
+
+// Use the existing pinned-SDK capture CLI in a bounded, shell-free child process.
+// It emits only the allowlisted safe summary; raw capture reports are never
+// written to disk or returned in parent diagnostics.
+function summaryFromCapture(path, verifyChunks) {
+  let output;
+  try {
+    output = execFileSync(process.execPath, [
+      fileURLToPath(new URL('./replay-file.mjs', import.meta.url)),
+      '--input', path, '--summary', ...(verifyChunks ? ['--verify-chunks'] : []),
+    ], {encoding: 'utf8', timeout: 30000, maxBuffer: MAX_REPORT_BYTES,
+      stdio: ['ignore', 'pipe', 'pipe']});
+  } catch {
+    throw new Error('Cannot replay capture with pinned SDK; input contents and path omitted');
+  }
+  try {
+    return validateSummary(JSON.parse(output));
+  } catch {
+    throw new Error('Invalid generated safe summary; input contents omitted');
+  }
 }
 
 function compareSummaries(before, after) {
@@ -140,7 +168,8 @@ try {
   if (args.help) {
     console.log(USAGE);
   } else {
-    const report = compareSummaries(readSummary(args.before), readSummary(args.after));
+    const report = compareSummaries(readSummary(args.before),
+      args.afterCapture ? summaryFromCapture(args.afterCapture, args.verifyChunks) : readSummary(args.after));
     const output = JSON.stringify(report, null, 2) + '\n';
     if (args.out) saveReport(args.out, output);
     else process.stdout.write(output);
