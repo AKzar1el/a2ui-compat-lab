@@ -198,3 +198,63 @@ test('writes drift evidence exclusively, preserves it on retries and hides paths
   assert.equal(result.status, 2);
   assert.doesNotMatch(result.stderr, /PRIVATE_SUMMARY_PATH_SENTINEL|a2ui-safe-diff-/);
 }));
+
+test('two private JSONL captures compare their observed structure without intermediate reports', () => withReports(({dir}) => {
+  const messages = readFileSync(sample, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  messages[2].updateDataModel.value.title = 'PRIVATE_PAIR_VALUE_SENTINEL';
+  const candidate = join(dir, 'PRIVATE_PAIR_PATH_SENTINEL.jsonl');
+  writeFileSync(candidate, messages.map(JSON.stringify).join('\n') + '\n');
+
+  let result = run(compare, ['--before-capture', sample, '--after-capture', candidate, '--strict']);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.result, 'MATCH', 'Value changes alone must not be treated as structural drift');
+  assert.equal(report.beforeEvents, 5);
+  assert.equal(report.afterEvents, 5);
+  assert.equal(report.changedSteps, 0);
+  assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE_PAIR_VALUE_SENTINEL|PRIVATE_PAIR_PATH_SENTINEL|surfaceId|captureSha256/);
+  assert.deepEqual(readdirSync(dir), ['PRIVATE_PAIR_PATH_SENTINEL.jsonl'],
+    'No raw or summary intermediate files should be materialized');
+
+  result = run(compare, ['--before-capture', sample, '--after-capture', candidate, '--verify-chunks', '--strict']);
+  assert.equal(result.status, 0, result.stderr);
+  const verified = JSON.parse(result.stdout);
+  assert.equal(verified.beforeChunksVerified, true);
+  assert.equal(verified.afterChunksVerified, true);
+  assert.equal(verified.verificationCoverageChanged, false);
+}));
+
+test('two-capture comparison detects real lifecycle drift and refuses untrusted inputs', () => withReports(({dir, beforePath}) => {
+  const messages = readFileSync(sample, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  messages.splice(4, 0, structuredClone(messages[3]));
+  const candidate = join(dir, 'drifting-private.jsonl');
+  writeFileSync(candidate, messages.map(JSON.stringify).join('\n') + '\n');
+  let result = run(compare, ['--before-capture', sample, '--after-capture', candidate, '--strict']);
+  assert.equal(result.status, 1, result.stderr);
+  const diff = JSON.parse(result.stdout);
+  assert.equal(diff.result, 'DRIFT');
+  assert.equal(diff.beforeEvents, 5);
+  assert.equal(diff.afterEvents, 6);
+  assert.deepEqual(diff.differences.map(entry => entry.index), [4, 5]);
+
+  const privateName = 'PRIVATE_PAIR_ERROR_SENTINEL';
+  const invalid = join(dir, privateName + '.jsonl');
+  writeFileSync(invalid, '{"bad":PRIVATE_PAIR_ERROR_SENTINEL}\n');
+  result = run(compare, ['--before-capture', invalid, '--after-capture', sample]);
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, '');
+  assert.doesNotMatch(result.stderr, /PRIVATE_PAIR_ERROR_SENTINEL|a2ui-safe-diff-/);
+
+  const baseline = run(replay, ['--input', sample, '--summary']);
+  assert.equal(baseline.status, 0, baseline.stderr);
+  writeFileSync(beforePath, baseline.stdout);
+  for (const args of [
+    ['--before', beforePath, '--before-capture', sample, '--after-capture', sample],
+    ['--before-capture', sample, '--after', beforePath, '--after-capture', sample],
+    ['--before', beforePath, '--after', beforePath, '--verify-chunks'],
+  ]) {
+    result = run(compare, args);
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Usage:/);
+  }
+}));
