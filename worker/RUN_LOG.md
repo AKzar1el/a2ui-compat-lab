@@ -743,3 +743,41 @@
 - **Acceptance and limits:** before/after private JSONL can be compared without writing intermediate summaries; value-only mutations MATCH and inserted valid events DRIFT, optional chunks verify both captures, privacy errors are path-free. Strict status 0/1/2 semantics preserved; structure is not value parity, anonymization, or browser execution of the supplied capture. No external customer/revenue evidence.
 - **Files:** `src/summary-compare.mjs`, `test/summary-compare.test.mjs`, `README.md`, `docs/CAPTURE_REPORT_COMPARISON.md`, `docs/EVIDENCE.md`, this append-only log. No workflow, lockfile, security, merger configuration, sibling repo, scheduler or paid-service changes.
 - **Remaining:** verify this final docs/journal-inclusive branch SHA, final push and PR CI, clean ancestry/reviews/allowlist. Only then place one full-40-character `MERGER_HANDOFF` line in the PR BODY. Existing A2UI-only guarded merger owns integration, and future run must verify independent post-merge main CI. Canonical master remains local-only.
+
+## 2026-11-11 — Offline developer JSONL to React Chromium (PR #88)
+
+- **Workspace and recovery:** God v5 bound to exact existing A2UI checkout,
+  origin https://github.com/AKzar1el/a2ui-compat-lab.git. Historical local
+  revshot/a2ui-node24-actions-20261107 remains at a1a3061 with untouched
+  untracked renderer-react/. No checkout, reset, clean, stash or Windows-local
+  source/test operation. Before choosing work, PR #87 was confirmed merged;
+  remote main 3ce728cd391578ede093288caae0e545bb6d9125 had green independent
+  CI #43001739152 and zero open target PRs.
+- **Knowledge and selection:** Bounded canonical index and project charter,
+  evidence and run-log tail consulted; browser/capture/replay/renderer terms
+  matched live #83-#87 addendum; no archived research/dead-end triplet.
+  Compared another browser-only regression with local developer-supplied
+  Chromium replay. Chose the latter: original fixed browser fixture cannot
+  reproduce a developer's private transcript in an actual published renderer.
+  No verified customer demand, upstream defect or revenue claim.
+- **Scoped GitHub-only branch:** revshot/a2ui-browser-private-capture-replay-20261111-12,
+  PR https://github.com/AKzar1el/a2ui-compat-lab/pull/88 from verified main.
+  Added bounded JSONL ingestion, opt-in one-Button Chromium pointer-action
+  check, origin-only network guard, redacted structural report, exclusive output,
+  default-browser regression acceptance, documentation and this append-only log.
+- **Actual CI:** Initial 0ee63fbb source failed browser CI #43011185289 due a
+  test fixture with literal backslash-n; 299ea009 corrected it and
+  #43011325725 exposed the empty root needing attached rather than visible
+  wait. Fix b00069ccebb484f458795c306f50a8c25ea621c1 passed
+  https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/43011497182
+  in sdk-parity/Python, real React/Chromium and dependency-audit (existing
+  unresolved Zod3 HIGH exception to Dec 7 only). No local test claim.
+- **Allowed files:** renderer-react/scripts/browser-capture-replay.mjs,
+  renderer-react/scripts/browser-regression.mjs, renderer-react/src/main.jsx,
+  README.md, docs/EVIDENCE.md, worker/RUN_LOG.md. No dependency, lockfile,
+  workflow, security, merger, sibling repository, scheduler or paid changes.
+- **Next:** Verify receipt-inclusive final SHA in PR/push CI, allowlist,
+  current main ancestry and reviews/holds; add exactly one final SHA bound
+  MERGER_HANDOFF in PR body only after all required checks pass. Guarded
+  integration and independent post-merge main CI remain for existing A2UI
+  merger. Real adoption/revenue remain unverified.

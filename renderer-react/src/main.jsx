@@ -18,10 +18,11 @@ function applyMessage(source) {
     message.createSurface.catalogId = basicCatalog.id;
   processor.processMessages([message]);
 }
-for (const step of steps.slice(0, 3)) applyMessage(step.message);
+const captureMode = new URLSearchParams(window.location.search).get('capture') === '1';
+if (!captureMode) for (const step of steps.slice(0, 3)) applyMessage(step.message);
 const initial = processor.getSurface('action-replay');
-if (!initial) throw new Error('Published SDK failed to create fixture surface');
-initial.onError.subscribe(error => errors.push(structuredClone(error)));
+if (!captureMode && !initial) throw new Error('Published SDK failed to create fixture surface');
+if (initial) initial.onError.subscribe(error => errors.push(structuredClone(error)));
 
 window.__a2uiLab = Object.freeze({
   applyMessage,
