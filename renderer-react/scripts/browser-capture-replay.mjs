@@ -7,7 +7,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -15,11 +15,13 @@ const OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'del
 
 function options(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const parsed = {clickSingleButton: false};
+  const parsed = {clickSingleButton: false, pressSingleButtonEnter: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
       parsed.clickSingleButton = true;
+    } else if (arg === '--press-single-button-enter' && !parsed.pressSingleButtonEnter) {
+      parsed.pressSingleButtonEnter = true;
     } else if ((arg === '--input' || arg === '--out') &&
       argv[i + 1] && !argv[i + 1].startsWith('--') && !parsed[arg.slice(2)]) {
       parsed[arg.slice(2)] = resolve(argv[++i]);
@@ -27,7 +29,7 @@ function options(argv) {
       throw new Error(USAGE);
     }
   }
-  if (!parsed.input) throw new Error(USAGE);
+  if (!parsed.input || (parsed.clickSingleButton && parsed.pressSingleButtonEnter)) throw new Error(USAGE);
   return parsed;
 }
 
@@ -73,9 +75,11 @@ function readCapture(input) {
 }
 
 /** Replays developer-provided messages in a real published React/Chromium renderer. */
-export async function runBrowserCapture(messages, {clickSingleButton = false} = {}) {
+export async function runBrowserCapture(messages, {clickSingleButton = false, pressSingleButtonEnter = false} = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
+  if (clickSingleButton && pressSingleButtonEnter)
+    throw new Error('Choose exactly one browser action mode');
   if (!messages.some(message => message && typeof message === 'object' &&
       message.version === 'v0.9' && Object.hasOwn(message, 'createSurface')))
     throw new Error('Browser capture requires a createSurface event');
@@ -153,18 +157,29 @@ export async function runBrowserCapture(messages, {clickSingleButton = false} = 
         throw new Error('Chromium reported replay errors or denied network traffic');
     }
     const before = (await page.evaluate(() => window.__a2uiLab.trace())).actions.length;
-    if (clickSingleButton) {
+    let keyboardFocusVerified = false;
+    if (clickSingleButton || pressSingleButtonEnter) {
       const buttons = page.getByRole('button');
       if (await buttons.count() !== 1)
-        throw new Error('Click mode requires exactly one rendered button');
-      await buttons.first().click({timeout: 7000});
+        throw new Error('Action mode requires exactly one rendered button');
+      if (pressSingleButtonEnter) {
+        // A physical Tab transition tests keyboard reachability, not programmatic focus.
+        await page.keyboard.press('Tab');
+        keyboardFocusVerified = await buttons.first().evaluate(button =>
+          document.activeElement === button);
+        if (!keyboardFocusVerified)
+          throw new Error('Keyboard mode requires a Tab-focusable button');
+        await page.keyboard.press('Enter');
+      } else {
+        await buttons.first().click({timeout: 7000});
+      }
       await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
         before + 1, {timeout: 5000});
     }
     const final = await page.evaluate(() => window.__a2uiLab.trace());
     if (runtimeErrors.length || consoleErrors.length || deniedRequests || deniedSockets)
       throw new Error('Chromium reported runtime, console or network errors');
-    if (clickSingleButton && final.actions.length !== before + 1)
+    if ((clickSingleButton || pressSingleButtonEnter) && final.actions.length !== before + 1)
       throw new Error('Expected exactly one browser action');
     return {
       schemaVersion: 1,
@@ -174,6 +189,8 @@ export async function runBrowserCapture(messages, {clickSingleButton = false} = 
       events: messages.length,
       steps,
       clickSingleButton,
+      pressSingleButtonEnter,
+      keyboardFocusVerified,
       actionsEmitted: final.actions.length,
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
     };
@@ -198,7 +215,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     if (args.help) console.log(USAGE);
     else {
       const report = await runBrowserCapture(readCapture(args.input),
-        {clickSingleButton: args.clickSingleButton});
+        {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
