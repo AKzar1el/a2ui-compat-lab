@@ -76,6 +76,9 @@ function readCapture(input) {
 export async function runBrowserCapture(messages, {clickSingleButton = false} = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
+  if (!messages.some(message => message && typeof message === 'object' &&
+      message.version === 'v0.9' && Object.hasOwn(message, 'createSurface')))
+    throw new Error('Browser capture requires a createSurface event');
   let server;
   let browser;
   const runtimeErrors = [];
@@ -127,10 +130,20 @@ export async function runBrowserCapture(messages, {clickSingleButton = false} = 
       const operation = OPERATIONS.find(key => Object.hasOwn(message, key));
       if (message.version !== 'v0.9' || !operation)
         throw new Error('Invalid browser capture event');
-      await page.evaluate(value => window.__a2uiLab.applyMessage(value), message);
+      try {
+        await page.evaluate(value => window.__a2uiLab.applyMessage(value), message);
+      } catch {
+        // SDK exception messages can embed private surface IDs or model values.
+        throw new Error(operation === 'createSurface'
+          ? 'Browser capture createSurface was not mounted'
+          : 'Browser capture SDK rejected an event');
+      }
       await page.evaluate(() => new Promise(resolve =>
         requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const trace = await page.evaluate(() => window.__a2uiLab.trace());
+      if (operation === 'createSurface' &&
+          !trace.surfaceIds.includes(message.createSurface.surfaceId))
+        throw new Error('Browser capture createSurface was not mounted');
       steps.push({
         index, operation, surfaceCount: trace.surfaceIds.length,
         visibleButtonCount: await page.getByRole('button').count(),
