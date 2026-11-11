@@ -4,7 +4,7 @@ import {mkdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const USAGE = 'Usage: node src/summary-compare.mjs --before baseline-summary.json (--after summary.json | --after-capture capture.jsonl) [--verify-chunks] [--strict] [--out result.json]';
+const USAGE = 'Usage: node src/summary-compare.mjs (--before baseline-summary.json | --before-capture before.jsonl) (--after summary.json | --after-capture after.jsonl) [--verify-chunks] [--strict] [--out result.json]';
 const MAX_REPORT_BYTES = 4 * 1024 * 1024;
 const MAX_STEPS = 10000;
 const MAX_REVIEW_INDICES = 100;
@@ -59,17 +59,20 @@ function parseArgs(argv) {
       options.strict = true;
     } else if (arg === '--verify-chunks' && !options.verifyChunks) {
       options.verifyChunks = true;
-    } else if (['--before', '--after', '--after-capture', '--out'].includes(arg) &&
+    } else if (['--before', '--before-capture', '--after', '--after-capture', '--out'].includes(arg) &&
         argv[i + 1] && !argv[i + 1].startsWith('--')) {
-      const key = arg === '--after-capture' ? 'afterCapture' : arg.slice(2);
+      const key = arg === '--after-capture' ? 'afterCapture' :
+        arg === '--before-capture' ? 'beforeCapture' : arg.slice(2);
       if (options[key]) throw new Error(USAGE);
       options[key] = resolve(argv[++i]);
     } else {
       throw new Error(USAGE);
     }
   }
-  if (!options.before || Boolean(options.after) === Boolean(options.afterCapture) ||
-      (options.verifyChunks && !options.afterCapture)) throw new Error(USAGE);
+  if (Boolean(options.before) === Boolean(options.beforeCapture) ||
+      Boolean(options.after) === Boolean(options.afterCapture) ||
+      (options.verifyChunks && !options.beforeCapture && !options.afterCapture))
+    throw new Error(USAGE);
   return options;
 }
 
@@ -168,8 +171,11 @@ try {
   if (args.help) {
     console.log(USAGE);
   } else {
-    const report = compareSummaries(readSummary(args.before),
-      args.afterCapture ? summaryFromCapture(args.afterCapture, args.verifyChunks) : readSummary(args.after));
+    const before = args.beforeCapture ? summaryFromCapture(args.beforeCapture, args.verifyChunks) :
+      readSummary(args.before);
+    const after = args.afterCapture ? summaryFromCapture(args.afterCapture, args.verifyChunks) :
+      readSummary(args.after);
+    const report = compareSummaries(before, after);
     const output = JSON.stringify(report, null, 2) + '\n';
     if (args.out) saveReport(args.out, output);
     else process.stdout.write(output);

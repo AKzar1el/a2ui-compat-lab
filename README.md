@@ -174,6 +174,16 @@ The offline report includes a content SHA-256, event count and per-event compone
 
 Capture size is capped at 4 MiB, raw lines at 256 KiB and frames (including blank lines) at 10,000; malformed UTF-8 and non-newline-terminated input are rejected. **Reports reproduce captured data-model values, potentially including private information.** Keep real customer traces local and review or redact them before sharing CI artifacts.
 
+## Compare two private captures without intermediate reports
+
+For a local structural regression check between two private A2UI v0.9 JSONL captures, run:
+
+```bash
+node src/summary-compare.mjs --before-capture old.jsonl --after-capture new.jsonl --strict --out out/structural-diff.json
+```
+
+Both inputs are replayed separately by the pinned published headless SDK in bounded child processes. Only fixed lifecycle-operation names and per-event state/action **counts** are compared. No intermediate replay or summary report is saved, and existing output files are never overwritten. Add `--verify-chunks` to verify both captures at bounded UTF-8 byte boundaries. A matching observed structure returns 0, drift returns 1 with `--strict`, and malformed inputs return 2. Model-value changes alone can MATCH: this is **not** value parity, evidence of browser behavior, or guaranteed anonymization. Keep private captures local and review structural metadata before publishing.
+
 ## Compare real Chromium replay evidence offline
 
 After two successful real-browser runs using the **same fixture**, compare their JSON traces before and after a deliberate published SDK or application update:
