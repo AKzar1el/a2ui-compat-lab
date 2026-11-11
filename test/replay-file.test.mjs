@@ -209,6 +209,11 @@ test('opt-in safe capture summary is useful for sharing without replay values or
   assert.equal(summary.steps.length, summary.events);
   assert.deepEqual(summary.steps.map(step => step.index), [0, 1, 2, 3, 4]);
   assert.equal(summary.steps.at(-1).surfacePresent, false);
+  assert.deepEqual(summary.steps.map(step => step.operation), [
+    'createSurface', 'updateComponents', 'updateDataModel', 'updateDataModel', 'deleteSurface',
+  ], 'Structural review must explain the A2UI message lifecycle without raw IDs');
+  assert.deepEqual(summary.steps.map(step => step.actionsEmitted), [0, 0, 0, 0, 0]);
+  assert.equal(summary.steps[1].componentCount, 3);
   assert.ok(summary.steps.every(step => Number.isInteger(step.componentCount) &&
     Number.isInteger(step.actionCount)));
   assert.doesNotMatch(result.stdout, /PRIVATE_SUMMARY_VALUE_SENTINEL|captureSha256|implementation|surfaceId|updateDataModel|\"data\"|\"components\"/);
