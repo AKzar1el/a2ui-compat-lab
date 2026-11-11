@@ -94,7 +94,10 @@ node src/replay-file.mjs --input capture.jsonl --summary --verify-chunks --out o
 
 `--summary` returns JSON with `schemaVersion`, `kind`, `protocol`, total
 `events`, a `chunksVerified` boolean and ordered `steps`. Each step has only
-an index, `surfacePresent`, `componentCount` and cumulative `actionCount`.
+an index, a fixed allowlisted `operation` (or `unclassified` for unknown/ambiguous
+messages), `surfacePresent`, `componentCount`, cumulative `actionCount`,
+and per-step `actionsEmitted`. This makes message ordering and action changes
+inspectable without publishing user-controlled event keys or values.
 The summary omits raw action/model values, surface and component IDs, producer
 implementation strings, capture bytes and SHA-256. `chunksVerified: false`
 means verification was **not run**, not that a mismatch was observed.
