@@ -691,3 +691,24 @@ The shared `src/report-output.mjs` helper for the three offline published-SDK he
 - **Failing acceptance proof:** Test-only SHA `3af93f96443bdf7631e5ca108d9d9951e71ec99a`, [CI #42964301743](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42964301743), failed precisely the new five-step timeline assertion while actual Chromium and dependency gates succeeded. Source/docs CI [#42964407116](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42964407116) initially failed because an existing privacy regex forbade the now-intentional literal protocol name `updateDataModel`, not because a captured private value leaked. The test was narrowed to continue forbidding all raw data, identifiers, implementation metadata and sentinel content.
 - **Fix / verification:** Source `1068ec3d931b7956d10f800e1986f3f8036c5a1a`, corrected privacy-test commit `171e47f15c0aa9f692dd057da8af4015a8a70d79`, [CI #42964579351](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42964579351) succeeded in `sdk-parity` (including pinned Python), real `react-browser` and `dependency-audit` under the existing **unresolved** Zod3 HIGH exception to 2026-12-07. Published-SDK lifecycle fixture asserts `createSurface, updateComponents, updateDataModel, updateDataModel, deleteSurface` with zero outbound actions and preserved privacy boundaries; full raw replay behavior is unchanged.
 - **Limits:** Captured event order is structurally sensitive despite omitting values, so inspect before sharing. The CLI is headless; separate Chromium CI does not make this an actual browser trace of that input. This is a tested usability capability, not a novel upstream SDK defect, proof of user demand or revenue. All edits used authorized target-only GitHub APIs; no Windows-local npm/Python/browser tests or release registry probe were performed.
+
+## Privacy-reduced workflow structure comparison (2026-11-11)
+
+The new optional `src/summary-compare.mjs` compares two value-free
+`replay-file --summary` artifacts for bounded structural drift. An offline
+acceptance test first generates a summary using the actual pinned published
+`@a2ui/web_core@0.15.0` MessageProcessor, then uses synthetic
+structural mutations to verify step insertion/removal, changed operation labels,
+component counts, coverage drift, strict exit codes, private-field refusal and
+exclusive no-overwrite evidence writes.
+
+Source/test commit `a9b97b04afe17445953bf5f389b20d7a7f239ef0`
+passed [GitHub Actions #42978534811](https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/42978534811)
+with `sdk-parity` (including pinned Python), real `react-browser`
+and `dependency-audit` (documented unresolved Zod3 exception). The
+test-only push run was cancelled by subsequent source push and is **not**
+evidence of an observed failing test. No Windows-local tests were run.
+
+This is a local developer capability and acceptance proof, **not** a new
+published SDK defect, equivalence of confidential captures, cross-renderer
+certification, verified customer use or revenue.

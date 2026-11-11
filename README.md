@@ -79,6 +79,25 @@ evidence. Counts and event patterns can still be sensitive: inspect before
 sharing. This summary is not a complete SDK trace, browser test, cryptographic
 attestation or proof of anonymity. See [capture comparison guidance](docs/CAPTURE_REPORT_COMPARISON.md).
 
+### Compare two privacy-reduced capture summaries
+
+To check whether the **shape** of two A2UI capture sessions changed without putting
+raw model values or IDs into a CI artifact, save each opt-in summary separately:
+
+```sh
+node src/replay-file.mjs --input before.jsonl --summary --out before-summary.json
+node src/replay-file.mjs --input after.jsonl --summary --out after-summary.json
+node src/summary-compare.mjs --before before-summary.json --after after-summary.json --strict --out structural-diff.json
+```
+
+The comparison reports changed operation labels, surface presence, component and
+action counts, and chunk-verification coverage with a bounded list of affected
+step indices. Exit codes: 0 match, 1 drift with `--strict`, 2 invalid inputs
+or failed output. It never copies values, IDs, implementation metadata or digests.
+**This compares structural workflow shapes, not exact captures or SDK parity:**
+different captures with identical shapes can match. For same-input SDK behavioral
+drift, use the private full-report comparator documented separately.
+
 ## Non-goals and scope
 
 The browser harness is a **narrow React v0.14 integration regression**, not proof of a novel upstream bug. It does not test incompatible React 0.15, other renderers, arbitrary agent output, complete failure recovery, commercial demand, or official A2UI conformance. See [Evidence](docs/EVIDENCE.md) and [Roadmap](docs/ROADMAP.md).
