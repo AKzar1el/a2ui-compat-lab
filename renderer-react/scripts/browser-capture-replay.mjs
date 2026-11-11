@@ -7,21 +7,29 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
+const MAX_BUTTON_INDEX = 31;
+const MAX_KEYBOARD_TABS = 64;
 const OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
 
-function options(argv) {
+export function parseBrowserCaptureOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const parsed = {clickSingleButton: false, pressSingleButtonEnter: false};
+  const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
+    clickButtonIndex: null, pressButtonIndexEnter: null};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
       parsed.clickSingleButton = true;
     } else if (arg === '--press-single-button-enter' && !parsed.pressSingleButtonEnter) {
       parsed.pressSingleButtonEnter = true;
+    } else if ((arg === '--click-button-index' || arg === '--press-button-index-enter') &&
+      /^(0|[1-9][0-9]?)$/.test(argv[i + 1] ?? '')) {
+      const key = arg === '--click-button-index' ? 'clickButtonIndex' : 'pressButtonIndexEnter';
+      if (parsed[key] !== null) throw new Error(USAGE);
+      parsed[key] = Number(argv[++i]);
     } else if ((arg === '--input' || arg === '--out') &&
       argv[i + 1] && !argv[i + 1].startsWith('--') && !parsed[arg.slice(2)]) {
       parsed[arg.slice(2)] = resolve(argv[++i]);
@@ -29,7 +37,12 @@ function options(argv) {
       throw new Error(USAGE);
     }
   }
-  if (!parsed.input || (parsed.clickSingleButton && parsed.pressSingleButtonEnter)) throw new Error(USAGE);
+  const actionModes = Number(parsed.clickSingleButton) + Number(parsed.pressSingleButtonEnter) +
+    Number(parsed.clickButtonIndex !== null) + Number(parsed.pressButtonIndexEnter !== null);
+  if (!parsed.input || actionModes > 1 ||
+      (parsed.clickButtonIndex !== null && parsed.clickButtonIndex > MAX_BUTTON_INDEX) ||
+      (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX))
+    throw new Error(USAGE);
   return parsed;
 }
 
@@ -75,11 +88,19 @@ function readCapture(input) {
 }
 
 /** Replays developer-provided messages in a real published React/Chromium renderer. */
-export async function runBrowserCapture(messages, {clickSingleButton = false, pressSingleButtonEnter = false} = {}) {
+export async function runBrowserCapture(messages, {
+  clickSingleButton = false, pressSingleButtonEnter = false,
+  clickButtonIndex = null, pressButtonIndexEnter = null,
+} = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
-  if (clickSingleButton && pressSingleButtonEnter)
-    throw new Error('Choose exactly one browser action mode');
+  const actionModes = Number(clickSingleButton) + Number(pressSingleButtonEnter) +
+    Number(clickButtonIndex !== null) + Number(pressButtonIndexEnter !== null);
+  if (actionModes > 1) throw new Error('Choose exactly one browser action mode');
+  for (const index of [clickButtonIndex, pressButtonIndexEnter]) {
+    if (index !== null && (!Number.isSafeInteger(index) || index < 0 || index > MAX_BUTTON_INDEX))
+      throw new Error('Invalid browser button index');
+  }
   if (!messages.some(message => message && typeof message === 'object' &&
       message.version === 'v0.9' && Object.hasOwn(message, 'createSurface')))
     throw new Error('Browser capture requires a createSurface event');
@@ -158,20 +179,28 @@ export async function runBrowserCapture(messages, {clickSingleButton = false, pr
     }
     const before = (await page.evaluate(() => window.__a2uiLab.trace())).actions.length;
     let keyboardFocusVerified = false;
-    if (clickSingleButton || pressSingleButtonEnter) {
+    const selectedIndex = clickSingleButton || pressSingleButtonEnter ? 0 :
+      clickButtonIndex !== null ? clickButtonIndex : pressButtonIndexEnter;
+    if (selectedIndex !== null) {
       const buttons = page.getByRole('button');
-      if (await buttons.count() !== 1)
+      const count = await buttons.count();
+      if ((clickSingleButton || pressSingleButtonEnter) && count !== 1)
         throw new Error('Action mode requires exactly one rendered button');
-      if (pressSingleButtonEnter) {
-        // A physical Tab transition tests keyboard reachability, not programmatic focus.
-        await page.keyboard.press('Tab');
-        keyboardFocusVerified = await buttons.first().evaluate(button =>
-          document.activeElement === button);
+      if (selectedIndex >= count)
+        throw new Error('Action mode button index is outside rendered range');
+      const selected = buttons.nth(selectedIndex);
+      if (pressSingleButtonEnter || pressButtonIndexEnter !== null) {
+        // Physical Tab traversal verifies reachability instead of forcing DOM focus.
+        for (let attempt = 0; attempt < MAX_KEYBOARD_TABS; attempt++) {
+          await page.keyboard.press('Tab');
+          keyboardFocusVerified = await selected.evaluate(button => document.activeElement === button);
+          if (keyboardFocusVerified) break;
+        }
         if (!keyboardFocusVerified)
           throw new Error('Keyboard mode requires a Tab-focusable button');
         await page.keyboard.press('Enter');
       } else {
-        await buttons.first().click({timeout: 7000});
+        await selected.click({timeout: 7000});
       }
       await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
         before + 1, {timeout: 5000});
@@ -179,7 +208,7 @@ export async function runBrowserCapture(messages, {clickSingleButton = false, pr
     const final = await page.evaluate(() => window.__a2uiLab.trace());
     if (runtimeErrors.length || consoleErrors.length || deniedRequests || deniedSockets)
       throw new Error('Chromium reported runtime, console or network errors');
-    if ((clickSingleButton || pressSingleButtonEnter) && final.actions.length !== before + 1)
+    if (selectedIndex !== null && final.actions.length !== before + 1)
       throw new Error('Expected exactly one browser action');
     return {
       schemaVersion: 1,
@@ -190,6 +219,8 @@ export async function runBrowserCapture(messages, {clickSingleButton = false, pr
       steps,
       clickSingleButton,
       pressSingleButtonEnter,
+      clickButtonIndex,
+      pressButtonIndexEnter,
       keyboardFocusVerified,
       actionsEmitted: final.actions.length,
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
@@ -211,11 +242,12 @@ function saveReport(path, content) {
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
-    const args = options(process.argv.slice(2));
+    const args = parseBrowserCaptureOptions(process.argv.slice(2));
     if (args.help) console.log(USAGE);
     else {
       const report = await runBrowserCapture(readCapture(args.input),
-        {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter});
+        {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
+          clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);

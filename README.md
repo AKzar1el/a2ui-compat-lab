@@ -159,6 +159,8 @@ the documented pinned dependencies and Chromium:
 node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl
 node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --click-single-button --out ../out/browser-summary.json
 node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --press-single-button-enter --out ../out/keyboard-summary.json
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --click-button-index 1 --out ../out/second-button.json
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --press-button-index-enter 1 --out ../out/second-keyboard.json
 ```
 
 Each line must contain one **raw v0.9 A2UI message** (not a message wrapper)
@@ -168,8 +170,14 @@ and verifies that a genuine browser pointer action emits exactly one agent
 event. Alternatively, `--press-single-button-enter` presses **Tab** from the
 initial page focus, checks that the single Button receives real keyboard focus,
 then presses **Enter** and requires exactly one emitted action. The pointer and
-keyboard modes are mutually exclusive. Failed focus/navigation is a failed replay,
-not a silent skip; this is not comprehensive accessibility certification.
+keyboard modes are mutually exclusive. For multi-Button captures use
+`--click-button-index N` or `--press-button-index-enter N` to select
+a zero-based rendered-Button position in DOM order (N = 0 through 31).
+Indexed keyboard mode physically Tabs to the selected Button (at most 64
+transitions), failing closed if it is not reachable. Invalid or out-of-range
+indices and simultaneous action modes fail closed without fallback.
+Failed focus/navigation is a failed replay, not a silent skip; this is
+not comprehensive accessibility certification.
 Browser HTTP and WebSocket traffic is limited to the ephemeral loopback
 Vite origin; no external service or inference endpoint is contacted.
 
