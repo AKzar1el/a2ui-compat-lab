@@ -60,7 +60,7 @@ export function parseBrowserCaptureOptions(argv) {
       parsed.actionSteps.length > MAX_ACTION_STEPS ||
       (parsed.actionSteps.length > 0 && (actionModes !== 0 || parsed.actionAfterEventIndex !== null)) ||
       parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
-        (i > 0 && step.eventIndex <= parsed.actionSteps[i - 1].eventIndex)))
+        (i > 0 && step.eventIndex < parsed.actionSteps[i - 1].eventIndex)))
     throw new Error(USAGE);
   return parsed;
 }
@@ -123,7 +123,7 @@ export async function runBrowserCapture(messages, {
         step.eventIndex >= messages.length || !Number.isSafeInteger(step.buttonIndex) ||
         step.buttonIndex < 0 || step.buttonIndex > MAX_BUTTON_INDEX ||
         !['click', 'enter'].includes(step.mode) ||
-        (index > 0 && step.eventIndex <= actionSteps[index - 1].eventIndex)) ||
+        (index > 0 && step.eventIndex < actionSteps[index - 1].eventIndex)) ||
       (actionSteps.length > 0 && actionAfterEventIndex !== null))
     throw new Error('Invalid browser action plan');
   if (actionModes > 1 || (actionSteps.length > 0 && actionModes !== 0))
@@ -273,10 +273,11 @@ export async function runBrowserCapture(messages, {
         throw new Error('Chromium reported replay errors or denied network traffic');
       if (rejectLoadingPlaceholders && loadingPlaceholderCount > 0)
         throw new Error('Browser capture displayed a transient loading placeholder');
-      const scriptedAction = actionSteps.find(step => step.eventIndex === index);
-      if (scriptedAction)
+      // Preserve the supplied order when multiple user actions share a single agent boundary.
+      const scriptedActions = actionSteps.filter(step => step.eventIndex === index);
+      for (const scriptedAction of scriptedActions)
         await activateButton(scriptedAction.buttonIndex, scriptedAction.mode === 'enter', true);
-      else if (index === actionAfterEventIndex) await activateButton();
+      if (!scriptedActions.length && index === actionAfterEventIndex) await activateButton();
     }
     if (selectedIndex !== null && actionAfterEventIndex === null)
       await activateButton();

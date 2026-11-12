@@ -250,16 +250,19 @@ node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --action
 Each `EVENT:BUTTON:click|enter` step fires **after** that zero-based JSONL event
 (`EVENT` 0-99), on the current rendered Button index (`BUTTON` 0-31);
 `click` uses a real pointer, and `enter` requires real keyboard Tab focus.
-The steps must have strictly increasing event indices, with at most eight
-actions per capture. They cannot be combined with single-action modes or
-`--action-after-event-index`. Missing, removed, or unreachable controls fail
-the replay; no synthetic agent actions are inserted. The structural report
+The steps must have non-decreasing event indices, with at most eight
+actions per capture. Repeating an event index replays multiple Button actions
+in their supplied order before the next agent message, without synthesizing
+an agent response. For example, use `--action-step 2:0:click --action-step
+2:1:enter` to exercise two controls after event 2. Steps cannot be combined
+with single-action modes or `--action-after-event-index`. Missing, removed,
+or unreachable controls fail the replay; no synthetic agent actions are inserted. The structural report
 includes event/button positions, interaction types, and verified action
 counts, **not** model values, action contexts, labels or surface IDs.
 Positions and event order may still expose workflow structure.
 
 The Button must exist and be reachable at the selected step; invalid or
-unreachable steps fail closed. This is a single synthetic user activation at
+unreachable steps fail closed. Each scripted step is a real browser activation at
 a message boundary, not a recorded user event or complete agent round-trip.
 Indexed keyboard mode physically Tabs to the selected Button (at most 64
 transitions), failing closed if it is not reachable. Invalid or out-of-range
