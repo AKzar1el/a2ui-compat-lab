@@ -45,6 +45,26 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline) {
     assert.doesNotMatch(JSON.stringify(changes), /action-replay|alpha|selection|surfaceId/,
       'Structural diff must never copy private values or identifiers');
 
+    // Compare two developer-owned private captures without writing intermediate
+    // browser reports. Actions are deliberately not replayed without a saved plan.
+    const rawPairMatch = join(dir, 'raw-pair-match.json');
+    const pairMatch = run(['--before-capture', capturePath, '--after-capture', capturePath,
+      '--strict', '--out', rawPairMatch]);
+    assert.equal(pairMatch.status, 0, 'Two identical private captures must match in Chromium');
+    assert.equal(JSON.parse(readFileSync(rawPairMatch, 'utf8')).ok, true);
+    assert.equal(pairMatch.stdout, '', 'Raw private capture must not appear in stdout');
+
+    const rawPairDrift = join(dir, 'raw-pair-drift.json');
+    const pairDrift = run(['--before-capture', capturePath, '--after-capture', driftPath,
+      '--strict', '--out', rawPairDrift]);
+    assert.equal(pairDrift.status, 1, 'Real Chromium must detect private capture event drift');
+    const paired = JSON.parse(readFileSync(rawPairDrift, 'utf8'));
+    assert.equal(paired.ok, false);
+    assert.ok(paired.changedSummaryFields.includes('events'));
+    assert.doesNotMatch(JSON.stringify(paired),
+      /action-replay|alpha|selection|surfaceId|private-original/,
+      'Raw-capture comparison must not publish private identifiers or input paths');
+
     writeFileSync(invalidPath, '{"modelSecret":"TOP_SECRET_CAPTURE_VALUE"}\n');
     const refused = run(['--before', baselinePath, '--after-capture', invalidPath]);
     assert.equal(refused.status, 2, 'Malformed private captures must fail closed');
