@@ -131,6 +131,27 @@ or failed output. It never copies values, IDs, implementation metadata or digest
 different captures with identical shapes can match. For same-input SDK behavioral
 drift, use the private full-report comparator documented separately.
 
+### Compare real React/Chromium capture baselines in CI
+
+The private-capture browser replay above produces a **value-free structural JSON report**.
+To catch *renderer-visible* drift (Button counts and action chronology) that a
+headless SDK summary alone cannot observe, compare two reports offline:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before baseline-browser.json --after fresh-browser.json --strict --out browser-diff.json
+```
+
+Exit codes are 0 for a match, 1 for structural drift with `--strict`,
+and 2 for invalid input or an output problem. The comparison is pinned to the
+published React/core 0.14.0 replay report schema, and checks lifecycle order,
+visible Button/surface counts, action counts, selected interaction plan and
+optional sampled loading placeholders. It never outputs captured model values,
+identifiers, input paths or action payloads, and refuses to overwrite artifacts.
+Use a fresh report path for each run. Structural equality **does not** prove
+value-level identity, renderer accessibility, anonymity or external adoption.
+The existing `src/browser-trace-compare.mjs` remains the separate,
+richer fixed-fixture comparison with screenshot/hash evidence.
+
 ## Non-goals and scope
 
 The browser harness is a **narrow React v0.14 integration regression**, not proof of a novel upstream bug. It does not test incompatible React 0.15, other renderers, arbitrary agent output, complete failure recovery, commercial demand, or official A2UI conformance. See [Evidence](docs/EVIDENCE.md) and [Roadmap](docs/ROADMAP.md).

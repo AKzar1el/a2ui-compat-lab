@@ -8,6 +8,7 @@ import {chromium} from '@playwright/test';
 import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEvidence} from '../../src/browser-evidence.mjs';
 import {createServer} from 'vite';
 import {decodeBrowserCapture, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
+import {compareBrowserCaptureSummaries} from '../../src/browser-capture-summary-compare.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = resolveBrowserEvidenceDir(root, process.argv.slice(2));
@@ -2486,6 +2487,21 @@ assert.equal(keyboardCaptureReport.actionsEmitted, 1,
 assert.equal(keyboardCaptureReport.pressSingleButtonEnter, true);
 assert.equal(keyboardCaptureReport.keyboardFocusVerified, true);
 assert.equal(keyboardCaptureReport.clickSingleButton, false);
+
+// These two reports came from actual published React/Chromium runs above.
+assert.equal(compareBrowserCaptureSummaries(browserCaptureReport,
+  structuredClone(browserCaptureReport)).ok, true);
+const browserModeDrift = compareBrowserCaptureSummaries(browserCaptureReport, keyboardCaptureReport);
+assert.equal(browserModeDrift.ok, false);
+assert.ok(browserModeDrift.changedSummaryFields.includes('keyboardFocusVerified'));
+const browserButtonDrift = structuredClone(browserCaptureReport);
+browserButtonDrift.steps.at(-1).visibleButtonCount++;
+const browserCountDiff = compareBrowserCaptureSummaries(browserCaptureReport, browserButtonDrift);
+assert.deepEqual(browserCountDiff.changedSteps,
+  [{index: 2, fields: ['visibleButtonCount']}]);
+assert.doesNotMatch(JSON.stringify(browserCountDiff),
+  /action-replay|alpha|Confirm|selection|surfaceId/,
+  'Browser differential output must be structural only');
 assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl', '--click-button-index', '0']).clickButtonIndex, 0);
 assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl', '--press-button-index-enter', '1']).pressButtonIndexEnter, 1);
 assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl', '--click-button-index', '01']), /Usage:/);
