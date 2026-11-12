@@ -34,6 +34,27 @@ const report = () => ({
   note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
 });
 
+test('direct two-private-capture CLI mode requires both captures and stays mutually exclusive', () => {
+  const parsed = parseBrowserCaptureSummaryCompareOptions([
+    '--before-capture', 'old.jsonl', '--after-capture', 'new.jsonl', '--strict',
+    '--format', 'junit',
+  ]);
+  assert.ok(parsed['before-capture'].endsWith('old.jsonl'));
+  assert.ok(parsed['after-capture'].endsWith('new.jsonl'));
+  assert.equal(parsed.strict, true);
+  assert.equal(parsed.format, 'junit');
+  assert.throws(() => parseBrowserCaptureSummaryCompareOptions([
+    '--before-capture', 'old.jsonl', '--after', 'saved.json',
+  ]), /Usage:/);
+  assert.throws(() => parseBrowserCaptureSummaryCompareOptions([
+    '--before-capture', 'old.jsonl', '--before', 'baseline.json',
+    '--after-capture', 'new.jsonl',
+  ]), /Usage:/);
+  assert.throws(() => parseBrowserCaptureSummaryCompareOptions([
+    '--after-capture', 'new.jsonl',
+  ]), /Usage:/);
+});
+
 test('real-Chromium report schema matches without copying private values', () => {
   const comparison = compareBrowserCaptureSummaries(report(), structuredClone(report()));
   assert.equal(comparison.ok, true);
