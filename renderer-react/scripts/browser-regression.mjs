@@ -2686,5 +2686,8 @@ await assert.rejects(
   {message: 'Browser capture SDK rejected an event'},
   'Published SDK exception text with private surface IDs must be redacted for programmatic callers',
 );
-testDirectBrowserCaptureBaseline(encodedExample, browserCaptureReport);
+testDirectBrowserCaptureBaseline(encodedExample, browserCaptureReport, {
+  capture: Buffer.from(twoButtonMessages.map(message => JSON.stringify(message)).join('\n') + '\n'),
+  report: sameBoundaryReport,
+});
 console.log('Developer JSONL capture -> React Chromium + real Button: PASS');
