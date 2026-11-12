@@ -54,6 +54,28 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline) {
     assert.equal(JSON.parse(readFileSync(rawPairMatch, 'utf8')).ok, true);
     assert.equal(pairMatch.stdout, '', 'Raw private capture must not appear in stdout');
 
+    // A vetted saved report may explicitly authorize the SAME bounded real
+    // Button interaction in both private captures, without leaking its data.
+    assert.equal(baseline.actionsVerified, 1);
+    const plannedPairDiff = join(dir, 'raw-pair-action-match.json');
+    const plannedPair = run(['--before-capture', capturePath, '--after-capture', capturePath,
+      '--action-plan', baselinePath, '--strict', '--out', plannedPairDiff]);
+    assert.equal(plannedPair.status, 0,
+      'Vetted browser interaction must replay in both captures and match');
+    assert.equal(JSON.parse(readFileSync(plannedPairDiff, 'utf8')).ok, true);
+    assert.equal(plannedPair.stdout, '');
+
+    const unreachablePlanPath = join(dir, 'private-unreachable-plan.json');
+    writeFileSync(unreachablePlanPath, JSON.stringify({...baseline,
+      clickSingleButton: false, clickButtonIndex: 31}));
+    const unreachable = run(['--before-capture', capturePath, '--after-capture', capturePath,
+      '--action-plan', unreachablePlanPath, '--strict']);
+    assert.equal(unreachable.status, 2, 'Unreachable vetted action must fail closed');
+    assert.equal(unreachable.stdout, '');
+    assert.doesNotMatch(unreachable.stderr,
+      /private-unreachable-plan|private-original|action-replay|alpha|selection/,
+      'Action failure must omit private paths and capture values');
+
     const rawPairDrift = join(dir, 'raw-pair-drift.json');
     const pairDrift = run(['--before-capture', capturePath, '--after-capture', driftPath,
       '--strict', '--out', rawPairDrift]);
