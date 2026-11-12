@@ -162,9 +162,23 @@ node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl 
 The saved fixed-schema report must contain at least one verified action. The
 same bounded plan is replayed independently in both real Chromium sessions;
 invalid, unreachable or stale targets fail closed without exposing capture
-values, paths or SDK errors. This does **not** compare private action payloads,
-establish anonymization or execute unreviewed actions. Review the saved plan
-before enabling interactions. Alternatively use `--before vetted-browser-report.json
+values, paths or SDK errors. Default comparisons do **not** compare private action payloads or execute
+unreviewed actions. To detect a changed emitted action (including name or
+arguments) even when the UI shape and action count match, opt in explicitly
+with the same reviewed plan:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --action-plan vetted-browser-report.json --compare-actions --strict --out private-action-diff.json
+```
+
+The two Chromium child runs share a fresh, in-memory HMAC key for this one
+comparison; the only output is `actionPayloadParity: match|drift` and a fixed
+field name on drift. No raw action payloads, fingerprints or key are written
+to the comparison report. This checks the emitted action payloads of the
+approved plan, not arbitrary user events or the entire private capture. It is
+not anonymization: structural and binary parity metadata can still be sensitive.
+The flag is refused without two private captures and an explicit saved plan.
+Review the plan and the output before enabling interactions or sharing results. Alternatively use `--before vetted-browser-report.json
 --after-capture new-private.jsonl` to compare directly against that baseline. Both modes stay
 offline after dependencies are installed and preserve strict 0/1/2 exit codes,
 no-overwrite protection and generic path-free diagnostics. Structural event
