@@ -4,7 +4,7 @@ import {lstatSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
-const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs --before OLD.json (--after NEW.json | --after-capture PRIVATE.jsonl) [--strict] [--format json|markdown] [--out NEW-DIFF.json|summary.md]';
+const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs --before OLD.json (--after NEW.json | --after-capture PRIVATE.jsonl) [--strict] [--format json|markdown|junit] [--out NEW-DIFF.json|summary.md|report.xml]';
 const MAX_BYTES = 256 * 1024;
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
@@ -172,6 +172,46 @@ function markdownComparisonReport(diff, before, after) {
   ].join('\n');
 }
 
+/** JUnit tests map each fixed-schema event difference to one independent failure. */
+function junitComparisonReport(diff, before, after) {
+  // Both inputs were already checked by compare; validate again before rendering.
+  const a = validate(before);
+  const b = validate(after);
+  const encode = value => String(value).replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  const count = 1 + diff.changedSteps.length;
+  const failures = diff.changedSteps.length + Number(diff.changedSummaryFields.length > 0);
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<testsuite name="a2ui-browser-capture" tests="' + count +
+      '" failures="' + failures + '" errors="0">',
+    '  <testcase classname="a2ui.browser.capture" name="summary">',
+  ];
+  if (diff.changedSummaryFields.length) {
+    lines.push('    <failure message="structural summary drift">' +
+      encode(diff.changedSummaryFields.join(', ')) + '</failure>');
+  }
+  lines.push('  </testcase>');
+  const fixedValue = (step, field) => {
+    if (field === 'presence') return step ? 'present' : 'absent';
+    if (!step) return 'absent';
+    return Object.hasOwn(step, field) ? String(step[field]) : 'not sampled';
+  };
+  for (const step of diff.changedSteps) {
+    const fields = step.fields.map(field => field + ': ' +
+      fixedValue(a.steps[step.index], field) + ' -> ' +
+      fixedValue(b.steps[step.index], field));
+    lines.push('  <testcase classname="a2ui.browser.capture" name="event-' +
+      step.index + '">');
+    lines.push('    <failure message="structural event drift">' +
+      encode(fields.join('; ')) + '</failure>');
+    lines.push('  </testcase>');
+  }
+  lines.push('</testsuite>', '');
+  return lines.join('\n');
+}
+
 export function parseBrowserCaptureSummaryCompareOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const options = {strict: false};
@@ -179,7 +219,7 @@ export function parseBrowserCaptureSummaryCompareOptions(argv) {
     const arg = argv[i];
     if (arg === '--strict' && !options.strict) options.strict = true;
     else if (arg === '--format' && !Object.hasOwn(options, 'format') &&
-      ['json', 'markdown'].includes(argv[i + 1])) options.format = argv[++i];
+      ['json', 'markdown', 'junit'].includes(argv[i + 1])) options.format = argv[++i];
     else if (['--before', '--after', '--after-capture', '--out'].includes(arg) &&
       !Object.hasOwn(options, arg.slice(2)) && argv[i + 1] &&
       !argv[i + 1].startsWith('--')) options[arg.slice(2)] = resolve(argv[++i]);
@@ -243,6 +283,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
         ? replayPrivateCapture(args['after-capture'], baseline) : readReport(args.after);
       const result = compareBrowserCaptureSummaries(baseline, observed);
       const content = args.format === 'markdown' ? markdownComparisonReport(result, baseline, observed) :
+        args.format === 'junit' ? junitComparisonReport(result, baseline, observed) :
         JSON.stringify(result, null, 2) + '\n';
       if (args.out) saveReport(args.out, content);
       else process.stdout.write(content);

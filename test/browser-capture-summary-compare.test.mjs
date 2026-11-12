@@ -187,6 +187,64 @@ test('opt-in Markdown CI summary shows fixed structural fields, preserves strict
   }
 });
 
+test('opt-in JUnit XML exposes fixed structural failures for CI without private data', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-browser-junit-'));
+  try {
+    const before = join(dir, 'PRIVATE_BEFORE_CAPTURE.json');
+    const after = join(dir, 'PRIVATE_AFTER_CAPTURE.json');
+    const out = join(dir, 'report.xml');
+    writeFileSync(before, JSON.stringify(report()));
+    writeFileSync(after, JSON.stringify(report()));
+    let run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--strict', '--format', 'junit'], {encoding: 'utf8'});
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
+    assert.match(run.stdout, /tests="1" failures="0" errors="0"/);
+    assert.doesNotMatch(run.stdout, /<failure /);
+
+    const changed = report();
+    changed.steps[1].visibleButtonCount = 3;
+    changed.clickSingleButton = false;
+    changed.pressSingleButtonEnter = true;
+    changed.keyboardFocusVerified = true;
+    writeFileSync(after, JSON.stringify(changed));
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--strict', '--format', 'junit', '--out', out], {encoding: 'utf8'});
+    assert.equal(run.status, 1, run.stderr);
+    const xml = readFileSync(out, 'utf8');
+    assert.match(xml, /tests="2" failures="2" errors="0"/);
+    assert.match(xml, /name="summary">[\s\S]*<failure message="structural summary drift">/);
+    assert.match(xml, /name="event-1">[\s\S]*visibleButtonCount: 1 -&gt; 3/);
+    assert.match(xml, /pressSingleButtonEnter/);
+    assert.doesNotMatch(xml, /PRIVATE_BEFORE_CAPTURE|PRIVATE_AFTER_CAPTURE|selection|alpha|undefined/);
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--format', 'junit', '--out', out], {encoding: 'utf8'});
+    assert.equal(run.status, 2, 'JUnit evidence must not be overwritten');
+
+    const deleted = report();
+    deleted.events = 1;
+    deleted.steps.pop();
+    writeFileSync(after, JSON.stringify(deleted));
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--strict', '--format', 'junit'], {encoding: 'utf8'});
+    assert.equal(run.status, 1);
+    assert.match(run.stdout, /name="event-1">[\s\S]*presence: present -&gt; absent/);
+
+    const injected = report();
+    injected.steps[1].operation = 'PRIVATE_UNTRUSTED_VALUE';
+    writeFileSync(after, JSON.stringify(injected));
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--format', 'junit'], {encoding: 'utf8'});
+    assert.equal(run.status, 2);
+    assert.doesNotMatch(run.stdout + run.stderr,
+      /PRIVATE_UNTRUSTED_VALUE|PRIVATE_BEFORE_CAPTURE|PRIVATE_AFTER_CAPTURE/);
+    assert.throws(() => parseBrowserCaptureSummaryCompareOptions(
+      ['--before', before, '--after', after, '--format', 'junit', '--format', 'json']), /Usage:/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
 test('private-capture comparison is an exclusive input mode and inherits browser action plans', () => {
   const options = parseBrowserCaptureSummaryCompareOptions(
     ['--before', 'baseline.json', '--after-capture', 'private.jsonl', '--strict']);
