@@ -150,11 +150,34 @@ test('opt-in Markdown CI summary shows fixed structural fields, preserves strict
     assert.equal(run.status, 1);
     const markdown = readFileSync(out, 'utf8');
     assert.match(markdown, /\*\*Result:\*\* DRIFT/);
-    assert.ok(markdown.includes('| 1 | `visibleButtonCount` |'));
+    assert.ok(markdown.includes('| 1 | `visibleButtonCount`: 1 -> 3 |'));
+    assert.doesNotMatch(markdown, /undefined|\[object Object\]/);
     assert.doesNotMatch(markdown, /PRIVATE_BEFORE_PATH|PRIVATE_AFTER_PATH|selection|alpha|TOP_SECRET_CAPTURE_VALUE/);
     run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
       '--format', 'markdown', '--out', out], {encoding: 'utf8'});
     assert.equal(run.status, 2, 'Markdown report must never overwrite existing evidence');
+    const operationDrift = report();
+    operationDrift.steps[1].operation = 'updateDataModel';
+    writeFileSync(after, JSON.stringify(operationDrift));
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--strict', '--format', 'markdown'], {encoding: 'utf8'});
+    assert.equal(run.status, 1);
+    assert.ok(run.stdout.includes('| 1 | `operation`: updateComponents -> updateDataModel |'));
+    const missingEvent = report();
+    missingEvent.events = 1;
+    missingEvent.steps.pop();
+    writeFileSync(after, JSON.stringify(missingEvent));
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--strict', '--format', 'markdown'], {encoding: 'utf8'});
+    assert.equal(run.status, 1);
+    assert.ok(run.stdout.includes('| 1 | `presence`: present -> absent |'));
+    const injected = report();
+    injected.steps[1].operation = 'PRIVATE_UNTRUSTED_MODEL_VALUE';
+    writeFileSync(after, JSON.stringify(injected));
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--format', 'markdown'], {encoding: 'utf8'});
+    assert.equal(run.status, 2);
+    assert.doesNotMatch(run.stdout + run.stderr, /PRIVATE_UNTRUSTED_MODEL_VALUE|PRIVATE_BEFORE_PATH|PRIVATE_AFTER_PATH/);
     for (const argv of [
       ['--before', before, '--after', after, '--format', 'html'],
       ['--before', before, '--after', after, '--format', 'markdown', '--format', 'json'],
