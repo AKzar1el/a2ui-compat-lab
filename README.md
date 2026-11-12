@@ -141,6 +141,26 @@ headless SDK summary alone cannot observe, compare two reports offline:
 node src/browser-capture-summary-compare.mjs --before baseline-browser.json --after fresh-browser.json --strict --out browser-diff.json
 ```
 
+For a readable, value-free GitHub Actions step summary, opt into Markdown output
+from the same validated structural comparison (the default remains JSON):
+
+```sh
+# In a GitHub Actions shell step, publish only if the structural metadata is safe to share.
+# Preserve a strict regression exit code while still showing the summary on drift:
+status=0
+node src/browser-capture-summary-compare.mjs --before baseline-browser.json --after fresh-browser.json --strict --format markdown --out browser-summary.md || status=$?
+if [ "$status" -le 1 ] && [ -f browser-summary.md ]; then
+  cat browser-summary.md >> "$GITHUB_STEP_SUMMARY"
+fi
+exit "$status"
+```
+
+The Markdown contains only fixed field names, structural event indices/counts and
+MATCH/DRIFT status, never captured values, IDs or private input paths. It still
+reveals workflow structure and **is not anonymized**; do not publish private captures,
+or share the summary without reviewing its sensitivity. The command refuses to
+overwrite an existing summary and keeps strict exit codes (0 match, 1 drift, 2 invalid).
+
 For a **single-command real-browser regression check** against a new private
 v0.9 JSONL capture, use the saved structural baseline directly:
 

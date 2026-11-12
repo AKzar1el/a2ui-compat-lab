@@ -4,7 +4,7 @@ import {lstatSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
-const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs --before OLD.json (--after NEW.json | --after-capture PRIVATE.jsonl) [--strict] [--out NEW-DIFF.json]';
+const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs --before OLD.json (--after NEW.json | --after-capture PRIVATE.jsonl) [--strict] [--format json|markdown] [--out NEW-DIFF.json|summary.md]';
 const MAX_BYTES = 256 * 1024;
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
@@ -136,12 +136,36 @@ export function compareBrowserCaptureSummaries(before, after) {
   };
 }
 
+/** Render only comparator-owned, fixed-schema fields for human CI review. */
+function markdownComparisonReport(diff) {
+  const fields = values => values.length ? values.map(value => '`' + value + '`').join(', ') : 'none';
+  const rows = diff.changedSteps.map(step => '| ' + step.index + ' | ' + fields(step.fields) + ' |');
+  return [
+    '## A2UI React/Chromium capture structural comparison',
+    '',
+    '**Result:** ' + (diff.ok ? 'MATCH' : 'DRIFT'),
+    '**Protocol:** ' + diff.protocol,
+    '**Events:** ' + diff.beforeEvents + ' before / ' + diff.afterEvents + ' after',
+    '**Changed summary fields:** ' + fields(diff.changedSummaryFields),
+    '**Changed event steps:** ' + diff.differingSteps,
+    '',
+    '| Event index | Changed structural fields |',
+    '| ---: | --- |',
+    ...rows,
+    '',
+    '_Only fixed structural counts and field names are shown. Event patterns may be sensitive; this is not anonymization._',
+    '',
+  ].join('\n');
+}
+
 export function parseBrowserCaptureSummaryCompareOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const options = {strict: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !options.strict) options.strict = true;
+    else if (arg === '--format' && !Object.hasOwn(options, 'format') &&
+      ['json', 'markdown'].includes(argv[i + 1])) options.format = argv[++i];
     else if (['--before', '--after', '--after-capture', '--out'].includes(arg) &&
       !Object.hasOwn(options, arg.slice(2)) && argv[i + 1] &&
       !argv[i + 1].startsWith('--')) options[arg.slice(2)] = resolve(argv[++i]);
@@ -204,9 +228,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const observed = args['after-capture']
         ? replayPrivateCapture(args['after-capture'], baseline) : readReport(args.after);
       const result = compareBrowserCaptureSummaries(baseline, observed);
-      const json = JSON.stringify(result, null, 2) + '\n';
-      if (args.out) saveReport(args.out, json);
-      else process.stdout.write(json);
+      const content = args.format === 'markdown' ? markdownComparisonReport(result) :
+        JSON.stringify(result, null, 2) + '\n';
+      if (args.out) saveReport(args.out, content);
+      else process.stdout.write(content);
       if (args.strict && !result.ok) process.exitCode = 1;
     }
   } catch {
