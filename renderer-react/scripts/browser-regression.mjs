@@ -2472,7 +2472,7 @@ assert.equal(loadingReport.steps.at(-1).loadingPlaceholderCount, 0,
   'After the root and children arrive there must be no loading placeholders');
 assert.equal(loadingReport.loadingPlaceholderEvents, 1);
 assert.doesNotMatch(JSON.stringify(loadingReport),
-  /action-replay|alpha|Confirm|selection|surfaceId|\\[Loading/,
+  /action-replay|alpha|Confirm|selection|surfaceId|Loading root/,
   'Streaming placeholder evidence must contain counts, not private DOM text or IDs');
 assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl',
   '--reject-loading-placeholders']).rejectLoadingPlaceholders, true);
