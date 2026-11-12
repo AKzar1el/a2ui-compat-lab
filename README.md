@@ -79,6 +79,26 @@ evidence. Counts and event patterns can still be sensitive: inspect before
 sharing. This summary is not a complete SDK trace, browser test, cryptographic
 attestation or proof of anonymity. See [capture comparison guidance](docs/CAPTURE_REPORT_COMPARISON.md).
 
+### Diagnose growing-string replace overhead locally
+
+`updateDataModel` v0.9 replaces values, so repeatedly sending longer strings can
+resend earlier content. For developer-owned private captures, opt into a value-free estimate:
+
+```sh
+node src/replay-file.mjs --input private.jsonl --summary --stream-efficiency --out out/stream-efficiency.json
+```
+
+`streamEfficiency` reports strictly prefix-growing string runs at a stable surface/path.
+`replacementValueBytes` counts UTF-8 bytes of the full values and `incrementalValueBytes`
+counts the starting values plus only their growth suffixes. The ratio excludes
+JSON envelopes, escapes, framing, compression and actual network transfer.
+It is not a real network-savings measurement or SDK append capability.
+The option requires `--summary`; it emits no model strings, paths or IDs, although
+aggregate counts and event patterns may still be sensitive.
+
+Motivation: [upstream replace-stream issue #3927](https://github.com/a2ui-project/a2ui/issues/3927).
+This diagnostic does not implement a protocol extension or prove customer demand.
+
 ### Compare two privacy-reduced capture summaries
 
 To check whether the **shape** of two A2UI capture sessions changed without putting
