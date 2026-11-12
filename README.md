@@ -176,6 +176,9 @@ comparison. Output includes `actionPayloadParity: match|drift`; on drift it also
 includes `firstDifferentActionIndex`, the **zero-based position within the
 reviewed Button action plan** (e.g. `1` means its second action changed). This
 helps localize a regression when rendered structure and action counts agree.
+Parity treats JSON object member order as irrelevant (including nested action context),
+while preserving action sequence and array order; changing an actual action value
+still reports drift. This avoids false regressions from equivalent JSON encodings.
 Ephemeral per-action fingerprints are stripped before reports are validated
 or published; no raw action payloads, reusable fingerprints or key are written
 to the comparison report. Action order and structural metadata can still be
