@@ -2499,6 +2499,48 @@ const timedKeyboard = await runBrowserCapture(timedMessages,
   {pressButtonIndexEnter: 0, actionAfterEventIndex: 2});
 assert.equal(timedKeyboard.actionsEmitted, 1);
 assert.equal(timedKeyboard.keyboardFocusVerified, true);
+// An interactive capture can include Button -> agent update -> Button -> deletion.
+// Both actions must be genuine Chromium input at their own event boundaries.
+const sequenceMessages = [...structuredClone(decodedExample), {
+  version: 'v0.9', updateDataModel: {
+    surfaceId: decodedExample[0].createSurface.surfaceId, path: '/',
+    value: {selection: 'updated-between-actions', confirmed: true},
+  },
+}, {version: 'v0.9', deleteSurface: {surfaceId: decodedExample[0].createSurface.surfaceId}}];
+const sequencePlan = [
+  {eventIndex: 2, buttonIndex: 0, mode: 'click'},
+  {eventIndex: 3, buttonIndex: 0, mode: 'enter'},
+];
+assert.deepEqual(parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--action-step', '2:0:click', '--action-step', '3:0:enter']).actionSteps, sequencePlan);
+const sequenceReport = await runBrowserCapture(sequenceMessages, {actionSteps: sequencePlan});
+assert.equal(sequenceReport.actionsEmitted, 2);
+assert.equal(sequenceReport.actionsVerified, 2);
+assert.deepEqual(sequenceReport.actionSteps, sequencePlan);
+assert.equal(sequenceReport.keyboardFocusVerified, true);
+assert.deepEqual(sequenceReport.steps.map(step => step.actionCount), [0, 0, 0, 1, 2]);
+assert.equal(sequenceReport.steps.at(-1).surfaceCount, 0);
+assert.doesNotMatch(JSON.stringify(sequenceReport),
+  /updated-between-actions|action-replay|selection|surfaceId/,
+  'A multi-action replay report must exclude values and identifiers');
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--action-step', '2:0:click', '--click-button-index', '0']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--action-step', '2:32:click']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--action-step', '02:0:enter']), /Usage:/);
+await assert.rejects(runBrowserCapture(sequenceMessages,
+  {actionSteps: [sequencePlan[1], sequencePlan[0]]}),
+  {message: 'Invalid browser action plan'});
+await assert.rejects(runBrowserCapture(sequenceMessages,
+  {actionSteps: [sequencePlan[0], sequencePlan[0]]}),
+  {message: 'Invalid browser action plan'});
+await assert.rejects(runBrowserCapture(sequenceMessages,
+  {actionSteps: [{eventIndex: 4, buttonIndex: 0, mode: 'click'}]}),
+  {message: 'Browser capture action target was not reachable'});
+await assert.rejects(runBrowserCapture(sequenceMessages,
+  {actionSteps: sequencePlan, clickSingleButton: true}),
+  {message: 'Choose exactly one browser action mode'});
 assert.doesNotMatch(JSON.stringify(timedKeyboard),
   /action-replay|alpha|Confirm|selection|surfaceId/,
   'Timed browser evidence must not expose private capture values or IDs');

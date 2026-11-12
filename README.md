@@ -182,6 +182,24 @@ node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --click-
 ```
 
 Without this option, actions execute after the final capture event as before.
+For an actual **two-step interaction** (Button, agent model response, then a
+second Button before deletion), use repeatable scripted action steps:
+
+```sh
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --action-step 2:0:click --action-step 3:0:enter --out ../out/two-actions.json
+```
+
+Each `EVENT:BUTTON:click|enter` step fires **after** that zero-based JSONL event
+(`EVENT` 0-99), on the current rendered Button index (`BUTTON` 0-31);
+`click` uses a real pointer, and `enter` requires real keyboard Tab focus.
+The steps must have strictly increasing event indices, with at most eight
+actions per capture. They cannot be combined with single-action modes or
+`--action-after-event-index`. Missing, removed, or unreachable controls fail
+the replay; no synthetic agent actions are inserted. The structural report
+includes event/button positions, interaction types, and verified action
+counts, **not** model values, action contexts, labels or surface IDs.
+Positions and event order may still expose workflow structure.
+
 The Button must exist and be reachable at the selected step; invalid or
 unreachable steps fail closed. This is a single synthetic user activation at
 a message boundary, not a recorded user event or complete agent round-trip.

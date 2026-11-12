@@ -7,18 +7,20 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter ...] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
 const MAX_BUTTON_INDEX = 31;
+const MAX_ACTION_STEPS = 8;
 const MAX_KEYBOARD_TABS = 64;
 const OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
 
 export function parseBrowserCaptureOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
-    clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null};
+    clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null,
+    actionSteps: []};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -33,6 +35,11 @@ export function parseBrowserCaptureOptions(argv) {
     } else if (arg === '--action-after-event-index' &&
       /^(0|[1-9][0-9]?)$/.test(argv[i + 1] ?? '') && parsed.actionAfterEventIndex === null) {
       parsed.actionAfterEventIndex = Number(argv[++i]);
+    } else if (arg === '--action-step' &&
+      /^(0|[1-9][0-9]?):(0|[1-9][0-9]?):(click|enter)$/.test(argv[i + 1] ?? '')) {
+      const [, eventIndex, buttonIndex, mode] =
+        argv[++i].match(/^(0|[1-9][0-9]?):(0|[1-9][0-9]?):(click|enter)$/);
+      parsed.actionSteps.push({eventIndex: Number(eventIndex), buttonIndex: Number(buttonIndex), mode});
     } else if ((arg === '--input' || arg === '--out') &&
       argv[i + 1] && !argv[i + 1].startsWith('--') && !parsed[arg.slice(2)]) {
       parsed[arg.slice(2)] = resolve(argv[++i]);
@@ -45,7 +52,11 @@ export function parseBrowserCaptureOptions(argv) {
   if (!parsed.input || actionModes > 1 ||
       (parsed.actionAfterEventIndex !== null && actionModes !== 1) ||
       (parsed.clickButtonIndex !== null && parsed.clickButtonIndex > MAX_BUTTON_INDEX) ||
-      (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX))
+      (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX) ||
+      parsed.actionSteps.length > MAX_ACTION_STEPS ||
+      (parsed.actionSteps.length > 0 && (actionModes !== 0 || parsed.actionAfterEventIndex !== null)) ||
+      parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
+        (i > 0 && step.eventIndex <= parsed.actionSteps[i - 1].eventIndex)))
     throw new Error(USAGE);
   return parsed;
 }
@@ -95,12 +106,24 @@ function readCapture(input) {
 export async function runBrowserCapture(messages, {
   clickSingleButton = false, pressSingleButtonEnter = false,
   clickButtonIndex = null, pressButtonIndexEnter = null, actionAfterEventIndex = null,
+  actionSteps = [],
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
   const actionModes = Number(clickSingleButton) + Number(pressSingleButtonEnter) +
     Number(clickButtonIndex !== null) + Number(pressButtonIndexEnter !== null);
-  if (actionModes > 1) throw new Error('Choose exactly one browser action mode');
+  if (!Array.isArray(actionSteps) || actionSteps.length > MAX_ACTION_STEPS ||
+      actionSteps.some((step, index) => !step || typeof step !== 'object' ||
+        Array.isArray(step) || Object.keys(step).sort().join(',') !== 'buttonIndex,eventIndex,mode' ||
+        !Number.isSafeInteger(step.eventIndex) || step.eventIndex < 0 ||
+        step.eventIndex >= messages.length || !Number.isSafeInteger(step.buttonIndex) ||
+        step.buttonIndex < 0 || step.buttonIndex > MAX_BUTTON_INDEX ||
+        !['click', 'enter'].includes(step.mode) ||
+        (index > 0 && step.eventIndex <= actionSteps[index - 1].eventIndex)) ||
+      (actionSteps.length > 0 && actionAfterEventIndex !== null))
+    throw new Error('Invalid browser action plan');
+  if (actionModes > 1 || (actionSteps.length > 0 && actionModes !== 0))
+    throw new Error('Choose exactly one browser action mode');
   for (const index of [clickButtonIndex, pressButtonIndexEnter]) {
     if (index !== null && (!Number.isSafeInteger(index) || index < 0 || index > MAX_BUTTON_INDEX))
       throw new Error('Invalid browser button index');
@@ -162,17 +185,23 @@ export async function runBrowserCapture(messages, {
       clickButtonIndex !== null ? clickButtonIndex : pressButtonIndexEnter;
     let keyboardFocusVerified = false;
     let actionBeforeCount = null;
-    const activateButton = async () => {
+    let actionsVerified = 0;
+    const activateButton = async (
+      targetIndex = selectedIndex,
+      useKeyboard = pressSingleButtonEnter || pressButtonIndexEnter !== null,
+      scripted = false,
+    ) => {
       const before = (await page.evaluate(() => window.__a2uiLab.trace())).actions.length;
       const buttons = page.getByRole('button');
       const count = await buttons.count();
       if ((clickSingleButton || pressSingleButtonEnter) && count !== 1)
         throw new Error('Action mode requires exactly one rendered button');
-      if (selectedIndex >= count)
-        throw new Error('Action mode button index is outside rendered range');
-      const selected = buttons.nth(selectedIndex);
+      if (targetIndex >= count)
+        throw new Error(scripted ? 'Browser capture action target was not reachable' :
+          'Action mode button index is outside rendered range');
+      const selected = buttons.nth(targetIndex);
       try {
-        if (pressSingleButtonEnter || pressButtonIndexEnter !== null) {
+        if (useKeyboard) {
           for (let attempt = 0; attempt < MAX_KEYBOARD_TABS; attempt++) {
             await page.keyboard.press('Tab');
             keyboardFocusVerified = await selected.evaluate(button => document.activeElement === button);
@@ -194,6 +223,7 @@ export async function runBrowserCapture(messages, {
         throw new Error('Browser capture action did not emit exactly one event');
       }
       actionBeforeCount = before;
+      actionsVerified++;
     };
     const steps = [];
     for (let index = 0; index < messages.length; index++) {
@@ -215,6 +245,8 @@ export async function runBrowserCapture(messages, {
       if (operation === 'createSurface' &&
           !trace.surfaceIds.includes(message.createSurface.surfaceId))
         throw new Error('Browser capture createSurface was not mounted');
+      if (actionSteps.length > 0 && trace.actions.length !== actionsVerified)
+        throw new Error('Unexpected Chromium action between planned steps');
       steps.push({
         index, operation, surfaceCount: trace.surfaceIds.length,
         visibleButtonCount: await page.getByRole('button').count(),
@@ -222,7 +254,10 @@ export async function runBrowserCapture(messages, {
       });
       if (runtimeErrors.length || consoleErrors.length || deniedRequests || deniedSockets)
         throw new Error('Chromium reported replay errors or denied network traffic');
-      if (index === actionAfterEventIndex) await activateButton();
+      const scriptedAction = actionSteps.find(step => step.eventIndex === index);
+      if (scriptedAction)
+        await activateButton(scriptedAction.buttonIndex, scriptedAction.mode === 'enter', true);
+      else if (index === actionAfterEventIndex) await activateButton();
     }
     if (selectedIndex !== null && actionAfterEventIndex === null)
       await activateButton();
@@ -231,6 +266,8 @@ export async function runBrowserCapture(messages, {
       throw new Error('Chromium reported runtime, console or network errors');
     if (selectedIndex !== null && final.actions.length !== actionBeforeCount + 1)
       throw new Error('Expected exactly one browser action');
+    if (actionSteps.length > 0 && final.actions.length !== actionsVerified)
+      throw new Error('Expected exactly one browser action per planned step');
     return {
       schemaVersion: 1,
       kind: 'a2ui-react-capture-browser-replay',
@@ -243,6 +280,8 @@ export async function runBrowserCapture(messages, {
       clickButtonIndex,
       pressButtonIndexEnter,
       actionAfterEventIndex,
+      actionSteps,
+      actionsVerified,
       keyboardFocusVerified,
       actionsEmitted: final.actions.length,
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
@@ -270,7 +309,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const report = await runBrowserCapture(readCapture(args.input),
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
-          actionAfterEventIndex: args.actionAfterEventIndex});
+          actionAfterEventIndex: args.actionAfterEventIndex, actionSteps: args.actionSteps});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
