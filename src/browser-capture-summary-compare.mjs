@@ -164,6 +164,8 @@ function markdownComparisonReport(diff, before, after) {
     '**Changed summary fields:** ' + fields(diff.changedSummaryFields),
     ...(diff.actionPayloadParity ? ['**Private action payload parity:** ' +
       diff.actionPayloadParity.toUpperCase()] : []),
+    ...(Number.isSafeInteger(diff.firstDifferentActionIndex)
+      ? ['**First differing planned action (0-based):** ' + diff.firstDifferentActionIndex] : []),
     '**Changed event steps:** ' + diff.differingSteps,
     '',
     '| Event index | Structural changes (before -> after) |',
@@ -193,7 +195,10 @@ function junitComparisonReport(diff, before, after) {
   ];
   if (diff.changedSummaryFields.length) {
     lines.push('    <failure message="structural summary drift">' +
-      encode(diff.changedSummaryFields.join(', ')) + '</failure>');
+      encode(diff.changedSummaryFields.join(', ') +
+        (Number.isSafeInteger(diff.firstDifferentActionIndex) ?
+          '; first differing planned action index: ' + diff.firstDifferentActionIndex : '')) +
+      '</failure>');
   }
   lines.push('  </testcase>');
   const fixedValue = (step, field) => {
@@ -273,13 +278,21 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null) {
   try {
     const parsed = JSON.parse(child.stdout);
     let actionDigest = null;
+    let actionDigests = null;
     if (actionDigestKey) {
-      if (!isRecord(parsed) || !/^[a-f0-9]{64}$/.test(parsed.__privateActionDigest))
+      if (!isRecord(parsed) || !/^[a-f0-9]{64}$/.test(parsed.__privateActionDigest) ||
+          !Array.isArray(parsed.__privateActionDigests) ||
+          parsed.__privateActionDigests.length !== parsed.actionsEmitted ||
+          parsed.__privateActionDigests.length > 8 ||
+          parsed.__privateActionDigests.some(value =>
+            typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)))
         throw invalid();
       actionDigest = parsed.__privateActionDigest;
+      actionDigests = parsed.__privateActionDigests;
       delete parsed.__privateActionDigest;
+      delete parsed.__privateActionDigests;
     }
-    return {report: validate(parsed), actionDigest};
+    return {report: validate(parsed), actionDigest, actionDigests};
   } catch {
     throw invalid();
   }
@@ -306,17 +319,24 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const actionDigestKey = args.compareActions ? randomBytes(32).toString('hex') : null;
       const beforeRun = args['before-capture']
         ? replayPrivateCapture(args['before-capture'], actionPlan, actionDigestKey)
-        : {report: readReport(args.before), actionDigest: null};
+        : {report: readReport(args.before), actionDigest: null, actionDigests: null};
       const baseline = beforeRun.report;
       const afterRun = args['after-capture']
         ? replayPrivateCapture(args['after-capture'], baseline, actionDigestKey)
-        : {report: readReport(args.after), actionDigest: null};
+        : {report: readReport(args.after), actionDigest: null, actionDigests: null};
       const observed = afterRun.report;
       const result = compareBrowserCaptureSummaries(baseline, observed);
       if (actionDigestKey) {
         const equal = beforeRun.actionDigest === afterRun.actionDigest;
         result.actionPayloadParity = equal ? 'match' : 'drift';
         if (!equal) {
+          const first = Array.from({length: Math.max(
+            beforeRun.actionDigests.length, afterRun.actionDigests.length,
+          )}, (_, index) => index).find(index =>
+            beforeRun.actionDigests[index] !== afterRun.actionDigests[index]);
+          if (first === undefined) throw invalid();
+          // Zero-based action position only; no event values, IDs or digests.
+          result.firstDifferentActionIndex = first;
           result.ok = false;
           result.changedSummaryFields.push('actionPayloadParity');
         }
