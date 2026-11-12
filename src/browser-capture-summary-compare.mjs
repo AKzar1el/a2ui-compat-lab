@@ -4,7 +4,7 @@ import {lstatSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
-const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs --before OLD.json (--after NEW.json | --after-capture PRIVATE.jsonl) [--strict] [--format json|markdown|junit] [--out NEW-DIFF.json|summary.md|report.xml]';
+const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs (--before OLD.json | --before-capture PRIVATE-OLD.jsonl) (--after NEW.json | --after-capture PRIVATE-NEW.jsonl) [--strict] [--format json|markdown|junit] [--out NEW-DIFF.json|summary.md|report.xml]';
 const MAX_BYTES = 256 * 1024;
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
@@ -220,12 +220,14 @@ export function parseBrowserCaptureSummaryCompareOptions(argv) {
     if (arg === '--strict' && !options.strict) options.strict = true;
     else if (arg === '--format' && !Object.hasOwn(options, 'format') &&
       ['json', 'markdown', 'junit'].includes(argv[i + 1])) options.format = argv[++i];
-    else if (['--before', '--after', '--after-capture', '--out'].includes(arg) &&
+    else if (['--before', '--before-capture', '--after', '--after-capture', '--out'].includes(arg) &&
       !Object.hasOwn(options, arg.slice(2)) && argv[i + 1] &&
       !argv[i + 1].startsWith('--')) options[arg.slice(2)] = resolve(argv[++i]);
     else throw new Error(USAGE);
   }
-  if (!options.before || Number(Boolean(options.after)) + Number(Boolean(options['after-capture'])) !== 1)
+  if (Number(Boolean(options.before)) + Number(Boolean(options['before-capture'])) !== 1 ||
+      Number(Boolean(options.after)) + Number(Boolean(options['after-capture'])) !== 1 ||
+      (options['before-capture'] && !options['after-capture']))
     throw new Error(USAGE);
   return options;
 }
@@ -243,7 +245,7 @@ function readReport(path) {
 }
 
 function replayPrivateCapture(inputPath, baseline) {
-  const args = browserCaptureReplayArguments(baseline);
+  const args = baseline ? browserCaptureReplayArguments(baseline) : [];
   let child;
   try {
     child = spawnSync(process.execPath, [RENDERER_SCRIPT, '--input', inputPath, ...args], {
@@ -278,7 +280,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     const args = parseBrowserCaptureSummaryCompareOptions(process.argv.slice(2));
     if (args.help) console.log(USAGE);
     else {
-      const baseline = readReport(args.before);
+      const baseline = args['before-capture']
+        ? replayPrivateCapture(args['before-capture'], null) : readReport(args.before);
       const observed = args['after-capture']
         ? replayPrivateCapture(args['after-capture'], baseline) : readReport(args.after);
       const result = compareBrowserCaptureSummaries(baseline, observed);
