@@ -2461,6 +2461,25 @@ assert.equal(browserCaptureReport.steps.at(-1).visibleButtonCount, 1);
 assert.equal(browserCaptureReport.actionsEmitted, 1,
   'One real Chromium pointer action must reach the published SDK');
 assert.equal(browserCaptureReport.clickSingleButton, true);
+// Inspect intermediate DOM at each agent event boundary, not just final UI.
+// This is a heuristic for the published React DeferredChild debug placeholder.
+const loadingOptions = parseBrowserCaptureOptions(['--input', 'private.jsonl', '--inspect-loading-placeholders']);
+assert.equal(loadingOptions.inspectLoadingPlaceholders, true);
+const loadingReport = await runBrowserCapture(decodedExample, {inspectLoadingPlaceholders: true});
+assert.ok(loadingReport.steps[0].loadingPlaceholderCount >= 1,
+  'A createSurface-only frame must expose the published renderer loading placeholder');
+assert.equal(loadingReport.steps.at(-1).loadingPlaceholderCount, 0,
+  'After the root and children arrive there must be no loading placeholders');
+assert.equal(loadingReport.loadingPlaceholderEvents, 1);
+assert.doesNotMatch(JSON.stringify(loadingReport),
+  /action-replay|alpha|Confirm|selection|surfaceId|Loading root/,
+  'Streaming placeholder evidence must contain counts, not private DOM text or IDs');
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--reject-loading-placeholders']).rejectLoadingPlaceholders, true);
+await assert.rejects(runBrowserCapture(decodedExample, {rejectLoadingPlaceholders: true}),
+  {message: 'Browser capture displayed a transient loading placeholder'});
+assert.equal(Object.hasOwn(browserCaptureReport.steps[0], 'loadingPlaceholderCount'), false,
+  'Default report fields must remain backward compatible');
 const keyboardCaptureReport = await runBrowserCapture(decodedExample, {pressSingleButtonEnter: true});
 assert.equal(keyboardCaptureReport.actionsEmitted, 1,
   'One Tab-to-Button Enter activation must reach the real published renderer');

@@ -211,6 +211,32 @@ not comprehensive accessibility certification.
 Browser HTTP and WebSocket traffic is limited to the ephemeral loopback
 Vite origin; no external service or inference endpoint is contacted.
 
+To inspect a streaming-UX regression that only appears **between** v0.9
+messages, opt into intermediate Chromium loading-placeholder diagnostics:
+
+```sh
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --inspect-loading-placeholders --out ../out/loading-visibility.json
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --reject-loading-placeholders
+```
+
+`--inspect-loading-placeholders` adds per-event `loadingPlaceholderCount`
+and aggregate `loadingPlaceholderEvents` to the structural report. The
+counts are sampled after each **complete event** and two animation frames;
+they can reveal the published React renderer's temporary `[Loading root...]`
+placeholder before root components arrive. `--reject-loading-placeholders`
+uses the same check but fails closed rather than accepting a capture that
+displays a matching placeholder. This exercises the downstream consumer gap
+described in [upstream issue #2013](https://github.com/a2ui-project/a2ui/issues/2013);
+it is not a novel upstream defect. By default these optional fields are absent.
+
+The detector intentionally counts matching *visible leaf divs*, not their text,
+component IDs or model values. It is a bounded pattern heuristic: app content
+that itself looks like `[Loading ...]` can trigger a false positive, and
+placeholders that appear and disappear *between* the sampled frames can be
+missed. This is not a continuously recorded visual trace, comprehensive
+streaming validation, cross-renderer parity, anonymity or a production UI fix.
+Do not share capture structure without reviewing it.
+
 Reports show only fixed lifecycle operation labels, per-step mounted-surface,
 visible-Button and emitted-action counts, and pinned React/core 0.14.0
 provenance. They exclude captured values, action contexts, surface/component
