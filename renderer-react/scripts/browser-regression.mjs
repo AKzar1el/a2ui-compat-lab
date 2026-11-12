@@ -2536,6 +2536,27 @@ assert.equal(compareBrowserCaptureSummaries(sameBoundaryReport,
 assert.doesNotMatch(JSON.stringify(sameBoundaryReport),
   /private-second-action|Private second label|submit-second|selection|surfaceId/,
   'Repeated-boundary replay reports must omit private action names and labels');
+// Developer-owned captures may require physical Space rather than Enter.
+// This exercises a real focused Chromium Button, not synthetic DOM click().
+const spaceBoundaryPlan = [
+  {eventIndex: 2, buttonIndex: 1, mode: 'space'},
+  {eventIndex: 2, buttonIndex: 0, mode: 'click'},
+];
+assert.deepEqual(parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--action-step', '2:1:space', '--action-step', '2:0:click']).actionSteps, spaceBoundaryPlan);
+const spaceBoundaryReport = await runBrowserCapture(twoButtonMessages, {actionSteps: spaceBoundaryPlan});
+assert.equal(spaceBoundaryReport.actionsVerified, 2);
+assert.equal(spaceBoundaryReport.actionsEmitted, 2,
+  'Chromium Space and click must each dispatch exactly one action at one boundary');
+assert.equal(spaceBoundaryReport.keyboardFocusVerified, true);
+assert.deepEqual(spaceBoundaryReport.actionSteps, spaceBoundaryPlan);
+assert.equal(compareBrowserCaptureSummaries(spaceBoundaryReport,
+  structuredClone(spaceBoundaryReport)).ok, true);
+assert.doesNotMatch(JSON.stringify(spaceBoundaryReport),
+  /private-second-action|Private second label|submit-second|selection|surfaceId/,
+  'Space replay report must not expose private event names, labels or model values');
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--action-step', '2:0:escape']), /Usage:/);
 // A valid action before deletion must be testable even when no Button survives.
 const timedMessages = [...structuredClone(decodedExample), {
   version: 'v0.9', deleteSurface: {surfaceId: decodedExample[0].createSurface.surfaceId},
