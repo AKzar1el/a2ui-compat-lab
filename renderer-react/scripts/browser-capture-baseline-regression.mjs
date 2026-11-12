@@ -78,6 +78,38 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     assert.doesNotMatch(JSON.stringify(matchingActions), /privateActionDigest|[a-f0-9]{64}/,
       'Do not export reusable action fingerprints');
 
+    // JSON object members are unordered: only changing context key insertion
+    // order in a real published-SDK Chromium action must not trigger parity drift.
+    const orderBefore = lines.map(line => JSON.parse(line));
+    const beforeButton = orderBefore[1].updateComponents.components.find(component =>
+      component.id === 'submit');
+    assert.deepEqual(Object.keys(beforeButton.action.event.context), ['selection']);
+    beforeButton.action.event.context.confirmed = {path: '/confirmed'};
+    const orderAfter = structuredClone(orderBefore);
+    const afterButton = orderAfter[1].updateComponents.components.find(component =>
+      component.id === 'submit');
+    afterButton.action.event.context = {
+      confirmed: {path: '/confirmed'},
+      selection: {path: '/selection'},
+    };
+    const orderBeforePath = join(dir, 'private-context-order-before.jsonl');
+    const orderAfterPath = join(dir, 'private-context-order-after.jsonl');
+    const orderDiffPath = join(dir, 'private-context-order-diff.json');
+    writeFileSync(orderBeforePath, orderBefore.map(message => JSON.stringify(message)).join('\\n') + '\\n');
+    writeFileSync(orderAfterPath, orderAfter.map(message => JSON.stringify(message)).join('\\n') + '\\n');
+    const sameContext = run(['--before-capture', orderBeforePath,
+      '--after-capture', orderAfterPath, '--action-plan', baselinePath,
+      '--compare-actions', '--strict', '--out', orderDiffPath]);
+    assert.equal(sameContext.status, 0,
+      'Permuting JSON object keys must not mark identical Chromium actions as drift');
+    const sameContextReport = JSON.parse(readFileSync(orderDiffPath, 'utf8'));
+    assert.equal(sameContextReport.actionPayloadParity, 'match');
+    assert.equal(sameContextReport.ok, true);
+    assert.equal(Object.hasOwn(sameContextReport, 'firstDifferentActionIndex'), false);
+    assert.doesNotMatch(JSON.stringify(sameContextReport),
+      /private-context-order|selection|confirmed|surfaceId|__privateActionDigest|[a-f0-9]{64}/,
+      'Context names, private paths and fingerprints must stay out of parity reports');
+
     const changedActionPath = join(dir, 'private-renamed-action.jsonl');
     const changedAction = lines.map(line => JSON.parse(line));
     const actionButton = changedAction[1].updateComponents.components.find(component =>
