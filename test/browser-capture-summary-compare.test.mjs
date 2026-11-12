@@ -155,6 +155,20 @@ test('private-capture comparison is an exclusive input mode and inherits browser
   scripted.keyboardFocusVerified = true;
   assert.deepEqual(browserCaptureReplayArguments(scripted),
     ['--action-step', '1:0:enter']);
+  const repeated = structuredClone(scripted);
+  repeated.actionSteps = [
+    {eventIndex: 1, buttonIndex: 0, mode: 'click'},
+    {eventIndex: 1, buttonIndex: 0, mode: 'enter'},
+  ];
+  repeated.actionsVerified = 2;
+  repeated.actionsEmitted = 2;
+  assert.deepEqual(browserCaptureReplayArguments(repeated),
+    ['--action-step', '1:0:click', '--action-step', '1:0:enter']);
+  assert.equal(compareBrowserCaptureSummaries(repeated, structuredClone(repeated)).ok, true);
+  const descending = structuredClone(repeated);
+  descending.actionSteps[1].eventIndex = 0;
+  assert.throws(() => browserCaptureReplayArguments(descending),
+    /Invalid browser capture summary/);
   const withLoading = report();
   withLoading.steps.forEach(step => { step.loadingPlaceholderCount = 0; });
   withLoading.loadingPlaceholderEvents = 0;

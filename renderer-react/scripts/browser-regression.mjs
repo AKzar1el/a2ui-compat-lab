@@ -2518,6 +2518,24 @@ secondButton.id = 'submit-second';
 secondButton.child = 'label-second';
 secondButton.action.event.name = 'private-second-action';
 twoButtonComponents.push(secondButton, {id: 'label-second', component: 'Text', text: 'Private second label'});
+// Multiple user actions can be replayed in order before the next agent event.
+const sameBoundaryPlan = [
+  {eventIndex: 2, buttonIndex: 1, mode: 'click'},
+  {eventIndex: 2, buttonIndex: 0, mode: 'enter'},
+];
+assert.deepEqual(parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--action-step', '2:1:click', '--action-step', '2:0:enter']).actionSteps, sameBoundaryPlan);
+const sameBoundaryReport = await runBrowserCapture(twoButtonMessages, {actionSteps: sameBoundaryPlan});
+assert.equal(sameBoundaryReport.actionsVerified, 2);
+assert.equal(sameBoundaryReport.actionsEmitted, 2,
+  'Two distinct real Chromium activations at one event boundary must both dispatch');
+assert.equal(sameBoundaryReport.keyboardFocusVerified, true);
+assert.deepEqual(sameBoundaryReport.actionSteps, sameBoundaryPlan);
+assert.equal(compareBrowserCaptureSummaries(sameBoundaryReport,
+  structuredClone(sameBoundaryReport)).ok, true);
+assert.doesNotMatch(JSON.stringify(sameBoundaryReport),
+  /private-second-action|Private second label|submit-second|selection|surfaceId/,
+  'Repeated-boundary replay reports must omit private action names and labels');
 // A valid action before deletion must be testable even when no Button survives.
 const timedMessages = [...structuredClone(decodedExample), {
   version: 'v0.9', deleteSurface: {surfaceId: decodedExample[0].createSurface.surfaceId},
@@ -2569,7 +2587,7 @@ await assert.rejects(runBrowserCapture(sequenceMessages,
   {actionSteps: [sequencePlan[1], sequencePlan[0]]}),
   {message: 'Invalid browser action plan'});
 await assert.rejects(runBrowserCapture(sequenceMessages,
-  {actionSteps: [sequencePlan[0], sequencePlan[0]]}),
+  {actionSteps: [{eventIndex: -1, buttonIndex: 0, mode: 'click'}]}),
   {message: 'Invalid browser action plan'});
 await assert.rejects(runBrowserCapture(sequenceMessages,
   {actionSteps: [{eventIndex: 4, buttonIndex: 0, mode: 'click'}]}),

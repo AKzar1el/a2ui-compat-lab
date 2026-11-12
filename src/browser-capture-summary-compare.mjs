@@ -82,7 +82,7 @@ function validate(report) {
     if (!isRecord(step) || Object.keys(step).sort().join(',') !== 'buttonIndex,eventIndex,mode' ||
         !bounded(step.eventIndex, report.events - 1) || !bounded(step.buttonIndex, 31) ||
         !['click', 'enter'].includes(step.mode) ||
-        (i > 0 && step.eventIndex <= report.actionSteps[i - 1].eventIndex))
+        (i > 0 && step.eventIndex < report.actionSteps[i - 1].eventIndex))
       throw invalid();
   }
   if (report.actionsVerified !== (report.actionSteps.length || Number(modes === 1)))
