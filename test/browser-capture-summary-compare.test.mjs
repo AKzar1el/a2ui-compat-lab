@@ -99,6 +99,37 @@ test('real-Chromium report schema matches without copying private values', () =>
   assert.doesNotMatch(JSON.stringify(comparison), /surfaceId|componentId|selection|alpha/);
 });
 
+test('saved scripted action plans compare values rather than JSON object key order', () => {
+  const before = report();
+  before.clickSingleButton = false;
+  before.actionSteps = [
+    {eventIndex: 1, buttonIndex: 0, mode: 'click'},
+    {eventIndex: 1, buttonIndex: 1, mode: 'enter'},
+  ];
+  before.actionsVerified = 2;
+  before.actionsEmitted = 2;
+
+  const after = structuredClone(before);
+  after.actionSteps = [
+    {mode: 'click', buttonIndex: 0, eventIndex: 1},
+    {buttonIndex: 1, mode: 'enter', eventIndex: 1},
+  ];
+  const equivalent = compareBrowserCaptureSummaries(before, after);
+  assert.equal(equivalent.ok, true,
+    'JSON member insertion order is not a change in vetted action plan semantics');
+  assert.deepEqual(equivalent.changedSummaryFields, []);
+
+  const reordered = structuredClone(after);
+  reordered.actionSteps.reverse();
+  assert.ok(compareBrowserCaptureSummaries(before, reordered)
+    .changedSummaryFields.includes('actionSteps'), 'Action sequence must remain ordered');
+
+  const changed = structuredClone(after);
+  changed.actionSteps[1].mode = 'space';
+  assert.ok(compareBrowserCaptureSummaries(before, changed)
+    .changedSummaryFields.includes('actionSteps'), 'Action mode changes are genuine drift');
+});
+
 test('detects UI/button regression and playback mode drift by fixed field names', () => {
   const before = report();
   const after = report();
