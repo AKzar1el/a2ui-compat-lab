@@ -9,6 +9,7 @@ import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEv
 import {createServer} from 'vite';
 import {decodeBrowserCapture, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
 import {compareBrowserCaptureSummaries} from '../../src/browser-capture-summary-compare.mjs';
+import {testDirectBrowserCaptureBaseline} from './browser-capture-baseline-regression.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = resolveBrowserEvidenceDir(root, process.argv.slice(2));
@@ -2646,4 +2647,5 @@ await assert.rejects(
   {message: 'Browser capture SDK rejected an event'},
   'Published SDK exception text with private surface IDs must be redacted for programmatic callers',
 );
+testDirectBrowserCaptureBaseline(encodedExample, browserCaptureReport);
 console.log('Developer JSONL capture -> React Chromium + real Button: PASS');
