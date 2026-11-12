@@ -7,7 +7,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter ...] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter ...] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -20,7 +20,7 @@ export function parseBrowserCaptureOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
     clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null,
-    actionSteps: []};
+    actionSteps: [], inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -40,6 +40,10 @@ export function parseBrowserCaptureOptions(argv) {
       const [, eventIndex, buttonIndex, mode] =
         argv[++i].match(/^(0|[1-9][0-9]?):(0|[1-9][0-9]?):(click|enter)$/);
       parsed.actionSteps.push({eventIndex: Number(eventIndex), buttonIndex: Number(buttonIndex), mode});
+    } else if (arg === '--inspect-loading-placeholders' && !parsed.inspectLoadingPlaceholders) {
+      parsed.inspectLoadingPlaceholders = true;
+    } else if (arg === '--reject-loading-placeholders' && !parsed.rejectLoadingPlaceholders) {
+      parsed.rejectLoadingPlaceholders = true;
     } else if ((arg === '--input' || arg === '--out') &&
       argv[i + 1] && !argv[i + 1].startsWith('--') && !parsed[arg.slice(2)]) {
       parsed[arg.slice(2)] = resolve(argv[++i]);
@@ -106,7 +110,7 @@ function readCapture(input) {
 export async function runBrowserCapture(messages, {
   clickSingleButton = false, pressSingleButtonEnter = false,
   clickButtonIndex = null, pressButtonIndexEnter = null, actionAfterEventIndex = null,
-  actionSteps = [],
+  actionSteps = [], inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
@@ -226,6 +230,8 @@ export async function runBrowserCapture(messages, {
       actionsVerified++;
     };
     const steps = [];
+    const trackLoadingPlaceholders = inspectLoadingPlaceholders || rejectLoadingPlaceholders;
+    let loadingPlaceholderEvents = 0;
     for (let index = 0; index < messages.length; index++) {
       const message = messages[index];
       const operation = OPERATIONS.find(key => Object.hasOwn(message, key));
@@ -247,13 +253,26 @@ export async function runBrowserCapture(messages, {
         throw new Error('Browser capture createSurface was not mounted');
       if (actionSteps.length > 0 && trace.actions.length !== actionsVerified)
         throw new Error('Unexpected Chromium action between planned steps');
+      // Count only visible leaf-level React loading placeholders, never their
+      // producer-controlled text or IDs. This is a heuristic, not a catalog parser.
+      const loadingPlaceholderCount = trackLoadingPlaceholders ? await page.evaluate(() => {
+        const surface = document.querySelector('section[aria-label="Real A2UI surface"]');
+        if (!surface) return 0;
+        return [...surface.querySelectorAll('div')].filter(node =>
+          node.childElementCount === 0 && node.getClientRects().length > 0 &&
+          /^\[Loading [^\[\]\r\n]{1,128}\.\.\.\]$/.test(node.textContent?.trim() ?? '')).length;
+      }) : null;
+      if (loadingPlaceholderCount > 0) loadingPlaceholderEvents++;
       steps.push({
+        ...(trackLoadingPlaceholders ? {loadingPlaceholderCount} : {}),
         index, operation, surfaceCount: trace.surfaceIds.length,
         visibleButtonCount: await page.getByRole('button').count(),
         actionCount: trace.actions.length,
       });
       if (runtimeErrors.length || consoleErrors.length || deniedRequests || deniedSockets)
         throw new Error('Chromium reported replay errors or denied network traffic');
+      if (rejectLoadingPlaceholders && loadingPlaceholderCount > 0)
+        throw new Error('Browser capture displayed a transient loading placeholder');
       const scriptedAction = actionSteps.find(step => step.eventIndex === index);
       if (scriptedAction)
         await activateButton(scriptedAction.buttonIndex, scriptedAction.mode === 'enter', true);
@@ -275,6 +294,7 @@ export async function runBrowserCapture(messages, {
       renderer: '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0',
       events: messages.length,
       steps,
+      ...(trackLoadingPlaceholders ? {loadingPlaceholderEvents} : {}),
       clickSingleButton,
       pressSingleButtonEnter,
       clickButtonIndex,
@@ -309,7 +329,9 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const report = await runBrowserCapture(readCapture(args.input),
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
-          actionAfterEventIndex: args.actionAfterEventIndex, actionSteps: args.actionSteps});
+          actionAfterEventIndex: args.actionAfterEventIndex, actionSteps: args.actionSteps,
+          inspectLoadingPlaceholders: args.inspectLoadingPlaceholders,
+          rejectLoadingPlaceholders: args.rejectLoadingPlaceholders});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
