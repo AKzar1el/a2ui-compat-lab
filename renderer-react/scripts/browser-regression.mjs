@@ -2465,6 +2465,10 @@ assert.equal(browserCaptureReport.actionsEmitted, 1,
 assert.equal(browserCaptureReport.clickSingleButton, true);
 // Inspect intermediate DOM at each agent event boundary, not just final UI.
 // This is a heuristic for the published React DeferredChild debug placeholder.
+// Capture-created surfaces must not silently lose published SDK onError events.
+await assert.rejects(runBrowserCapture(decodedExample, {surfaceErrorProbe: true}),
+  {message: 'Browser capture renderer reported surface errors'},
+  'A real SDK surface error must fail closed without exposing its payload');
 const loadingOptions = parseBrowserCaptureOptions(['--input', 'private.jsonl', '--inspect-loading-placeholders']);
 assert.equal(loadingOptions.inspectLoadingPlaceholders, true);
 const loadingReport = await runBrowserCapture(decodedExample, {inspectLoadingPlaceholders: true});
