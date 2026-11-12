@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import {createHmac} from 'node:crypto';
 import {readFileSync, statSync, mkdirSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
@@ -20,7 +21,8 @@ export function parseBrowserCaptureOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
     clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null,
-    actionSteps: [], inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false};
+    actionSteps: [], inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
+    internalActionDigest: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -40,6 +42,9 @@ export function parseBrowserCaptureOptions(argv) {
       const [, eventIndex, buttonIndex, mode] =
         argv[++i].match(/^(0|[1-9][0-9]?):(0|[1-9][0-9]?):(click|enter|space)$/);
       parsed.actionSteps.push({eventIndex: Number(eventIndex), buttonIndex: Number(buttonIndex), mode});
+    } else if (arg === '--internal-action-digest' && !parsed.internalActionDigest) {
+      // Internal one-run transport: only the comparator injects a fresh key.
+      parsed.internalActionDigest = true;
     } else if (arg === '--inspect-loading-placeholders' && !parsed.inspectLoadingPlaceholders) {
       parsed.inspectLoadingPlaceholders = true;
     } else if (arg === '--reject-loading-placeholders' && !parsed.rejectLoadingPlaceholders) {
@@ -111,9 +116,12 @@ export async function runBrowserCapture(messages, {
   clickSingleButton = false, pressSingleButtonEnter = false,
   clickButtonIndex = null, pressButtonIndexEnter = null, actionAfterEventIndex = null,
   actionSteps = [], inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
+  actionDigestKey = null,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
+  if (actionDigestKey !== null && !/^[a-f0-9]{64}$/.test(actionDigestKey))
+    throw new Error('Invalid internal action digest key');
   const actionModes = Number(clickSingleButton) + Number(pressSingleButtonEnter) +
     Number(clickButtonIndex !== null) + Number(pressButtonIndexEnter !== null);
   if (!Array.isArray(actionSteps) || actionSteps.length > MAX_ACTION_STEPS ||
@@ -307,6 +315,9 @@ export async function runBrowserCapture(messages, {
       actionsVerified,
       keyboardFocusVerified,
       actionsEmitted: final.actions.length,
+      // Never persist or publish this digest; the parent drops it before report validation.
+      ...(actionDigestKey ? {__privateActionDigest: createHmac('sha256',
+        Buffer.from(actionDigestKey, 'hex')).update(JSON.stringify(final.actions)).digest('hex')} : {}),
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
     };
   } finally {
@@ -329,12 +340,16 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     const args = parseBrowserCaptureOptions(process.argv.slice(2));
     if (args.help) console.log(USAGE);
     else {
+      const digestKey = args.internalActionDigest ? process.env.A2UI_PRIVATE_ACTION_DIGEST_KEY : null;
+      if (args.internalActionDigest && (args.out || !/^[a-f0-9]{64}$/.test(digestKey ?? '')))
+        throw new Error('Internal action digest must be pipe-only with a valid ephemeral key');
       const report = await runBrowserCapture(readCapture(args.input),
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
           actionAfterEventIndex: args.actionAfterEventIndex, actionSteps: args.actionSteps,
           inspectLoadingPlaceholders: args.inspectLoadingPlaceholders,
-          rejectLoadingPlaceholders: args.rejectLoadingPlaceholders});
+          rejectLoadingPlaceholders: args.rejectLoadingPlaceholders,
+          actionDigestKey: digestKey});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
