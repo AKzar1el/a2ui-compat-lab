@@ -145,9 +145,14 @@ For a readable, value-free GitHub Actions step summary, opt into Markdown output
 from the same validated structural comparison (the default remains JSON):
 
 ```sh
-node src/browser-capture-summary-compare.mjs --before baseline-browser.json --after fresh-browser.json --strict --format markdown --out browser-summary.md
-# In a GitHub Actions shell step, append the generated file after local review:
-cat browser-summary.md >> "$GITHUB_STEP_SUMMARY"
+# In a GitHub Actions shell step, publish only if the structural metadata is safe to share.
+# Preserve a strict regression exit code while still showing the summary on drift:
+status=0
+node src/browser-capture-summary-compare.mjs --before baseline-browser.json --after fresh-browser.json --strict --format markdown --out browser-summary.md || status=$?
+if [ "$status" -le 1 ] && [ -f browser-summary.md ]; then
+  cat browser-summary.md >> "$GITHUB_STEP_SUMMARY"
+fi
+exit "$status"
 ```
 
 The Markdown contains only fixed field names, structural event indices/counts and
