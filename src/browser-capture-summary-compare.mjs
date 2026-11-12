@@ -29,6 +29,11 @@ const SUMMARY_FIELDS = ['events', 'loadingPlaceholderEvents', 'clickSingleButton
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const bounded = (value, max) => Number.isSafeInteger(value) && value >= 0 && value <= max;
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+// Action order matters, but JSON member insertion order does not.
+const sameActionSteps = (left, right) => left.length === right.length &&
+  left.every((step, index) =>
+    ['eventIndex', 'buttonIndex', 'mode'].every(field =>
+      step[field] === right[index][field]));
 const invalid = () => new Error('Invalid browser capture summary; input content omitted');
 
 function validate(report) {
@@ -114,7 +119,8 @@ export function browserCaptureReplayArguments(before) {
 export function compareBrowserCaptureSummaries(before, after) {
   const a = validate(before);
   const b = validate(after);
-  const changedSummaryFields = SUMMARY_FIELDS.filter(field => !same(a[field], b[field]));
+  const changedSummaryFields = SUMMARY_FIELDS.filter(field => field === 'actionSteps' ?
+    !sameActionSteps(a[field], b[field]) : !same(a[field], b[field]));
   const changedSteps = [];
   for (let index = 0; index < Math.max(a.steps.length, b.steps.length); index++) {
     const left = a.steps[index];
