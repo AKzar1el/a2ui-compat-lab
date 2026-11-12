@@ -7,7 +7,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter ...] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ...] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -36,9 +36,9 @@ export function parseBrowserCaptureOptions(argv) {
       /^(0|[1-9][0-9]?)$/.test(argv[i + 1] ?? '') && parsed.actionAfterEventIndex === null) {
       parsed.actionAfterEventIndex = Number(argv[++i]);
     } else if (arg === '--action-step' &&
-      /^(0|[1-9][0-9]?):(0|[1-9][0-9]?):(click|enter)$/.test(argv[i + 1] ?? '')) {
+      /^(0|[1-9][0-9]?):(0|[1-9][0-9]?):(click|enter|space)$/.test(argv[i + 1] ?? '')) {
       const [, eventIndex, buttonIndex, mode] =
-        argv[++i].match(/^(0|[1-9][0-9]?):(0|[1-9][0-9]?):(click|enter)$/);
+        argv[++i].match(/^(0|[1-9][0-9]?):(0|[1-9][0-9]?):(click|enter|space)$/);
       parsed.actionSteps.push({eventIndex: Number(eventIndex), buttonIndex: Number(buttonIndex), mode});
     } else if (arg === '--inspect-loading-placeholders' && !parsed.inspectLoadingPlaceholders) {
       parsed.inspectLoadingPlaceholders = true;
@@ -122,7 +122,7 @@ export async function runBrowserCapture(messages, {
         !Number.isSafeInteger(step.eventIndex) || step.eventIndex < 0 ||
         step.eventIndex >= messages.length || !Number.isSafeInteger(step.buttonIndex) ||
         step.buttonIndex < 0 || step.buttonIndex > MAX_BUTTON_INDEX ||
-        !['click', 'enter'].includes(step.mode) ||
+        !['click', 'enter', 'space'].includes(step.mode) ||
         (index > 0 && step.eventIndex < actionSteps[index - 1].eventIndex)) ||
       (actionSteps.length > 0 && actionAfterEventIndex !== null))
     throw new Error('Invalid browser action plan');
@@ -192,7 +192,7 @@ export async function runBrowserCapture(messages, {
     let actionsVerified = 0;
     const activateButton = async (
       targetIndex = selectedIndex,
-      useKeyboard = pressSingleButtonEnter || pressButtonIndexEnter !== null,
+      keyboardKey = (pressSingleButtonEnter || pressButtonIndexEnter !== null) ? 'Enter' : null,
       scripted = false,
     ) => {
       const before = (await page.evaluate(() => window.__a2uiLab.trace())).actions.length;
@@ -205,14 +205,14 @@ export async function runBrowserCapture(messages, {
           'Action mode button index is outside rendered range');
       const selected = buttons.nth(targetIndex);
       try {
-        if (useKeyboard) {
+        if (keyboardKey) {
           for (let attempt = 0; attempt < MAX_KEYBOARD_TABS; attempt++) {
             await page.keyboard.press('Tab');
             keyboardFocusVerified = await selected.evaluate(button => document.activeElement === button);
             if (keyboardFocusVerified) break;
           }
           if (!keyboardFocusVerified) throw new Error('No keyboard focus');
-          await page.keyboard.press('Enter');
+          await page.keyboard.press(keyboardKey);
         } else {
           await selected.click({timeout: 7000});
         }
@@ -276,7 +276,9 @@ export async function runBrowserCapture(messages, {
       // Preserve the supplied order when multiple user actions share a single agent boundary.
       const scriptedActions = actionSteps.filter(step => step.eventIndex === index);
       for (const scriptedAction of scriptedActions)
-        await activateButton(scriptedAction.buttonIndex, scriptedAction.mode === 'enter', true);
+        await activateButton(scriptedAction.buttonIndex,
+          scriptedAction.mode === 'click' ? null : scriptedAction.mode === 'enter' ? 'Enter' : 'Space',
+          true);
       if (!scriptedActions.length && index === actionAfterEventIndex) await activateButton();
     }
     if (selectedIndex !== null && actionAfterEventIndex === null)
