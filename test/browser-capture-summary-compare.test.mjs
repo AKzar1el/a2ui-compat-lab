@@ -129,6 +129,41 @@ test('CLI strict exit codes, exclusive evidence and private-input redaction', ()
   }
 });
 
+test('opt-in Markdown CI summary shows fixed structural fields, preserves strict exit and privacy', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-browser-markdown-'));
+  try {
+    const before = join(dir, 'PRIVATE_BEFORE_PATH.json');
+    const after = join(dir, 'PRIVATE_AFTER_PATH.json');
+    const out = join(dir, 'summary.md');
+    writeFileSync(before, JSON.stringify(report()));
+    writeFileSync(after, JSON.stringify(report()));
+    let run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--strict', '--format', 'markdown'], {encoding: 'utf8'});
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /\\*\\*Result:\\*\\* MATCH/);
+    assert.match(run.stdout, /Changed event steps:\\*\\* 0/);
+    const changed = report();
+    changed.steps[1].visibleButtonCount = 3;
+    writeFileSync(after, JSON.stringify(changed));
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--strict', '--format', 'markdown', '--out', out], {encoding: 'utf8'});
+    assert.equal(run.status, 1);
+    const markdown = readFileSync(out, 'utf8');
+    assert.match(markdown, /\\*\\*Result:\\*\\* DRIFT/);
+    assert.match(markdown, /\\| 1 \\| \`visibleButtonCount\` \\|/);
+    assert.doesNotMatch(markdown, /PRIVATE_BEFORE_PATH|PRIVATE_AFTER_PATH|selection|alpha|TOP_SECRET_CAPTURE_VALUE/);
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--format', 'markdown', '--out', out], {encoding: 'utf8'});
+    assert.equal(run.status, 2, 'Markdown report must never overwrite existing evidence');
+    for (const argv of [
+      ['--before', before, '--after', after, '--format', 'html'],
+      ['--before', before, '--after', after, '--format', 'markdown', '--format', 'json'],
+    ]) assert.throws(() => parseBrowserCaptureSummaryCompareOptions(argv), /Usage:/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
 test('private-capture comparison is an exclusive input mode and inherits browser action plans', () => {
   const options = parseBrowserCaptureSummaryCompareOptions(
     ['--before', 'baseline.json', '--after-capture', 'private.jsonl', '--strict']);

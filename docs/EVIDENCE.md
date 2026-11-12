@@ -766,3 +766,7 @@ conflicting activation modes. This tests a specific developer capture and
 browser keyboard interaction, **not** all keyboard patterns, WCAG compliance,
 custom catalogs or other SDK versions. Exact CI result/PR receipt should be
 recorded only after CI and guarded integration have actually finished.
+
+## CI-readable real-browser structural comparison (2026-11-12; awaiting final-head CI)
+
+The optional `--format markdown` mode for `src/browser-capture-summary-compare.mjs` renders only the comparator's fixed structural report keys, event indices/counts and match/drift status. It is suited to human review in GitHub Actions step summaries without exposing private capture bytes, paths, surface IDs or action values. The default JSON output and strict/no-overwrite semantics are retained. Deterministic CLI tests cover match/drift, Markdown field labels, private path omission, invalid formats, duplicate formats and exclusive artifact creation. This is not anonymization, cross-renderer validation, direct third-party feedback or measured adoption; GitHub Actions final-head evidence is required before calling the change validated.
