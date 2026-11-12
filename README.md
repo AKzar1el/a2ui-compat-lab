@@ -288,14 +288,17 @@ second Button before deletion), use repeatable scripted action steps:
 node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --action-step 2:0:click --action-step 3:0:enter --out ../out/two-actions.json
 ```
 
-Each `EVENT:BUTTON:click|enter` step fires **after** that zero-based JSONL event
+Each `EVENT:BUTTON:click|enter|space` step fires **after** that zero-based JSONL event
 (`EVENT` 0-99), on the current rendered Button index (`BUTTON` 0-31);
-`click` uses a real pointer, and `enter` requires real keyboard Tab focus.
+`click` uses a real pointer; `enter` and `space` require real keyboard Tab focus
+and dispatch physical Enter or Space to the selected Button.
 The steps must have non-decreasing event indices, with at most eight
 actions per capture. Repeating an event index replays multiple Button actions
 in their supplied order before the next agent message, without synthesizing
 an agent response. For example, use `--action-step 2:0:click --action-step
-2:1:enter` to exercise two controls after event 2. Steps cannot be combined
+2:1:enter` to exercise two controls after event 2. Use
+`--action-step 2:1:space` to test the Space-key activation path in the same
+real Chromium renderer; it is not an accessibility certification. Steps cannot be combined
 with single-action modes or `--action-after-event-index`. Missing, removed,
 or unreachable controls fail the replay; no synthetic agent actions are inserted. The structural report
 includes event/button positions, interaction types, and verified action
