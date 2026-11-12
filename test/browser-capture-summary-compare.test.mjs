@@ -74,6 +74,23 @@ test('paired private captures accept only an explicit vetted action-plan file', 
   }
 });
 
+test('opt-in private action parity requires two captures and a vetted action plan', () => {
+  const options = parseBrowserCaptureSummaryCompareOptions([
+    '--before-capture', 'private-old.jsonl', '--after-capture', 'private-new.jsonl',
+    '--action-plan', 'reviewed-browser-report.json', '--compare-actions', '--strict',
+  ]);
+  assert.equal(options.compareActions, true);
+  for (const argumentsToReject of [
+    ['--before-capture', 'a.jsonl', '--after-capture', 'b.jsonl', '--compare-actions'],
+    ['--before', 'saved.json', '--after-capture', 'b.jsonl',
+      '--action-plan', 'reviewed.json', '--compare-actions'],
+    ['--before-capture', 'a.jsonl', '--after-capture', 'b.jsonl',
+      '--action-plan', 'reviewed.json', '--compare-actions', '--compare-actions'],
+  ]) {
+    assert.throws(() => parseBrowserCaptureSummaryCompareOptions(argumentsToReject), /Usage:/);
+  }
+});
+
 test('real-Chromium report schema matches without copying private values', () => {
   const comparison = compareBrowserCaptureSummaries(report(), structuredClone(report()));
   assert.equal(comparison.ok, true);
