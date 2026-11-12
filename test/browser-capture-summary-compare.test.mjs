@@ -1,0 +1,129 @@
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {test} from 'node:test';
+import {
+  compareBrowserCaptureSummaries,
+  parseBrowserCaptureSummaryCompareOptions,
+} from '../src/browser-capture-summary-compare.mjs';
+
+const script = fileURLToPath(new URL('../src/browser-capture-summary-compare.mjs', import.meta.url));
+const report = () => ({
+  schemaVersion: 1,
+  kind: 'a2ui-react-capture-browser-replay',
+  protocol: 'v0.9',
+  renderer: '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0',
+  events: 2,
+  steps: [
+    {index: 0, operation: 'createSurface', surfaceCount: 1, visibleButtonCount: 0, actionCount: 0},
+    {index: 1, operation: 'updateComponents', surfaceCount: 1, visibleButtonCount: 1, actionCount: 0},
+  ],
+  clickSingleButton: true,
+  pressSingleButtonEnter: false,
+  clickButtonIndex: null,
+  pressButtonIndexEnter: null,
+  actionAfterEventIndex: null,
+  actionSteps: [],
+  actionsVerified: 1,
+  keyboardFocusVerified: false,
+  actionsEmitted: 1,
+  note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
+});
+
+test('real-Chromium report schema matches without copying private values', () => {
+  const comparison = compareBrowserCaptureSummaries(report(), structuredClone(report()));
+  assert.equal(comparison.ok, true);
+  assert.equal(comparison.differingSteps, 0);
+  assert.deepEqual(comparison.changedSummaryFields, []);
+  assert.doesNotMatch(JSON.stringify(comparison), /surfaceId|componentId|selection|alpha/);
+});
+
+test('detects UI/button regression and playback mode drift by fixed field names', () => {
+  const before = report();
+  const after = report();
+  after.steps[1].visibleButtonCount = 2;
+  after.clickSingleButton = false;
+  after.pressSingleButtonEnter = true;
+  after.keyboardFocusVerified = true;
+  const comparison = compareBrowserCaptureSummaries(before, after);
+  assert.equal(comparison.ok, false);
+  assert.deepEqual(comparison.changedSteps, [{index: 1, fields: ['visibleButtonCount']}]);
+  assert.ok(comparison.changedSummaryFields.includes('pressSingleButtonEnter'));
+  assert.ok(comparison.changedSummaryFields.includes('keyboardFocusVerified'));
+});
+
+test('checks event deletion and sampled placeholder visibility separately', () => {
+  const before = report();
+  before.steps.forEach(step => { step.loadingPlaceholderCount = 0; });
+  before.steps[0].loadingPlaceholderCount = 1;
+  before.loadingPlaceholderEvents = 1;
+  const after = structuredClone(before);
+  after.steps[0].loadingPlaceholderCount = 0;
+  after.loadingPlaceholderEvents = 0;
+  let comparison = compareBrowserCaptureSummaries(before, after);
+  assert.equal(comparison.ok, false);
+  assert.deepEqual(comparison.changedSteps, [{index: 0, fields: ['loadingPlaceholderCount']}]);
+  assert.ok(comparison.changedSummaryFields.includes('loadingPlaceholderEvents'));
+  after.steps.pop();
+  after.events = 1;
+  comparison = compareBrowserCaptureSummaries(before, after);
+  assert.equal(comparison.differingSteps, 2);
+  assert.deepEqual(comparison.changedSteps.at(-1), {index: 1, fields: ['presence']});
+});
+
+test('rejects unexpected producer fields, malformed plans and inconsistent counts', () => {
+  const injected = report();
+  injected.privateModelValue = 'TOP_SECRET_CAPTURE_VALUE';
+  assert.throws(() => compareBrowserCaptureSummaries(injected, report()),
+    error => /Invalid browser capture summary/.test(error.message) &&
+      !error.message.includes('TOP_SECRET_CAPTURE_VALUE'));
+  const invalidCount = report();
+  invalidCount.steps[1].actionCount = -1;
+  assert.throws(() => compareBrowserCaptureSummaries(report(), invalidCount),
+    /Invalid browser capture summary/);
+  const malformed = report();
+  malformed.actionSteps = [{eventIndex: 1, buttonIndex: 0, mode: 'click'}];
+  assert.throws(() => compareBrowserCaptureSummaries(report(), malformed),
+    /Invalid browser capture summary/);
+  const invalidLoading = report();
+  invalidLoading.loadingPlaceholderEvents = 1;
+  assert.throws(() => compareBrowserCaptureSummaries(report(), invalidLoading),
+    /Invalid browser capture summary/);
+  assert.throws(() => parseBrowserCaptureSummaryCompareOptions(
+    ['--before', 'a.json', '--after', 'b.json', '--strict', '--strict']), /Usage:/);
+});
+
+test('CLI strict exit codes, exclusive evidence and private-input redaction', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-browser-diff-'));
+  try {
+    const before = join(dir, 'private-before.json');
+    const after = join(dir, 'private-after.json');
+    const out = join(dir, 'new-diff.json');
+    writeFileSync(before, JSON.stringify(report()));
+    writeFileSync(after, JSON.stringify(report()));
+    let run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--strict', '--out', out], {encoding: 'utf8'});
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(JSON.parse(readFileSync(out, 'utf8')).ok, true);
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--out', out], {encoding: 'utf8'});
+    assert.equal(run.status, 2, 'Evidence output must never be overwritten');
+    const changed = report();
+    changed.steps[1].visibleButtonCount = 3;
+    writeFileSync(after, JSON.stringify(changed));
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after,
+      '--strict'], {encoding: 'utf8'});
+    assert.equal(run.status, 1);
+    assert.equal(JSON.parse(run.stdout).ok, false);
+    writeFileSync(after, '{"secret":"TOP_SECRET_CAPTURE_VALUE"}');
+    run = spawnSync(process.execPath, [script, '--before', before, '--after', after],
+      {encoding: 'utf8'});
+    assert.equal(run.status, 2);
+    assert.doesNotMatch(run.stderr, /TOP_SECRET_CAPTURE_VALUE|private-before/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
