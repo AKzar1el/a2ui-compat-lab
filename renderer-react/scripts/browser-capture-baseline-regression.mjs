@@ -9,7 +9,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const compareScript = resolve(repo, 'src/browser-capture-summary-compare.mjs');
 
 /** End-to-end published React/Chromium private-capture comparison, not a mocked report. */
-export function testDirectBrowserCaptureBaseline(encodedCapture, baseline) {
+export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoActionEvidence) {
   const dir = mkdtempSync(join(tmpdir(), 'a2ui-browser-private-baseline-'));
   const run = args => spawnSync(process.execPath, [compareScript, ...args], {
     cwd: repo, encoding: 'utf8', windowsHide: true,
@@ -74,6 +74,7 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline) {
     const matchingActions = JSON.parse(readFileSync(parityMatchPath, 'utf8'));
     assert.equal(matchingActions.actionPayloadParity, 'match');
     assert.equal(matchingActions.ok, true);
+    assert.equal(Object.hasOwn(matchingActions, 'firstDifferentActionIndex'), false);
     assert.doesNotMatch(JSON.stringify(matchingActions), /privateActionDigest|[a-f0-9]{64}/,
       'Do not export reusable action fingerprints');
 
@@ -98,11 +99,43 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline) {
       'Opt-in action parity must detect an action change with the same count and UI');
     const actionResult = JSON.parse(readFileSync(changedActionDiff, 'utf8'));
     assert.equal(actionResult.actionPayloadParity, 'drift');
+    assert.equal(actionResult.firstDifferentActionIndex, 0);
     assert.deepEqual(actionResult.changedSummaryFields, ['actionPayloadParity']);
     assert.equal(actionResult.differingSteps, 0);
     assert.doesNotMatch(JSON.stringify(actionResult),
       /PRIVATE_DIFFERENT_ACTION_DO_NOT_REPORT|private-renamed|private-original|alpha|selection|surfaceId|__privateActionDigest/,
       'Private action values, fingerprints and capture paths must stay out of reports');
+
+    // A separately verified real Chromium plan emits two distinct Button
+    // actions at the same boundary. Alter only the SECOND action's name.
+    assert.equal(twoActionEvidence.report.actionsVerified, 2);
+    assert.equal(twoActionEvidence.report.actionsEmitted, 2);
+    const twoCapturePath = join(dir, 'private-two-action-before.jsonl');
+    const twoChangedPath = join(dir, 'private-two-action-after.jsonl');
+    const twoPlanPath = join(dir, 'vetted-two-action-report.json');
+    const twoDiffPath = join(dir, 'two-action-diff.json');
+    writeFileSync(twoCapturePath, twoActionEvidence.capture);
+    writeFileSync(twoPlanPath, JSON.stringify(twoActionEvidence.report));
+    const modified = twoActionEvidence.capture.toString('utf8').trimEnd()
+      .split('\n').map(line => JSON.parse(line));
+    const secondPlannedButton = modified[1].updateComponents.components.find(component =>
+      component.id === 'submit');
+    assert.ok(secondPlannedButton?.action?.event?.name);
+    secondPlannedButton.action.event.name = 'PRIVATE_SECOND_ONLY_ACTION_DRIFT';
+    writeFileSync(twoChangedPath, modified.map(message => JSON.stringify(message)).join('\n') + '\n');
+    const secondOnlyDrift = run(['--before-capture', twoCapturePath,
+      '--after-capture', twoChangedPath, '--action-plan', twoPlanPath,
+      '--compare-actions', '--strict', '--out', twoDiffPath]);
+    assert.equal(secondOnlyDrift.status, 1,
+      'Real Chromium should localize the second differing emitted action');
+    const localized = JSON.parse(readFileSync(twoDiffPath, 'utf8'));
+    assert.equal(localized.actionPayloadParity, 'drift');
+    assert.equal(localized.firstDifferentActionIndex, 1);
+    assert.equal(localized.differingSteps, 0,
+      'Per-action parity must reveal a change invisible to structural counts');
+    assert.doesNotMatch(JSON.stringify(localized),
+      /PRIVATE_SECOND_ONLY_ACTION_DRIFT|private-two-action|submit-second|selection|alpha|surfaceId|__privateActionDigest|[a-f0-9]{64}/,
+      'Never persist private action text, paths, keys or reusable digests');
 
     const unreachablePlanPath = join(dir, 'private-unreachable-plan.json');
     writeFileSync(unreachablePlanPath, JSON.stringify({...baseline,
