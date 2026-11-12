@@ -149,11 +149,23 @@ independently; no intermediate browser reports or raw values are written:
 node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --strict --out browser-diff.json
 ```
 
-This direct mode tests UI structure, visible Button counts and event order.
-It does **not** activate Buttons: no saved baseline exists from which to recover
-a vetted interaction plan. To compare action behavior, first save a browser
-report with `--action-step`, then use `--before baseline-browser.json
---after-capture new-private.jsonl` as documented below. Both modes stay
+By default, direct paired capture mode tests UI structure, visible Button
+counts and event order **without activating Buttons**. To compare real pointer
+or keyboard interaction behavior across both private captures, first explicitly
+review and save a trusted browser report with an action plan
+(`--action-step` or a single-Button mode), then opt in:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --action-plan vetted-browser-report.json --strict --out planned-browser-diff.json
+```
+
+The saved fixed-schema report must contain at least one verified action. The
+same bounded plan is replayed independently in both real Chromium sessions;
+invalid, unreachable or stale targets fail closed without exposing capture
+values, paths or SDK errors. This does **not** compare private action payloads,
+establish anonymization or execute unreviewed actions. Review the saved plan
+before enabling interactions. Alternatively use `--before vetted-browser-report.json
+--after-capture new-private.jsonl` to compare directly against that baseline. Both modes stay
 offline after dependencies are installed and preserve strict 0/1/2 exit codes,
 no-overwrite protection and generic path-free diagnostics. Structural event
 patterns may remain sensitive; review reports before sharing.
