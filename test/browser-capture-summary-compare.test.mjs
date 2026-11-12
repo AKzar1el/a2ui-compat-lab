@@ -55,6 +55,25 @@ test('direct two-private-capture CLI mode requires both captures and stays mutua
   ]), /Usage:/);
 });
 
+test('paired private captures accept only an explicit vetted action-plan file', () => {
+  const options = parseBrowserCaptureSummaryCompareOptions([
+    '--before-capture', 'private-before.jsonl', '--after-capture', 'private-after.jsonl',
+    '--action-plan', 'vetted-browser-baseline.json', '--strict',
+  ]);
+  assert.ok(options['action-plan'].endsWith('vetted-browser-baseline.json'));
+  assert.equal(options.strict, true);
+  for (const args of [
+    ['--before', 'baseline.json', '--after-capture', 'private.jsonl',
+      '--action-plan', 'vetted.json'],
+    ['--before-capture', 'private.jsonl', '--after', 'report.json',
+      '--action-plan', 'vetted.json'],
+    ['--before-capture', 'a.jsonl', '--after-capture', 'b.jsonl',
+      '--action-plan', 'vetted.json', '--action-plan', 'other.json'],
+  ]) {
+    assert.throws(() => parseBrowserCaptureSummaryCompareOptions(args), /Usage:/);
+  }
+});
+
 test('real-Chromium report schema matches without copying private values', () => {
   const comparison = compareBrowserCaptureSummaries(report(), structuredClone(report()));
   assert.equal(comparison.ok, true);
