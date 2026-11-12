@@ -137,9 +137,23 @@ export function compareBrowserCaptureSummaries(before, after) {
 }
 
 /** Render only comparator-owned, fixed-schema fields for human CI review. */
-function markdownComparisonReport(diff) {
+function markdownComparisonReport(diff, before, after) {
+  // Reports are strictly validated before any field is rendered into Markdown.
+  const a = validate(before);
+  const b = validate(after);
   const fields = values => values.length ? values.map(value => '`' + value + '`').join(', ') : 'none';
-  const rows = diff.changedSteps.map(step => '| ' + step.index + ' | ' + fields(step.fields) + ' |');
+  const fixedValue = (step, field) => {
+    if (field === 'presence') return step ? 'present' : 'absent';
+    if (!step) return 'absent';
+    return Object.hasOwn(step, field) ? String(step[field]) : 'not sampled';
+  };
+  const rows = diff.changedSteps.map(step => {
+    const left = a.steps[step.index];
+    const right = b.steps[step.index];
+    const deltas = step.fields.map(field =>
+      '`' + field + '`: ' + fixedValue(left, field) + ' -> ' + fixedValue(right, field));
+    return '| ' + step.index + ' | ' + deltas.join('; ') + ' |';
+  });
   return [
     '## A2UI React/Chromium capture structural comparison',
     '',
@@ -149,7 +163,7 @@ function markdownComparisonReport(diff) {
     '**Changed summary fields:** ' + fields(diff.changedSummaryFields),
     '**Changed event steps:** ' + diff.differingSteps,
     '',
-    '| Event index | Changed structural fields |',
+    '| Event index | Structural changes (before -> after) |',
     '| ---: | --- |',
     ...rows,
     '',
@@ -228,7 +242,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const observed = args['after-capture']
         ? replayPrivateCapture(args['after-capture'], baseline) : readReport(args.after);
       const result = compareBrowserCaptureSummaries(baseline, observed);
-      const content = args.format === 'markdown' ? markdownComparisonReport(result) :
+      const content = args.format === 'markdown' ? markdownComparisonReport(result, baseline, observed) :
         JSON.stringify(result, null, 2) + '\n';
       if (args.out) saveReport(args.out, content);
       else process.stdout.write(content);
