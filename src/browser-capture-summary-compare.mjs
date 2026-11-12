@@ -1,10 +1,13 @@
 #!/usr/bin/env node
+import {spawnSync} from 'node:child_process';
 import {lstatSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
-const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs --before OLD.json --after NEW.json [--strict] [--out NEW-DIFF.json]';
+const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs --before OLD.json (--after NEW.json | --after-capture PRIVATE.jsonl) [--strict] [--out NEW-DIFF.json]';
 const MAX_BYTES = 256 * 1024;
+const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
+const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
 const MAX_EVENTS = 100;
 const MAX_COUNT = 10000;
 const REPORT_KIND = 'a2ui-react-capture-browser-replay';
@@ -87,6 +90,25 @@ function validate(report) {
   return report;
 }
 
+/** Reconstruct only an allowlisted browser action plan from a validated baseline. */
+export function browserCaptureReplayArguments(before) {
+  const report = validate(before);
+  const args = [];
+  if (report.clickSingleButton) args.push('--click-single-button');
+  else if (report.pressSingleButtonEnter) args.push('--press-single-button-enter');
+  else if (report.clickButtonIndex !== null)
+    args.push('--click-button-index', String(report.clickButtonIndex));
+  else if (report.pressButtonIndexEnter !== null)
+    args.push('--press-button-index-enter', String(report.pressButtonIndexEnter));
+  if (report.actionAfterEventIndex !== null)
+    args.push('--action-after-event-index', String(report.actionAfterEventIndex));
+  for (const step of report.actionSteps)
+    args.push('--action-step', step.eventIndex + ':' + step.buttonIndex + ':' + step.mode);
+  if (Object.hasOwn(report, 'loadingPlaceholderEvents'))
+    args.push('--inspect-loading-placeholders');
+  return args;
+}
+
 /** Compare only fixed, validated structural fields from real browser replay reports. */
 export function compareBrowserCaptureSummaries(before, after) {
   const a = validate(before);
@@ -120,12 +142,13 @@ export function parseBrowserCaptureSummaryCompareOptions(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !options.strict) options.strict = true;
-    else if (['--before', '--after', '--out'].includes(arg) &&
+    else if (['--before', '--after', '--after-capture', '--out'].includes(arg) &&
       !Object.hasOwn(options, arg.slice(2)) && argv[i + 1] &&
       !argv[i + 1].startsWith('--')) options[arg.slice(2)] = resolve(argv[++i]);
     else throw new Error(USAGE);
   }
-  if (!options.before || !options.after) throw new Error(USAGE);
+  if (!options.before || Number(Boolean(options.after)) + Number(Boolean(options['after-capture'])) !== 1)
+    throw new Error(USAGE);
   return options;
 }
 
@@ -136,6 +159,28 @@ function readReport(path) {
     const bytes = readFileSync(path);
     const json = new TextDecoder('utf-8', {fatal: true}).decode(bytes);
     return JSON.parse(json);
+  } catch {
+    throw invalid();
+  }
+}
+
+function replayPrivateCapture(inputPath, baseline) {
+  const args = browserCaptureReplayArguments(baseline);
+  let child;
+  try {
+    child = spawnSync(process.execPath, [RENDERER_SCRIPT, '--input', inputPath, ...args], {
+      cwd: RENDERER_DIR, shell: false, windowsHide: true,
+      encoding: 'utf8', maxBuffer: MAX_BYTES, timeout: 120000,
+    });
+  } catch {
+    throw invalid();
+  }
+  // Never relay child stderr, private paths or captured A2UI values on failure.
+  if (child.error || child.status !== 0 || !child.stdout ||
+      Buffer.byteLength(child.stdout, 'utf8') > MAX_BYTES)
+    throw invalid();
+  try {
+    return validate(JSON.parse(child.stdout));
   } catch {
     throw invalid();
   }
@@ -155,7 +200,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     const args = parseBrowserCaptureSummaryCompareOptions(process.argv.slice(2));
     if (args.help) console.log(USAGE);
     else {
-      const result = compareBrowserCaptureSummaries(readReport(args.before), readReport(args.after));
+      const baseline = readReport(args.before);
+      const observed = args['after-capture']
+        ? replayPrivateCapture(args['after-capture'], baseline) : readReport(args.after);
+      const result = compareBrowserCaptureSummaries(baseline, observed);
       const json = JSON.stringify(result, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);

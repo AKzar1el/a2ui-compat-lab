@@ -141,6 +141,23 @@ headless SDK summary alone cannot observe, compare two reports offline:
 node src/browser-capture-summary-compare.mjs --before baseline-browser.json --after fresh-browser.json --strict --out browser-diff.json
 ```
 
+For a **single-command real-browser regression check** against a new private
+v0.9 JSONL capture, use the saved structural baseline directly:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before baseline-browser.json --after-capture private.jsonl --strict --out browser-diff.json
+```
+
+This starts the pinned React/core 0.14.0 Chromium renderer locally (install
+the isolated `renderer-react/` dependencies and Chromium first). It reconstructs
+the baseline's verified Button action positions, pointer/Tab-Enter modes, event
+boundaries, and optional sampled loading-placeholder inspection, then checks the
+fresh browser report without saving an intermediate report or private capture.
+`--after` and `--after-capture` are mutually exclusive. The child is bounded,
+shell-free, offline except ephemeral loopback Vite traffic, and reports generic
+errors rather than replay diagnostics containing private text. Captures and
+baseline reports remain on disk; structural event patterns are **not anonymized**.
+
 Exit codes are 0 for a match, 1 for structural drift with `--strict`,
 and 2 for invalid input or an output problem. The comparison is pinned to the
 published React/core 0.14.0 replay report schema, and checks lifecycle order,
