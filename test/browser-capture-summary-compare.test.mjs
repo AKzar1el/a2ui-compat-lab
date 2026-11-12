@@ -281,6 +281,15 @@ test('private-capture comparison is an exclusive input mode and inherits browser
   assert.deepEqual(browserCaptureReplayArguments(repeated),
     ['--action-step', '1:0:click', '--action-step', '1:0:enter']);
   assert.equal(compareBrowserCaptureSummaries(repeated, structuredClone(repeated)).ok, true);
+  const space = structuredClone(scripted);
+  space.actionSteps = [{eventIndex: 1, buttonIndex: 0, mode: 'space'}];
+  assert.deepEqual(browserCaptureReplayArguments(space), ['--action-step', '1:0:space']);
+  assert.equal(compareBrowserCaptureSummaries(space, structuredClone(space)).ok, true);
+  const unknownKey = structuredClone(space);
+  unknownKey.actionSteps[0].mode = 'PRIVATE_CAPTURE_VALUE';
+  assert.throws(() => browserCaptureReplayArguments(unknownKey),
+    error => /Invalid browser capture summary/.test(error.message) &&
+      !error.message.includes('PRIVATE_CAPTURE_VALUE'));
   const descending = structuredClone(repeated);
   descending.actionSteps[1].eventIndex = 0;
   assert.throws(() => browserCaptureReplayArguments(descending),
