@@ -9,7 +9,7 @@ const MAX_LINE_BYTES = 256 * 1024;
 const MAX_FRAMES = 10000;
 // Keep the opt-in 1-byte transport replay bounded on real-world captures.
 const MAX_CHUNK_VERIFY_BYTES = 512 * 1024;
-const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks] [--summary]';
+const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks] [--summary] [--stream-efficiency]';
 
 // Emit only protocol-defined operation names; never copy producer-controlled keys.
 const EVENT_OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
@@ -19,17 +19,78 @@ function safeOperation(message) {
   return names.length === 1 ? names[0] : 'unclassified';
 }
 
+
+/** Estimate repeated UTF-8 growing string payloads in v0.9 replace streams.
+ * This measures neither wire bytes nor a supported append protocol. */
+function estimateStringReplaceBytes(messages) {
+  const runs = new Map();
+  const result = {growingRuns: 0, growingUpdates: 0,
+    replacementValueBytes: 0, incrementalValueBytes: 0};
+  const close = key => {
+    const run = runs.get(key);
+    if (run?.growths > 0) {
+      result.growingRuns++;
+      result.growingUpdates += run.growths;
+      result.replacementValueBytes += run.fullBytes;
+      result.incrementalValueBytes += run.deltaBytes;
+    }
+    runs.delete(key);
+  };
+  const intersects = (a, b) => a === b || a === '/' || b === '/' ||
+    a.startsWith(b + '/') || b.startsWith(a + '/');
+  for (const message of messages) {
+    const lifecycle = message?.createSurface ?? message?.deleteSurface;
+    if (lifecycle) {
+      for (const [key, run] of runs)
+        if (run.surfaceId === lifecycle.surfaceId) close(key);
+    }
+    const update = message?.updateDataModel;
+    if (!update || typeof update.surfaceId !== 'string' ||
+        typeof update.path !== 'string') continue;
+    const {surfaceId, path, value} = update;
+    const key = JSON.stringify([surfaceId, path]);
+    for (const [other, run] of runs)
+      if (other !== key && run.surfaceId === surfaceId && intersects(run.path, path))
+        close(other);
+    if (typeof value !== 'string') {
+      close(key);
+      continue;
+    }
+    const fullBytes = Buffer.byteLength(value, 'utf8');
+    const old = runs.get(key);
+    if (old && value.length > old.value.length && value.startsWith(old.value)) {
+      old.growths++;
+      old.fullBytes += fullBytes;
+      old.deltaBytes += Buffer.byteLength(value.slice(old.value.length), 'utf8');
+      old.value = value;
+    } else {
+      if (old) close(key);
+      runs.set(key, {surfaceId, path, value, growths: 0, fullBytes, deltaBytes: fullBytes});
+    }
+  }
+  for (const key of runs.keys()) close(key);
+  return {...result, amplificationFactor: result.incrementalValueBytes
+    ? Math.round(result.replacementValueBytes / result.incrementalValueBytes * 100) / 100
+    : null};
+}
+
 // This CLI handles local captures only: never fetch, upload or run supplied code.
 function options(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const result = {};
   let verifyChunks = false;
   let summary = false;
+  let streamEfficiency = false;
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (key === '--summary') {
       if (summary) throw new Error(USAGE);
       summary = true;
+      continue;
+    }
+    if (key === '--stream-efficiency') {
+      if (streamEfficiency) throw new Error(USAGE);
+      streamEfficiency = true;
       continue;
     }
     if (key === '--verify-chunks') {
@@ -42,12 +103,13 @@ function options(argv) {
       throw new Error(USAGE);
     result[key] = next;
   }
-  if (!result['--input']) throw new Error(USAGE);
+  if (!result['--input'] || (streamEfficiency && !summary)) throw new Error(USAGE);
   return {
     input: resolve(result['--input']),
     out: result['--out'] ? resolve(result['--out']) : null,
     verifyChunks,
     summary,
+    streamEfficiency,
   };
 }
 
@@ -65,7 +127,7 @@ function redactCaptureError(stage, run) {
   }
 }
 
-function replayCapture(raw, {verifyChunks = false, summary = false} = {}) {
+function replayCapture(raw, {verifyChunks = false, summary = false, streamEfficiency = false} = {}) {
   if (raw.length === 0 || raw.length > MAX_INPUT_BYTES)
     throw new RangeError('Capture must be 1 byte to 4 MiB');
   if (verifyChunks && raw.length > MAX_CHUNK_VERIFY_BYTES)
@@ -101,6 +163,7 @@ function replayCapture(raw, {verifyChunks = false, summary = false} = {}) {
     replay,
   };
   if (summary) report.eventOperations = messages.map(safeOperation);
+  if (streamEfficiency) report.streamEfficiency = estimateStringReplaceBytes(messages);
   if (verifyChunks) {
     const baseline = JSON.stringify(replay);
     const chunkSizes = [1, 7, 57, raw.length];
@@ -155,11 +218,11 @@ function writeCaptureReport(out, report) {
 }
 
 try {
-  const {input, out, help, verifyChunks, summary} = options(process.argv.slice(2));
+  const {input, out, help, verifyChunks, summary, streamEfficiency} = options(process.argv.slice(2));
   if (help) {
     console.log(USAGE);
   } else {
-    const observed = replayCapture(readCaptureFile(input), {verifyChunks, summary});
+    const observed = replayCapture(readCaptureFile(input), {verifyChunks, summary, streamEfficiency});
     // A shareable structural summary never includes capture values, IDs, or its
     // digest; raw evidence remains private unless the caller explicitly omits --summary.
     const view = summary ? {
@@ -168,6 +231,7 @@ try {
       protocol: observed.protocol,
       events: observed.events,
       chunksVerified: observed.allChunksMatch === true,
+      ...(streamEfficiency ? {streamEfficiency: observed.streamEfficiency} : {}),
       steps: observed.replay.snapshots.map((snapshot, index) => ({
         index: snapshot.index,
         operation: observed.eventOperations[index],

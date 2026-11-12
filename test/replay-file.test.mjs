@@ -239,3 +239,54 @@ test('unknown, duplicate or absent flags exit with usage and no output', () => {
   assert.equal(help.status, 0);
   assert.match(help.stdout, /Usage:/);
 });
+
+
+test('opt-in string stream diagnostic counts Unicode growth without model values or IDs', () => inTemp(dir => {
+  const values = ['PRIVATE_STREAM', 'PRIVATE_STREAM🙂', 'PRIVATE_STREAM🙂 next'];
+  const messages = structuredClone(fixture.slice(0, 3));
+  for (const message of messages)
+    (message.createSurface ?? message.updateComponents ?? message.updateDataModel).surfaceId = 'PRIVATE_ID';
+  for (const value of values)
+    messages.push({version: 'v0.9', updateDataModel: {surfaceId: 'PRIVATE_ID', path: '/title', value}});
+  const input = join(dir, 'capture.jsonl');
+  writeFileSync(input, messages.map(m => JSON.stringify(m)).join('\n') + '\n');
+  const response = invoke(['--input', input, '--summary', '--stream-efficiency']);
+  assert.equal(response.status, 0, response.stderr);
+  const {streamEfficiency: stats} = JSON.parse(response.stdout);
+  assert.equal(stats.growingRuns, 1);
+  assert.equal(stats.growingUpdates, 2);
+  assert.equal(stats.replacementValueBytes, values.reduce((sum, text) => sum + Buffer.byteLength(text), 0));
+  assert.equal(stats.incrementalValueBytes, Buffer.byteLength(values.at(-1)));
+  assert.equal(stats.amplificationFactor, Math.round(stats.replacementValueBytes / stats.incrementalValueBytes * 100) / 100);
+  assert.doesNotMatch(response.stdout, /PRIVATE_STREAM|PRIVATE_ID|\/title|captureSha256|"data"/);
+  const defaultReport = invoke(['--input', input, '--summary']);
+  assert.equal(defaultReport.status, 0, defaultReport.stderr);
+  assert.equal(Object.hasOwn(JSON.parse(defaultReport.stdout), 'streamEfficiency'), false);
+}));
+
+test('string stream diagnostic ignores non-prefix updates and invalidates ancestor writes', () => inTemp(dir => {
+  const messages = [
+    ...structuredClone(fixture.slice(0, 3)),
+    {version: 'v0.9', updateDataModel: {surfaceId: 'replay', path: '/title', value: 'Alpha'}},
+    {version: 'v0.9', updateDataModel: {surfaceId: 'replay', path: '/title', value: 'Beta'}},
+    {version: 'v0.9', updateDataModel: {surfaceId: 'replay', path: '/', value: {title: 'Reset'}}},
+    {version: 'v0.9', updateDataModel: {surfaceId: 'replay', path: '/title', value: 'Beta!'}},
+    {version: 'v0.9', deleteSurface: {surfaceId: 'replay'}},
+  ];
+  const input = join(dir, 'capture.jsonl');
+  writeFileSync(input, messages.map(m => JSON.stringify(m)).join('\n') + '\n');
+  const response = invoke(['--input', input, '--summary', '--stream-efficiency']);
+  assert.equal(response.status, 0, response.stderr);
+  assert.deepEqual(JSON.parse(response.stdout).streamEfficiency, {
+    growingRuns: 0, growingUpdates: 0, replacementValueBytes: 0,
+    incrementalValueBytes: 0, amplificationFactor: null,
+  });
+  for (const args of [
+    ['--input', input, '--stream-efficiency'],
+    ['--input', input, '--summary', '--stream-efficiency', '--stream-efficiency'],
+  ]) {
+    const invalid = invoke(args);
+    assert.equal(invalid.status, 1);
+    assert.match(invalid.stderr, /Usage:/);
+  }
+}));
