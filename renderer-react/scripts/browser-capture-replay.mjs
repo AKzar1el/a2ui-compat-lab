@@ -125,12 +125,14 @@ export async function runBrowserCapture(messages, {
   clickSingleButton = false, pressSingleButtonEnter = false,
   clickButtonIndex = null, pressButtonIndexEnter = null, actionAfterEventIndex = null,
   actionSteps = [], inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
-  actionDigestKey = null,
+  actionDigestKey = null, surfaceErrorProbe = false,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
   if (actionDigestKey !== null && !/^[a-f0-9]{64}$/.test(actionDigestKey))
     throw new Error('Invalid internal action digest key');
+  if (typeof surfaceErrorProbe !== 'boolean')
+    throw new Error('Invalid internal surface error probe');
   const actionModes = Number(clickSingleButton) + Number(pressSingleButtonEnter) +
     Number(clickButtonIndex !== null) + Number(pressButtonIndexEnter !== null);
   if (!Array.isArray(actionSteps) || actionSteps.length > MAX_ACTION_STEPS ||
@@ -195,7 +197,8 @@ export async function runBrowserCapture(messages, {
     page.on('console', message => {
       if (message.type() === 'error') consoleErrors.push('console');
     });
-    await page.goto(origin + '/?capture=1', {waitUntil: 'domcontentloaded'});
+    await page.goto(origin + '/?capture=1' +
+      (surfaceErrorProbe ? '&surface-error-probe=1' : ''), {waitUntil: 'domcontentloaded'});
     await page.locator('section[aria-label="Real A2UI surface"]').waitFor({state: 'attached', timeout: 10000});
     await page.waitForFunction(() => Boolean(window.__a2uiLab?.trace), null, {timeout: 10000});
     // React useEffect subscribes to surface creation after initial paint.
@@ -265,6 +268,8 @@ export async function runBrowserCapture(messages, {
       await page.evaluate(() => new Promise(resolve =>
         requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const trace = await page.evaluate(() => window.__a2uiLab.trace());
+      if (trace.errors.length > 0)
+        throw new Error('Browser capture renderer reported surface errors');
       if (operation === 'createSurface' &&
           !trace.surfaceIds.includes(message.createSurface.surfaceId))
         throw new Error('Browser capture createSurface was not mounted');
@@ -301,6 +306,8 @@ export async function runBrowserCapture(messages, {
     if (selectedIndex !== null && actionAfterEventIndex === null)
       await activateButton();
     const final = await page.evaluate(() => window.__a2uiLab.trace());
+    if (final.errors.length > 0)
+      throw new Error('Browser capture renderer reported surface errors');
     if (runtimeErrors.length || consoleErrors.length || deniedRequests || deniedSockets)
       throw new Error('Chromium reported runtime, console or network errors');
     if (selectedIndex !== null && final.actions.length !== actionBeforeCount + 1)
