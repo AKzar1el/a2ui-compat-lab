@@ -17,6 +17,15 @@ const MAX_ACTION_STEPS = 8;
 const MAX_KEYBOARD_TABS = 64;
 const OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
 
+// JSON object member insertion order is not action semantics. Sort nested
+// object keys before ephemeral parity HMACs; preserve action/array order.
+function canonicalActionJSON(value) {
+  return JSON.stringify(value, (_key, nested) =>
+    nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? Object.fromEntries(Object.keys(nested).sort().map(key => [key, nested[key]]))
+      : nested);
+}
+
 export function parseBrowserCaptureOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
@@ -318,11 +327,11 @@ export async function runBrowserCapture(messages, {
       // Never persist or publish this digest; the parent drops it before report validation.
       ...(actionDigestKey ? {
         __privateActionDigest: createHmac('sha256', Buffer.from(actionDigestKey, 'hex'))
-          .update(JSON.stringify(final.actions)).digest('hex'),
+          .update(canonicalActionJSON(final.actions)).digest('hex'),
         // Transient keyed digests locate action drift; the parent discards them.
         __privateActionDigests: final.actions.map(action =>
           createHmac('sha256', Buffer.from(actionDigestKey, 'hex'))
-            .update(JSON.stringify(action)).digest('hex')),
+            .update(canonicalActionJSON(action)).digest('hex')),
       } : {}),
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
     };
