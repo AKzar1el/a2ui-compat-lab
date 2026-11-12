@@ -141,6 +141,23 @@ headless SDK summary alone cannot observe, compare two reports offline:
 node src/browser-capture-summary-compare.mjs --before baseline-browser.json --after fresh-browser.json --strict --out browser-diff.json
 ```
 
+When neither side has a saved browser report yet, compare **two local private
+JSONL captures directly** in real React/Chromium. Both captures are rendered
+independently; no intermediate browser reports or raw values are written:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --strict --out browser-diff.json
+```
+
+This direct mode tests UI structure, visible Button counts and event order.
+It does **not** activate Buttons: no saved baseline exists from which to recover
+a vetted interaction plan. To compare action behavior, first save a browser
+report with `--action-step`, then use `--before baseline-browser.json
+--after-capture new-private.jsonl` as documented below. Both modes stay
+offline after dependencies are installed and preserve strict 0/1/2 exit codes,
+no-overwrite protection and generic path-free diagnostics. Structural event
+patterns may remain sensitive; review reports before sharing.
+
 For a readable, value-free GitHub Actions step summary, opt into Markdown output
 from the same validated structural comparison (the default remains JSON):
 
