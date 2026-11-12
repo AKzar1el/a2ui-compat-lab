@@ -155,9 +155,11 @@ fi
 exit "$status"
 ```
 
-The Markdown contains only fixed field names, structural event indices/counts and
-MATCH/DRIFT status, never captured values, IDs or private input paths. It still
-reveals workflow structure and **is not anonymized**; do not publish private captures,
+On drift, the Markdown shows validated before/after structural counts and fixed
+operation names at each changed event (for example, `visibleButtonCount: 1 -> 3`),
+so reviewers can distinguish growth from deletion without opening private captures.
+It contains no captured values, IDs or private input paths. Workflow metadata is
+**not anonymized**; do not publish private captures,
 or share the summary without reviewing its sensitivity. The command refuses to
 overwrite an existing summary and keeps strict exit codes (0 match, 1 drift, 2 invalid).
 
