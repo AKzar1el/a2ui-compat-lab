@@ -65,6 +65,45 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline) {
     assert.equal(JSON.parse(readFileSync(plannedPairDiff, 'utf8')).ok, true);
     assert.equal(plannedPair.stdout, '');
 
+    // Compare actual emitted browser action payload equality without publishing
+    // the payloads, reusable hashes, identifiers or the ephemeral HMAC key.
+    const parityMatchPath = join(dir, 'private-action-parity-match.json');
+    const parityMatch = run(['--before-capture', capturePath, '--after-capture', capturePath,
+      '--action-plan', baselinePath, '--compare-actions', '--strict', '--out', parityMatchPath]);
+    assert.equal(parityMatch.status, 0, 'The same real Chromium action must match in both runs');
+    const matchingActions = JSON.parse(readFileSync(parityMatchPath, 'utf8'));
+    assert.equal(matchingActions.actionPayloadParity, 'match');
+    assert.equal(matchingActions.ok, true);
+    assert.doesNotMatch(JSON.stringify(matchingActions), /privateActionDigest|[a-f0-9]{64}/,
+      'Do not export reusable action fingerprints');
+
+    const changedActionPath = join(dir, 'private-renamed-action.jsonl');
+    const changedAction = lines.map(line => JSON.parse(line));
+    const actionButton = changedAction[1].updateComponents.components.find(component =>
+      component.id === 'submit');
+    assert.ok(actionButton?.action?.event?.name);
+    actionButton.action.event.name = 'PRIVATE_DIFFERENT_ACTION_DO_NOT_REPORT';
+    writeFileSync(changedActionPath, changedAction.map(message => JSON.stringify(message)).join('\n') + '\n');
+
+    const structuralOnly = run(['--before-capture', capturePath,
+      '--after-capture', changedActionPath, '--action-plan', baselinePath, '--strict']);
+    assert.equal(structuralOnly.status, 0,
+      'Existing structural-only comparison should not claim payload parity');
+
+    const changedActionDiff = join(dir, 'private-action-parity-drift.json');
+    const actionDrift = run(['--before-capture', capturePath,
+      '--after-capture', changedActionPath, '--action-plan', baselinePath,
+      '--compare-actions', '--strict', '--out', changedActionDiff]);
+    assert.equal(actionDrift.status, 1,
+      'Opt-in action parity must detect an action change with the same count and UI');
+    const actionResult = JSON.parse(readFileSync(changedActionDiff, 'utf8'));
+    assert.equal(actionResult.actionPayloadParity, 'drift');
+    assert.deepEqual(actionResult.changedSummaryFields, ['actionPayloadParity']);
+    assert.equal(actionResult.differingSteps, 0);
+    assert.doesNotMatch(JSON.stringify(actionResult),
+      /PRIVATE_DIFFERENT_ACTION_DO_NOT_REPORT|private-renamed|private-original|alpha|selection|surfaceId|__privateActionDigest/,
+      'Private action values, fingerprints and capture paths must stay out of reports');
+
     const unreachablePlanPath = join(dir, 'private-unreachable-plan.json');
     writeFileSync(unreachablePlanPath, JSON.stringify({...baseline,
       clickSingleButton: false, clickButtonIndex: 31}));
