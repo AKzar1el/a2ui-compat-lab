@@ -316,8 +316,14 @@ export async function runBrowserCapture(messages, {
       keyboardFocusVerified,
       actionsEmitted: final.actions.length,
       // Never persist or publish this digest; the parent drops it before report validation.
-      ...(actionDigestKey ? {__privateActionDigest: createHmac('sha256',
-        Buffer.from(actionDigestKey, 'hex')).update(JSON.stringify(final.actions)).digest('hex')} : {}),
+      ...(actionDigestKey ? {
+        __privateActionDigest: createHmac('sha256', Buffer.from(actionDigestKey, 'hex'))
+          .update(JSON.stringify(final.actions)).digest('hex'),
+        // Transient keyed digests locate action drift; the parent discards them.
+        __privateActionDigests: final.actions.map(action =>
+          createHmac('sha256', Buffer.from(actionDigestKey, 'hex'))
+            .update(JSON.stringify(action)).digest('hex')),
+      } : {}),
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
     };
   } finally {
