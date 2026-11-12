@@ -163,6 +163,25 @@ It contains no captured values, IDs or private input paths. Workflow metadata is
 or share the summary without reviewing its sensitivity. The command refuses to
 overwrite an existing summary and keeps strict exit codes (0 match, 1 drift, 2 invalid).
 
+For CI platforms that consume **JUnit XML** (for example, a test-report
+collector in GitLab or Jenkins), the same offline real-Chromium structural diff
+can emit one summary test case and one failing test case per changed event:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before baseline-browser.json --after fresh-browser.json --strict --format junit --out browser-regression.xml
+```
+
+This is a **JUnit-compatible report artifact**, not a claim that GitHub Actions
+renders JUnit natively. Consumers must explicitly ingest or retain the XML.
+`--after-capture private.jsonl` also works with this format after the pinned
+local Chromium replay. Strict exit codes remain 0 match, 1 structural drift
+and 2 invalid inputs or output failure; a drift report is still written before
+exit 1, while existing report files are never overwritten. The XML includes
+only fixed structural field names, bounded event indices, approved operation
+labels and counts, not captured values, identifiers, input paths or screenshots.
+**Event patterns remain sensitive and are not anonymized.** Review the report
+before publishing or attaching it to a publicly visible build.
+
 For a **single-command real-browser regression check** against a new private
 v0.9 JSONL capture, use the saved structural baseline directly:
 
