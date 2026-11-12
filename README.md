@@ -172,10 +172,15 @@ node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl 
 ```
 
 The two Chromium child runs share a fresh, in-memory HMAC key for this one
-comparison; the only output is `actionPayloadParity: match|drift` and a fixed
-field name on drift. No raw action payloads, fingerprints or key are written
-to the comparison report. This checks the emitted action payloads of the
-approved plan, not arbitrary user events or the entire private capture. It is
+comparison. Output includes `actionPayloadParity: match|drift`; on drift it also
+includes `firstDifferentActionIndex`, the **zero-based position within the
+reviewed Button action plan** (e.g. `1` means its second action changed). This
+helps localize a regression when rendered structure and action counts agree.
+Ephemeral per-action fingerprints are stripped before reports are validated
+or published; no raw action payloads, reusable fingerprints or key are written
+to the comparison report. Action order and structural metadata can still be
+sensitive. This checks emitted action payloads of the approved plan, not
+arbitrary user events or the entire private capture. It is
 not anonymization: structural and binary parity metadata can still be sensitive.
 The flag is refused without two private captures and an explicit saved plan.
 Review the plan and the output before enabling interactions or sharing results. Alternatively use `--before vetted-browser-report.json
