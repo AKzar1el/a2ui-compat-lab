@@ -95,8 +95,8 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     const orderBeforePath = join(dir, 'private-context-order-before.jsonl');
     const orderAfterPath = join(dir, 'private-context-order-after.jsonl');
     const orderDiffPath = join(dir, 'private-context-order-diff.json');
-    writeFileSync(orderBeforePath, orderBefore.map(message => JSON.stringify(message)).join('\\n') + '\\n');
-    writeFileSync(orderAfterPath, orderAfter.map(message => JSON.stringify(message)).join('\\n') + '\\n');
+    writeFileSync(orderBeforePath, orderBefore.map(message => JSON.stringify(message)).join('\n') + '\n');
+    writeFileSync(orderAfterPath, orderAfter.map(message => JSON.stringify(message)).join('\n') + '\n');
     const sameContext = run(['--before-capture', orderBeforePath,
       '--after-capture', orderAfterPath, '--action-plan', baselinePath,
       '--compare-actions', '--strict', '--out', orderDiffPath]);
