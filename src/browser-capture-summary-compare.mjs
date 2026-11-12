@@ -81,7 +81,7 @@ function validate(report) {
     const step = report.actionSteps[i];
     if (!isRecord(step) || Object.keys(step).sort().join(',') !== 'buttonIndex,eventIndex,mode' ||
         !bounded(step.eventIndex, report.events - 1) || !bounded(step.buttonIndex, 31) ||
-        !['click', 'enter'].includes(step.mode) ||
+        !['click', 'enter', 'space'].includes(step.mode) ||
         (i > 0 && step.eventIndex < report.actionSteps[i - 1].eventIndex))
       throw invalid();
   }
