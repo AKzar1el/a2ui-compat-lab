@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {test} from 'node:test';
 import {
+  browserCaptureReplayArguments,
   compareBrowserCaptureSummaries,
   parseBrowserCaptureSummaryCompareOptions,
 } from '../src/browser-capture-summary-compare.mjs';
@@ -126,4 +127,45 @@ test('CLI strict exit codes, exclusive evidence and private-input redaction', ()
   } finally {
     rmSync(dir, {recursive: true, force: true});
   }
+});
+
+test('private-capture comparison is an exclusive input mode and inherits browser action plans', () => {
+  const options = parseBrowserCaptureSummaryCompareOptions(
+    ['--before', 'baseline.json', '--after-capture', 'private.jsonl', '--strict']);
+  assert.equal(options.strict, true);
+  assert.ok(options['after-capture'].endsWith('private.jsonl'));
+  for (const argv of [
+    ['--before', 'baseline.json', '--after', 'report.json', '--after-capture', 'private.jsonl'],
+    ['--before', 'baseline.json'],
+    ['--before', 'baseline.json', '--after-capture', 'private.jsonl', '--after-capture', 'other.jsonl'],
+  ]) assert.throws(() => parseBrowserCaptureSummaryCompareOptions(argv), /Usage:/);
+
+  const pointer = report();
+  assert.deepEqual(browserCaptureReplayArguments(pointer), ['--click-single-button']);
+  const timed = report();
+  timed.clickSingleButton = false;
+  timed.clickButtonIndex = 0;
+  timed.actionAfterEventIndex = 1;
+  assert.deepEqual(browserCaptureReplayArguments(timed),
+    ['--click-button-index', '0', '--action-after-event-index', '1']);
+  const scripted = report();
+  scripted.clickSingleButton = false;
+  scripted.actionSteps = [{eventIndex: 1, buttonIndex: 0, mode: 'enter'}];
+  scripted.steps[1].actionCount = 0;
+  scripted.keyboardFocusVerified = true;
+  assert.deepEqual(browserCaptureReplayArguments(scripted),
+    ['--action-step', '1:0:enter']);
+  const withLoading = report();
+  withLoading.steps.forEach(step => { step.loadingPlaceholderCount = 0; });
+  withLoading.loadingPlaceholderEvents = 0;
+  assert.deepEqual(browserCaptureReplayArguments(withLoading),
+    ['--click-single-button', '--inspect-loading-placeholders']);
+  withLoading.steps[1].loadingPlaceholderCount = 1;
+  withLoading.loadingPlaceholderEvents = 0;
+  assert.throws(() => browserCaptureReplayArguments(withLoading),
+    /Invalid browser capture summary/);
+  const secret = report();
+  secret.privateValue = 'NEVER_PRINT_CAPTURE_VALUE';
+  assert.throws(() => browserCaptureReplayArguments(secret),
+    error => !error.message.includes('NEVER_PRINT_CAPTURE_VALUE'));
 });
