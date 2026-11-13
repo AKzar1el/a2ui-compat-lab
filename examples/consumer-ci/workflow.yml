@@ -1,0 +1,68 @@
+# Copy to YOUR repository's .github/workflows/a2ui-compare.yml.
+# Edit the capture-producing steps and paths before running. This is not enabled in the lab.
+name: A2UI private Chromium comparison
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare-private-a2ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout application capture inputs
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout pinned compatibility lab
+        uses: actions/checkout@v4
+        with:
+          repository: AKzar1el/a2ui-compat-lab
+          ref: 5e247d9ac13561d061ba2e116266c04847e8ba73
+          path: a2ui-lab
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned React and A2UI dependencies
+        working-directory: a2ui-lab/renderer-react
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install offline Chromium replay runtime
+        working-directory: a2ui-lab/renderer-react
+        run: npx playwright install --with-deps chromium
+      - name: Compare two developer-owned private captures
+        shell: bash
+        env:
+          # Replace these paths with outputs of your trusted capture-producing step.
+          BEFORE_CAPTURE: ci/a2ui-before.jsonl
+          AFTER_CAPTURE: ci/a2ui-after.jsonl
+        run: |
+          set -uo pipefail
+          test -f "$BEFORE_CAPTURE" && test -f "$AFTER_CAPTURE" || {
+            echo "Capture inputs missing; this template requires explicit inputs" >&2
+            exit 2
+          }
+          status=0
+          node a2ui-lab/src/browser-capture-error-boundary-compare.mjs \
+            --before-capture "$BEFORE_CAPTURE" --after-capture "$AFTER_CAPTURE" \
+            --require-no-observed-failures --strict \
+            --report-dir "$RUNNER_TEMP/a2ui-comparison" || status=$?
+          exit "$status"
+      # Privacy-reduced reports still expose event counts and indices.
+      # Explicitly opt in by setting A2UI_SHARE_COMPARISON_METADATA=true
+      # as a GitHub Actions repository variable after reviewing that exposure.
+      - name: Add reviewed CI summary
+        if: ${{ always() && vars.A2UI_SHARE_COMPARISON_METADATA == 'true' }}
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/a2ui-comparison/comparison.md" ]; then
+            cat "$RUNNER_TEMP/a2ui-comparison/comparison.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload reviewed JSON Markdown JUnit artifacts
+        if: ${{ always() && vars.A2UI_SHARE_COMPARISON_METADATA == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2ui-private-comparison
+          path: ${{ runner.temp }}/a2ui-comparison/comparison.*
+          if-no-files-found: ignore
+          retention-days: 1

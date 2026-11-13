@@ -12,6 +12,7 @@ import {createServer} from 'vite';
 import {decodeBrowserCapture, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
 import {compareBrowserCaptureSummaries} from '../../src/browser-capture-summary-compare.mjs';
 import {testDirectBrowserCaptureBaseline} from './browser-capture-baseline-regression.mjs';
+import {testConsumerCiStarter} from './consumer-ci-regression.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = resolveBrowserEvidenceDir(root, process.argv.slice(2));
@@ -2778,3 +2779,5 @@ testDirectBrowserCaptureBaseline(encodedExample, browserCaptureReport, {
   report: sameBoundaryReport,
 });
 console.log('Developer JSONL capture -> React Chromium + real Button: PASS');
+testConsumerCiStarter();
+console.log('Consumer CI starter: real rendered-text drift and three-format replay health PASS');
