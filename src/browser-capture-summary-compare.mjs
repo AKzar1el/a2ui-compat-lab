@@ -5,7 +5,7 @@ import {lstatSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
-const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs (--before OLD.json | --before-capture PRIVATE-OLD.jsonl) (--after NEW.json | --after-capture PRIVATE-NEW.jsonl) [--action-plan SAVED-VETTED-REPORT.json] [--compare-actions] [--strict] [--format json|markdown|junit] [--out NEW-DIFF.json|summary.md|report.xml]';
+const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs (--before OLD.json | --before-capture PRIVATE-OLD.jsonl) (--after NEW.json | --after-capture PRIVATE-NEW.jsonl) [--action-plan SAVED-VETTED-REPORT.json] [--compare-actions | --compare-rendered-text] [--strict] [--format json|markdown|junit] [--out NEW-DIFF.json|summary.md|report.xml]';
 const MAX_BYTES = 256 * 1024;
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
@@ -170,8 +170,13 @@ function markdownComparisonReport(diff, before, after) {
     '**Changed summary fields:** ' + fields(diff.changedSummaryFields),
     ...(diff.actionPayloadParity ? ['**Private action payload parity:** ' +
       diff.actionPayloadParity.toUpperCase()] : []),
+    ...(diff.renderedTextParity ? ['**Private rendered text parity:** ' +
+      diff.renderedTextParity.toUpperCase()] : []),
     ...(Number.isSafeInteger(diff.firstDifferentActionIndex)
       ? ['**First differing planned action (0-based):** ' + diff.firstDifferentActionIndex] : []),
+    ...(Number.isSafeInteger(diff.firstDifferentRenderedTextEventIndex)
+      ? ['**First differing rendered-text event (0-based):** ' +
+        diff.firstDifferentRenderedTextEventIndex] : []),
     '**Changed event steps:** ' + diff.differingSteps,
     '',
     '| Event index | Structural changes (before -> after) |',
@@ -203,7 +208,10 @@ function junitComparisonReport(diff, before, after) {
     lines.push('    <failure message="structural summary drift">' +
       encode(diff.changedSummaryFields.join(', ') +
         (Number.isSafeInteger(diff.firstDifferentActionIndex) ?
-          '; first differing planned action index: ' + diff.firstDifferentActionIndex : '')) +
+          '; first differing planned action index: ' + diff.firstDifferentActionIndex : '') +
+        (Number.isSafeInteger(diff.firstDifferentRenderedTextEventIndex) ?
+          '; first differing rendered-text event index: ' +
+          diff.firstDifferentRenderedTextEventIndex : '')) +
       '</failure>');
   }
   lines.push('  </testcase>');
@@ -228,11 +236,13 @@ function junitComparisonReport(diff, before, after) {
 
 export function parseBrowserCaptureSummaryCompareOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const options = {strict: false, compareActions: false};
+  const options = {strict: false, compareActions: false, compareRenderedText: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !options.strict) options.strict = true;
     else if (arg === '--compare-actions' && !options.compareActions) options.compareActions = true;
+    else if (arg === '--compare-rendered-text' && !options.compareRenderedText)
+      options.compareRenderedText = true;
     else if (arg === '--format' && !Object.hasOwn(options, 'format') &&
       ['json', 'markdown', 'junit'].includes(argv[i + 1])) options.format = argv[++i];
     else if (['--before', '--before-capture', '--after', '--after-capture', '--action-plan', '--out'].includes(arg) &&
@@ -245,7 +255,9 @@ export function parseBrowserCaptureSummaryCompareOptions(argv) {
       (options['before-capture'] && !options['after-capture']) ||
       (options['action-plan'] && (!options['before-capture'] || !options['after-capture'])) ||
       (options.compareActions && (!options['before-capture'] || !options['after-capture'] ||
-        !options['action-plan'])))
+        !options['action-plan'])) ||
+      (options.compareRenderedText && (!options['before-capture'] || !options['after-capture'] ||
+        options['action-plan'] || options.compareActions)))
     throw new Error(USAGE);
   return options;
 }
@@ -262,17 +274,18 @@ function readReport(path) {
   }
 }
 
-function replayPrivateCapture(inputPath, baseline, actionDigestKey = null) {
+function replayPrivateCapture(inputPath, baseline, actionDigestKey = null, textDigestKey = null) {
   const args = baseline ? browserCaptureReplayArguments(baseline) : [];
   let child;
   try {
     child = spawnSync(process.execPath, [RENDERER_SCRIPT, '--input', inputPath, ...args,
-      ...(actionDigestKey ? ['--internal-action-digest'] : [])], {
+      ...(actionDigestKey ? ['--internal-action-digest'] : []),
+      ...(textDigestKey ? ['--internal-rendered-text-digest'] : [])], {
       cwd: RENDERER_DIR, shell: false, windowsHide: true,
       encoding: 'utf8', maxBuffer: MAX_BYTES, timeout: 120000,
       // One fresh key is shared by the two children, never logged or saved.
-      ...(actionDigestKey ? {env: {...process.env,
-        A2UI_PRIVATE_ACTION_DIGEST_KEY: actionDigestKey}} : {}),
+      ...((actionDigestKey || textDigestKey) ? {env: {...process.env,
+        A2UI_PRIVATE_ACTION_DIGEST_KEY: actionDigestKey ?? textDigestKey}} : {}),
     });
   } catch {
     throw invalid();
@@ -285,6 +298,7 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null) {
     const parsed = JSON.parse(child.stdout);
     let actionDigest = null;
     let actionDigests = null;
+    let renderedTextDigests = null;
     if (actionDigestKey) {
       if (!isRecord(parsed) || !/^[a-f0-9]{64}$/.test(parsed.__privateActionDigest) ||
           !Array.isArray(parsed.__privateActionDigests) ||
@@ -298,7 +312,16 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null) {
       delete parsed.__privateActionDigest;
       delete parsed.__privateActionDigests;
     }
-    return {report: validate(parsed), actionDigest, actionDigests};
+    if (textDigestKey) {
+      const digests = parsed.__privateRenderedTextDigests;
+      if (!Array.isArray(digests) || digests.length !== parsed.events ||
+          digests.length > MAX_EVENTS || digests.some(value =>
+            typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)))
+        throw invalid();
+      renderedTextDigests = digests;
+      delete parsed.__privateRenderedTextDigests;
+    }
+    return {report: validate(parsed), actionDigest, actionDigests, renderedTextDigests};
   } catch {
     throw invalid();
   }
@@ -323,13 +346,14 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const actionPlan = args['action-plan'] ? validate(readReport(args['action-plan'])) : null;
       if (actionPlan && actionPlan.actionsVerified < 1) throw invalid();
       const actionDigestKey = args.compareActions ? randomBytes(32).toString('hex') : null;
+      const textDigestKey = args.compareRenderedText ? randomBytes(32).toString('hex') : null;
       const beforeRun = args['before-capture']
-        ? replayPrivateCapture(args['before-capture'], actionPlan, actionDigestKey)
-        : {report: readReport(args.before), actionDigest: null, actionDigests: null};
+        ? replayPrivateCapture(args['before-capture'], actionPlan, actionDigestKey, textDigestKey)
+        : {report: readReport(args.before), actionDigest: null, actionDigests: null, renderedTextDigests: null};
       const baseline = beforeRun.report;
       const afterRun = args['after-capture']
-        ? replayPrivateCapture(args['after-capture'], baseline, actionDigestKey)
-        : {report: readReport(args.after), actionDigest: null, actionDigests: null};
+        ? replayPrivateCapture(args['after-capture'], baseline, actionDigestKey, textDigestKey)
+        : {report: readReport(args.after), actionDigest: null, actionDigests: null, renderedTextDigests: null};
       const observed = afterRun.report;
       const result = compareBrowserCaptureSummaries(baseline, observed);
       if (actionDigestKey) {
@@ -347,6 +371,19 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           result.changedSummaryFields.push('actionPayloadParity');
         }
         result.note = 'Opt-in private action parity: only match/drift is exposed; values are not anonymized';
+      }
+      if (textDigestKey) {
+        const oldText = beforeRun.renderedTextDigests;
+        const newText = afterRun.renderedTextDigests;
+        const first = Array.from({length: Math.max(oldText.length, newText.length)},
+          (_, index) => index).find(index => oldText[index] !== newText[index]);
+        result.renderedTextParity = first === undefined ? 'match' : 'drift';
+        if (first !== undefined) {
+          result.firstDifferentRenderedTextEventIndex = first;
+          result.ok = false;
+          result.changedSummaryFields.push('renderedTextParity');
+        }
+        result.note = 'Opt-in rendered-text equality in real Chromium; no reusable hashes or private values are exported';
       }
       const content = args.format === 'markdown' ? markdownComparisonReport(result, baseline, observed) :
         args.format === 'junit' ? junitComparisonReport(result, baseline, observed) :
