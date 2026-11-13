@@ -97,8 +97,7 @@ export function parseBrowserCaptureOptions(argv) {
         parsed.stopAfterEventIndex !== null || parsed.actionAfterEventIndex !== null ||
         parsed.inspectLoadingPlaceholders || parsed.rejectLoadingPlaceholders ||
         parsed.internalActionDigest ||
-        parsed.internalButtonStateDigest || parsed.internalButtonA11yDigest ||
-        parsed.internalButtonFocusDigest)) ||
+        parsed.internalButtonStateDigest || parsed.internalButtonA11yDigest)) ||
       parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
         (i > 0 && step.eventIndex < parsed.actionSteps[i - 1].eventIndex)))
     throw new Error(USAGE);
