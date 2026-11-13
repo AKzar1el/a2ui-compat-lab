@@ -613,6 +613,26 @@ the default `--format json` is unchanged.
 node src/browser-capture-error-boundary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --require-no-observed-failures --strict --format junit --out out/error-boundary.xml
 ```
 
+To produce **JSON, Markdown and JUnit together with only one pair of Chromium
+replays**, use a fresh report directory instead of invoking the comparator
+three times:
+
+```sh
+node src/browser-capture-error-boundary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --require-no-observed-failures --strict --report-dir out/new-error-boundary-run
+```
+
+This creates `comparison.json`, `comparison.md` and `comparison.xml` in a
+**new** directory; a pre-existing directory (including a symlink), `--out`,
+or `--format` used with `--report-dir` is refused with exit 2. Parent
+directories are created if necessary. The comparator emits no report to
+stdout in directory mode. A strict drift or observed failure still writes
+all three reports and exits 1, so downstream CI can inspect the result.
+An I/O failure may leave a partial new directory: do not treat exit 2 as
+a complete artifact set. No raw JSONL captures or browser errors are saved
+in these reports, but event counts and indices may reveal workflow structure;
+review generated artifacts before sharing or uploading them.
+
+
 JUnit and Markdown contain only fixed comparator labels and bounded event
 counts or indices, never raw capture values or browser error details. Reports
 remain sensitive metadata rather than anonymized artifacts, and output files
