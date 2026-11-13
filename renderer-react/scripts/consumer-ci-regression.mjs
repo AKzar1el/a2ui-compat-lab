@@ -129,7 +129,7 @@ export function testConsumerCiStarter() {
     for (const output of [geometryJson, geometryMarkdown, geometryJUnit,
       allChecks.stdout]) {
       assert.doesNotMatch(output,
-        /PUBLIC_STABLE_GEOMETRY_DEMO|geometry-before\\.jsonl|geometry-after\\.jsonl|__private|[a-f0-9]{64}/);
+        /PUBLIC_STABLE_GEOMETRY_DEMO|geometry-before\.jsonl|geometry-after\.jsonl|__private|[a-f0-9]{64}/);
     }
 
     const deniedUngated = run(errorComparator, ['--compare-rendered-text', '--strict']);
