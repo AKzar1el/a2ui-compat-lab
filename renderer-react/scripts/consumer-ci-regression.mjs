@@ -35,10 +35,10 @@ export function testConsumerCiStarter() {
   const workflow = readFileSync(resolve(repo, 'examples/consumer-ci/workflow.yml'), 'utf8');
   // The consumer uses a separate immutable checkout. Pin to the verified
   // source revision containing BOTH CLI parse and runtime diagnostic guards.
-  assert.match(workflow, /ref: a26bd19ca2cbbec128f1c7a8d6071ff1eaa53ddb\b/,
-    'Consumer checkout must pin the full tested geometry runtime, not its earlier comparator-only commit');
-  assert.match(workflow, /--require-no-observed-failures --compare-rendered-text --compare-button-geometry --strict/,
-    'Consumer CI must gate replay health AND real rendered Text drift');
+  assert.match(workflow, /ref: 6fa9d19fcdd322a32c41c62e50ce4f3e59fc7850\b/,
+    'Consumer checkout must pin the full one-pass focus and geometry runtime, not a prior comparator-only commit');
+  assert.match(workflow, /--require-no-observed-failures --compare-rendered-text --compare-button-geometry --compare-button-focus --strict/,
+    'Consumer CI must gate replay health, real rendered Text and Tab reachability');
   assert.doesNotMatch(workflow, /src\/browser-capture-summary-compare\.mjs/,
     'Consumer CI must not trigger a second Chromium pair');
   assert.doesNotMatch(workflow, /rendered-text\.xml/,
@@ -68,7 +68,7 @@ export function testConsumerCiStarter() {
     // A single pair of Chromium replays must detect healthy-but-changed Text.
     const combinedDir = join(dir, 'combined-health-and-text');
     const combined = run(errorComparator,
-      ['--require-no-observed-failures', '--compare-rendered-text',
+      ['--require-no-observed-failures', '--compare-rendered-text', '--compare-button-focus',
         '--strict', '--report-dir', combinedDir]);
     assert.equal(combined.error, undefined, 'One-pair Chromium comparator must run');
     assert.equal(combined.status, 1, 'Text drift must fail strict CI with healthy replays');
@@ -77,12 +77,15 @@ export function testConsumerCiStarter() {
     assert.equal(combinedResult.observedFailuresAbsent, true);
     assert.equal(combinedResult.errorBoundaryParity, 'match');
     assert.equal(combinedResult.renderedTextParity, 'drift');
+    assert.equal(combinedResult.buttonFocusParity, 'match',
+      'The synthetic Text-only fixture has no Button to lose keyboard focus');
     assert.equal(combinedResult.firstDifferentRenderedTextEventIndex, 2);
     assert.equal(combinedResult.ok, false);
     const combinedMarkdown = readFileSync(join(combinedDir, 'comparison.md'), 'utf8');
     const combinedJUnit = readFileSync(join(combinedDir, 'comparison.xml'), 'utf8');
     assert.match(combinedMarkdown, /Real Chromium rendered Text parity:.*DRIFT/);
     assert.match(combinedJUnit, /name="rendered-text-parity"/);
+    assert.match(combinedJUnit, /name="button-focus-parity"/);
     assert.match(combinedJUnit, /<failure message="rendered Text drift"/);
     // A real Row/Column layout regression moves the Button without changing
     // the number of events or causing observed Chromium replay failures.
