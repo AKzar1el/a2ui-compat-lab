@@ -2451,6 +2451,30 @@ const exampleMessages = JSON.parse(fixture).map(entry => entry.message);
 const encodedExample = Buffer.from(exampleMessages.map(message => JSON.stringify(message)).join('\n') + '\n');
 const decodedExample = decodeBrowserCapture(encodedExample);
 assert.deepEqual(decodedExample, exampleMessages);
+// A developer can isolate a failing private capture prefix without copying its
+// JSONL into smaller files or activating any captured controls.
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--stop-after-event-index', '1']).stopAfterEventIndex, 1);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--stop-after-event-index', '01']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--stop-after-event-index', '1', '--click-single-button']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--stop-after-event-index', '1', '--action-step', '1:0:click']), /Usage:/);
+const prefixCaptureReport = await runBrowserCapture(decodedExample, {stopAfterEventIndex: 1});
+assert.equal(prefixCaptureReport.events, 2);
+assert.deepEqual(prefixCaptureReport.steps.map(step => step.operation),
+  ['createSurface', 'updateComponents']);
+assert.equal(prefixCaptureReport.steps.at(-1).visibleButtonCount, 1);
+assert.equal(prefixCaptureReport.actionsEmitted, 0);
+assert.doesNotMatch(JSON.stringify(prefixCaptureReport),
+  /action-replay|alpha|Confirm|selection|surfaceId/,
+  'Prefix replay must not publish private model values or identifiers');
+await assert.rejects(runBrowserCapture(decodedExample, {stopAfterEventIndex: 3}),
+  {message: 'Invalid browser capture stop event index'});
+await assert.rejects(runBrowserCapture(decodedExample,
+  {stopAfterEventIndex: 1, clickSingleButton: true}),
+  {message: 'Prefix replay cannot activate browser controls'});
 assert.throws(() => decodeBrowserCapture(Buffer.from('{"version":"v0.9"}')), /Invalid browser capture/,
   'Non-newline-terminated captures must fail closed');
 const browserCaptureReport = await runBrowserCapture(decodedExample, {clickSingleButton: true});
