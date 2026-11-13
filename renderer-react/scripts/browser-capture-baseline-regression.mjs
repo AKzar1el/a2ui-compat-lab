@@ -221,6 +221,38 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
       /PRIVATE_SECOND_ONLY_ACTION_DRIFT|private-two-action|submit-second|selection|alpha|surfaceId|__privateActionDigest|[a-f0-9]{64}/,
       'Never persist private action text, paths, keys or reusable digests');
 
+    // Two independent opt-in checks should work in one vetted Chromium replay.
+    // Without a reviewed action plan, combining them must not activate controls.
+    const dualDenied = run(['--before-capture', capturePath,
+      '--after-capture', changedActionPath, '--compare-actions',
+      '--compare-rendered-text', '--strict']);
+    assert.equal(dualDenied.status, 2,
+      'Combined action and rendered-text parity must reject an unvetted plan');
+    assert.equal(dualDenied.stdout, '');
+
+    const dualMatchPath = join(dir, 'dual-parity-match.json');
+    const dualMatch = run(['--before-capture', capturePath,
+      '--after-capture', capturePath, '--action-plan', baselinePath,
+      '--compare-actions', '--compare-rendered-text', '--strict', '--out', dualMatchPath]);
+    assert.equal(dualMatch.status, 0, 'Reviewed plan should allow both parity checks together');
+    const dualSame = JSON.parse(readFileSync(dualMatchPath, 'utf8'));
+    assert.equal(dualSame.ok, true);
+    assert.equal(dualSame.actionPayloadParity, 'match');
+    assert.equal(dualSame.renderedTextParity, 'match');
+
+    const dualDriftPath = join(dir, 'dual-parity-action-drift.json');
+    const dualDrift = run(['--before-capture', capturePath,
+      '--after-capture', changedActionPath, '--action-plan', baselinePath,
+      '--compare-actions', '--compare-rendered-text', '--strict', '--out', dualDriftPath]);
+    assert.equal(dualDrift.status, 1, 'Reviewed combined replay must detect action-only drift');
+    const dualChanged = JSON.parse(readFileSync(dualDriftPath, 'utf8'));
+    assert.equal(dualChanged.actionPayloadParity, 'drift');
+    assert.equal(dualChanged.renderedTextParity, 'match');
+    assert.equal(dualChanged.firstDifferentActionIndex, 0);
+    assert.doesNotMatch(JSON.stringify(dualChanged),
+      /PRIVATE_DIFFERENT_ACTION_DO_NOT_REPORT|private-renamed|alpha|selection|surfaceId|__[A-Za-z]*Digest|[a-f0-9]{64}/,
+      'Both private signals must discard keys, hashes and capture values');
+
     const unreachablePlanPath = join(dir, 'private-unreachable-plan.json');
     writeFileSync(unreachablePlanPath, JSON.stringify({...baseline,
       clickSingleButton: false, clickButtonIndex: 31}));
