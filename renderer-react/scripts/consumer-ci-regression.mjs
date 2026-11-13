@@ -9,6 +9,8 @@ import {compareErrorBoundaries} from '../../src/browser-capture-error-boundary-c
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const before = resolve(repo, 'fixtures/lifecycle-v09.jsonl');
 const after = resolve(repo, 'examples/consumer-ci/after.jsonl');
+const geometryBefore = resolve(repo, 'examples/consumer-ci/geometry-before.jsonl');
+const geometryAfter = resolve(repo, 'examples/consumer-ci/geometry-after.jsonl');
 const textComparator = resolve(repo, 'src/browser-capture-summary-compare.mjs');
 const errorComparator = resolve(repo, 'src/browser-capture-error-boundary-compare.mjs');
 
@@ -20,10 +22,18 @@ function run(script, args) {
   });
 }
 
+function runGeometry(args, from = geometryBefore, to = geometryAfter) {
+  return spawnSync(process.execPath, [errorComparator, '--before-capture', from,
+    '--after-capture', to, ...args], {
+    cwd: repo, encoding: 'utf8', windowsHide: true,
+    timeout: 120000, maxBuffer: 256 * 1024,
+  });
+}
+
 /** Exercise the published React/Chromium paths used by the copyable CI recipe. */
 export function testConsumerCiStarter() {
   const workflow = readFileSync(resolve(repo, 'examples/consumer-ci/workflow.yml'), 'utf8');
-  assert.match(workflow, /--require-no-observed-failures --compare-rendered-text --strict/,
+  assert.match(workflow, /--require-no-observed-failures --compare-rendered-text --compare-button-geometry --strict/,
     'Consumer CI must gate replay health AND real rendered Text drift');
   assert.doesNotMatch(workflow, /src\/browser-capture-summary-compare\.mjs/,
     'Consumer CI must not trigger a second Chromium pair');
@@ -70,6 +80,58 @@ export function testConsumerCiStarter() {
     assert.match(combinedMarkdown, /Real Chromium rendered Text parity:.*DRIFT/);
     assert.match(combinedJUnit, /name="rendered-text-parity"/);
     assert.match(combinedJUnit, /<failure message="rendered Text drift"/);
+    // A real Row/Column layout regression moves the Button without changing
+    // the number of events or causing observed Chromium replay failures.
+    const layoutBlind = runGeometry(['--require-no-observed-failures', '--strict']);
+    assert.equal(layoutBlind.status, 0,
+      'Replay health alone must not claim actual Button geometry parity');
+    const geoMatch = runGeometry(['--require-no-observed-failures',
+      '--compare-button-geometry', '--strict'], geometryBefore, geometryBefore);
+    assert.equal(geoMatch.status, 0, 'Identical Button layout must match');
+    assert.equal(JSON.parse(geoMatch.stdout).buttonGeometryParity, 'match');
+
+    const geometryDir = join(dir, 'one-pair-geometry');
+    const geometry = runGeometry(['--require-no-observed-failures',
+      '--compare-button-geometry', '--strict', '--report-dir', geometryDir]);
+    assert.equal(geometry.error, undefined);
+    assert.equal(geometry.status, 1,
+      'Real Chromium Button relocation must fail strict consumer CI');
+    const geometryJson = readFileSync(join(geometryDir, 'comparison.json'), 'utf8');
+    const geometryReport = JSON.parse(geometryJson);
+    assert.equal(geometryReport.observedFailuresAbsent, true);
+    assert.equal(geometryReport.buttonGeometryParity, 'drift');
+    assert.equal(geometryReport.firstDifferentButtonGeometryEventIndex, 1);
+    assert.equal(geometryReport.errorBoundaryParity, 'match');
+    assert.equal(geometryReport.ok, false);
+    const geometryMarkdown = readFileSync(join(geometryDir, 'comparison.md'), 'utf8');
+    const geometryJUnit = readFileSync(join(geometryDir, 'comparison.xml'), 'utf8');
+    assert.match(geometryMarkdown, /Button geometry parity:.*DRIFT/);
+    assert.match(geometryJUnit, /name="button-geometry-parity"/);
+    assert.match(geometryJUnit, /<failure message="Button geometry drift"/);
+
+    const allChecks = runGeometry(['--require-no-observed-failures',
+      '--compare-rendered-text', '--compare-button-geometry', '--strict']);
+    assert.equal(allChecks.status, 1, 'Combined real-Chromium comparison must detect layout drift');
+    const allReport = JSON.parse(allChecks.stdout);
+    assert.equal(allReport.buttonGeometryParity, 'drift');
+    assert.ok(['match', 'drift'].includes(allReport.renderedTextParity));
+    const deniedGeometry = runGeometry(['--compare-button-geometry', '--strict']);
+    assert.equal(deniedGeometry.status, 2,
+      'Button geometry sampling requires strict observed-health policy');
+    const failedGeometry = compareErrorBoundaries(
+      {events: 3, index: 1, digests: null, geometryDigests: null},
+      {events: 3, index: 1, digests: null, geometryDigests: null},
+      {requireNoObservedFailures: true, compareButtonGeometry: true});
+    assert.equal(failedGeometry.buttonGeometryParity, 'unavailable');
+    assert.equal(failedGeometry.ok, false,
+      'Matching failing replays cannot claim geometry parity');
+
+    for (const output of [geometryJson, geometryMarkdown, geometryJUnit,
+      allChecks.stdout]) {
+      assert.doesNotMatch(output,
+        /PUBLIC_STABLE_GEOMETRY_DEMO|geometry-before\\.jsonl|geometry-after\\.jsonl|__private|[a-f0-9]{64}/);
+    }
+
     const deniedUngated = run(errorComparator, ['--compare-rendered-text', '--strict']);
     assert.equal(deniedUngated.status, 2,
       'Rendered Text mode requires explicit no-observed-failures policy');
