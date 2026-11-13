@@ -96,7 +96,7 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.reportFirstError && (actionModes !== 0 || parsed.actionSteps.length > 0 ||
         parsed.stopAfterEventIndex !== null || parsed.actionAfterEventIndex !== null ||
         parsed.inspectLoadingPlaceholders || parsed.rejectLoadingPlaceholders ||
-        parsed.internalActionDigest || parsed.internalRenderedTextDigest ||
+        parsed.internalActionDigest ||
         parsed.internalButtonStateDigest || parsed.internalButtonA11yDigest ||
         parsed.internalButtonFocusDigest || parsed.internalButtonGeometryDigest)) ||
       parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
@@ -206,7 +206,7 @@ export async function runBrowserCapture(messages, {
   if (reportFirstError && (actionModes !== 0 || actionSteps.length > 0 ||
       stopAfterEventIndex !== null || actionAfterEventIndex !== null ||
       inspectLoadingPlaceholders || rejectLoadingPlaceholders || actionDigestKey !== null ||
-      renderedTextDigestKey !== null || buttonStateDigestKey !== null ||
+      buttonStateDigestKey !== null ||
       buttonA11yDigestKey !== null || buttonFocusDigestKey !== null ||
       buttonGeometryDigestKey !== null))
     throw new Error('Error-event diagnostics cannot activate controls or combine replay modes');
