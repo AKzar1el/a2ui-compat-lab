@@ -2,9 +2,10 @@
 
 This is a **copyable integration recipe**, not a hosted service or official
 A2UI conformance certificate. It uses the pinned published React/core 0.14
-renderer to replay developer-owned v0.9 JSONL captures. It is designed to
-fail CI on changed observed error boundaries or on *either* replay showing an
-observed failure, rather than treating two equally broken captures as healthy.
+renderer to replay developer-owned v0.9 JSONL captures. It is designed to fail CI on changed observed error boundaries, on *either*
+replay showing an observed failure, **or on changed visible Text** even when
+both captures replay without errors. The last check uses a separate Chromium
+pair and costs additional browser runtime; neither check activates Buttons.
 
 ## Verify the local demo first
 
@@ -60,16 +61,21 @@ capture step. The example does not invent capture tooling and will fail
 closed when those files are missing.
 
 The workflow checks out this lab at a **fixed verified commit**, installs
-the isolated published React/core dependencies, performs a single
-`--require-no-observed-failures --strict --report-dir` comparison,
-and retains a failing exit status even when reports are written.
+the isolated published React/core dependencies, runs `--require-no-observed-failures --strict --report-dir` for replay health
+**and** a separate `--compare-rendered-text --strict --format junit` check
+for visible Text drift. Both return codes are preserved, so either failure
+fails CI. The second Chromium pair costs additional runtime and creates
+`rendered-text.xml` next to the three health reports. Other UI properties
+(such as Button focus/geometry) are not covered by this starter.
 
 By default, the workflow **does not** upload artifacts or add a GitHub step
-summary. The generated JSON, Markdown and JUnit files live only in the
+summary. The generated JSON, Markdown and two JUnit reports live only in the
 runner's temporary directory. After you inspect your capture metadata and
 decide publication is acceptable, explicitly set the repository Actions
 variable `A2UI_SHARE_COMPARISON_METADATA=true` to enable a one-day
-artifact and step summary. Never upload the raw JSONL captures.
+artifact and step summary. The optional artifact also includes the Text
+parity JUnit report; the step summary shows only the health Markdown.
+Never upload the raw JSONL captures.
 
 Privacy-reduced is **not anonymous**: event counts, failure indices and
 parity decisions can disclose workflow structure. Keep capture generation
