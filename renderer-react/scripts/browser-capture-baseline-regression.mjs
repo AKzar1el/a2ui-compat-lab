@@ -384,6 +384,48 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
       /PRIVATE_GATE_REQUIRED|private-button-disabled|private-button-enabled|gate|allowed|surfaceId|__private|[a-f0-9]{64}/,
       'Only bounded event indices and fixed enum fields may leave the process');
 
+    // Real Tab reachability can regress even when Text, counts and structure
+    // agree. Replay keyboard focus in Chromium without pressing a Button.
+    const focusMatchPath = join(dir, 'private-button-focus-match.json');
+    const focusDriftPath = join(dir, 'private-button-focus-drift.json');
+    const focusMatch = run(['--before-capture', gateBeforePath,
+      '--after-capture', gateBeforePath, '--compare-button-focus', '--strict',
+      '--out', focusMatchPath]);
+    assert.equal(focusMatch.status, 0,
+      'Identical real Chromium Tab focus traversal must match');
+    const focusSame = JSON.parse(readFileSync(focusMatchPath, 'utf8'));
+    assert.equal(focusSame.buttonFocusParity, 'match');
+    assert.equal(focusSame.ok, true);
+    assert.equal(Object.hasOwn(focusSame, 'firstDifferentButtonFocusEventIndex'), false);
+
+    const focusDrift = run(['--before-capture', gateBeforePath,
+      '--after-capture', gateAfterPath, '--compare-button-focus', '--strict',
+      '--out', focusDriftPath]);
+    assert.equal(focusDrift.status, 1,
+      'A disabled Button must leave actual Tab traversal even when its Text matches');
+    const focusChanged = JSON.parse(readFileSync(focusDriftPath, 'utf8'));
+    assert.equal(focusChanged.buttonFocusParity, 'drift');
+    assert.equal(focusChanged.firstDifferentButtonFocusEventIndex, 2);
+    assert.deepEqual(focusChanged.changedSummaryFields, ['buttonFocusParity']);
+    assert.equal(focusChanged.differingSteps, 0);
+    assert.doesNotMatch(JSON.stringify(focusChanged),
+      /PRIVATE_GATE_REQUIRED|private-button-disabled|private-button-enabled|surfaceId|__private|[a-f0-9]{64}/,
+      'Focus parity must not expose private input, accessible names or fingerprints');
+
+    const invalidFocusMode = run(['--before', baselinePath,
+      '--after-capture', gateAfterPath, '--compare-button-focus']);
+    assert.equal(invalidFocusMode.status, 2,
+      'Keyboard focus traversal compares only two private Chromium captures');
+    assert.equal(invalidFocusMode.stdout, '');
+    const focusWithPlan = run(['--before-capture', gateBeforePath,
+      '--after-capture', gateAfterPath, '--action-plan', baselinePath,
+      '--compare-button-focus']);
+    assert.equal(focusWithPlan.status, 2,
+      'Tab-focus probing must never activate saved-plan Button actions');
+    assert.equal(focusWithPlan.stdout, '');
+    assert.doesNotMatch(invalidFocusMode.stderr + focusWithPlan.stderr,
+      /private-button-disabled|PRIVATE_GATE_REQUIRED|surfaceId/);
+
     // The published v0.9 accessibility label may change the Button's
     // screen-reader name without changing visible Text, Button count, state,
     // or action payloads. Compare actual Chromium accessibility snapshots.
