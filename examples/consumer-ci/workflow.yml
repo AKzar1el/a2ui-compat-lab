@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AKzar1el/a2ui-compat-lab
-          ref: 5e247d9ac13561d061ba2e116266c04847e8ba73
+          ref: 1b3ddd3ecd5320504de7dcf8b9f998f34194ab5d
           path: a2ui-lab
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -37,22 +37,16 @@ jobs:
           BEFORE_CAPTURE: ci/a2ui-before.jsonl
           AFTER_CAPTURE: ci/a2ui-after.jsonl
         run: |
-          set -uo pipefail
+          set -euo pipefail
           test -f "$BEFORE_CAPTURE" && test -f "$AFTER_CAPTURE" || {
             echo "Capture inputs missing; this template requires explicit inputs" >&2
             exit 2
           }
-          status=0
+          # One Chromium pair checks both replay health and rendered Text parity.
           node a2ui-lab/src/browser-capture-error-boundary-compare.mjs \
             --before-capture "$BEFORE_CAPTURE" --after-capture "$AFTER_CAPTURE" \
-            --require-no-observed-failures --strict \
-            --report-dir "$RUNNER_TEMP/a2ui-comparison" || status=$?
-          # A healthy replay can still render changed Text; check both dimensions.
-          node a2ui-lab/src/browser-capture-summary-compare.mjs \
-            --before-capture "$BEFORE_CAPTURE" --after-capture "$AFTER_CAPTURE" \
-            --compare-rendered-text --strict --format junit \
-            --out "$RUNNER_TEMP/a2ui-comparison/rendered-text.xml" || status=$?
-          exit "$status"
+            --require-no-observed-failures --compare-rendered-text --strict \
+            --report-dir "$RUNNER_TEMP/a2ui-comparison"
       # Privacy-reduced reports still expose event counts and indices.
       # Explicitly opt in by setting A2UI_SHARE_COMPARISON_METADATA=true
       # as a GitHub Actions repository variable after reviewing that exposure.
@@ -70,6 +64,5 @@ jobs:
           name: a2ui-private-comparison
           path: |
             ${{ runner.temp }}/a2ui-comparison/comparison.*
-            ${{ runner.temp }}/a2ui-comparison/rendered-text.xml
           if-no-files-found: ignore
           retention-days: 1
