@@ -174,8 +174,10 @@ function markdownComparisonReport(diff, before, after) {
       diff.renderedTextParity.toUpperCase()] : []),
     ...(diff.buttonStateParity ? ['**Private Button enablement parity:** ' +
       diff.buttonStateParity.toUpperCase()] : []),
-    ...(diff.buttonA11yParity ? ['**Private Button accessibility parity:** ' +
+    ...(diff.buttonA11yParity ? ['**Observed Chromium Button accessibility parity:** ' +
       diff.buttonA11yParity.toUpperCase()] : []),
+    ...(diff.declaredButtonA11yParity ? ['**Declared A2UI Button accessibility parity:** ' +
+      diff.declaredButtonA11yParity.toUpperCase()] : []),
     ...(Number.isSafeInteger(diff.firstDifferentActionIndex)
       ? ['**First differing planned action (0-based):** ' + diff.firstDifferentActionIndex] : []),
     ...(Number.isSafeInteger(diff.firstDifferentRenderedTextEventIndex)
@@ -185,8 +187,11 @@ function markdownComparisonReport(diff, before, after) {
       ? ['**First differing Button-state event (0-based):** ' +
         diff.firstDifferentButtonStateEventIndex] : []),
     ...(Number.isSafeInteger(diff.firstDifferentButtonA11yEventIndex)
-      ? ['**First differing Button accessibility event (0-based):** ' +
+      ? ['**First differing observed Button accessibility event (0-based):** ' +
         diff.firstDifferentButtonA11yEventIndex] : []),
+    ...(Number.isSafeInteger(diff.firstDifferentDeclaredButtonA11yEventIndex)
+      ? ['**First differing declared Button accessibility event (0-based):** ' +
+        diff.firstDifferentDeclaredButtonA11yEventIndex] : []),
     '**Changed event steps:** ' + diff.differingSteps,
     '',
     '| Event index | Structural changes (before -> after) |',
@@ -226,8 +231,11 @@ function junitComparisonReport(diff, before, after) {
           '; first differing Button-state event index: ' +
           diff.firstDifferentButtonStateEventIndex : '') +
         (Number.isSafeInteger(diff.firstDifferentButtonA11yEventIndex) ?
-          '; first differing Button accessibility event index: ' +
-          diff.firstDifferentButtonA11yEventIndex : '')) +
+          '; first differing observed Button accessibility event index: ' +
+          diff.firstDifferentButtonA11yEventIndex : '') +
+        (Number.isSafeInteger(diff.firstDifferentDeclaredButtonA11yEventIndex) ?
+          '; first differing declared Button accessibility event index: ' +
+          diff.firstDifferentDeclaredButtonA11yEventIndex : '')) +
       '</failure>');
   }
   lines.push('  </testcase>');
@@ -332,6 +340,7 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null,
     let renderedTextDigests = null;
     let buttonStateDigests = null;
     let buttonA11yDigests = null;
+    let declaredButtonA11yDigests = null;
     if (actionDigestKey) {
       if (!isRecord(parsed) || !/^[a-f0-9]{64}$/.test(parsed.__privateActionDigest) ||
           !Array.isArray(parsed.__privateActionDigests) ||
@@ -371,9 +380,16 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null,
         throw invalid();
       buttonA11yDigests = digests;
       delete parsed.__privateButtonA11yDigests;
+      const declarations = parsed.__privateDeclaredButtonA11yDigests;
+      if (!Array.isArray(declarations) || declarations.length !== parsed.events ||
+          declarations.length > MAX_EVENTS || declarations.some(value =>
+            typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)))
+        throw invalid();
+      declaredButtonA11yDigests = declarations;
+      delete parsed.__privateDeclaredButtonA11yDigests;
     }
     return {report: validate(parsed), actionDigest, actionDigests, renderedTextDigests,
-      buttonStateDigests, buttonA11yDigests};
+      buttonStateDigests, buttonA11yDigests, declaredButtonA11yDigests};
   } catch {
     throw invalid();
   }
@@ -405,13 +421,15 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
         ? replayPrivateCapture(args['before-capture'], actionPlan, actionDigestKey, textDigestKey,
           buttonStateDigestKey, buttonA11yDigestKey)
         : {report: readReport(args.before), actionDigest: null, actionDigests: null,
-          renderedTextDigests: null, buttonStateDigests: null, buttonA11yDigests: null};
+          renderedTextDigests: null, buttonStateDigests: null, buttonA11yDigests: null,
+          declaredButtonA11yDigests: null};
       const baseline = beforeRun.report;
       const afterRun = args['after-capture']
         ? replayPrivateCapture(args['after-capture'], baseline, actionDigestKey, textDigestKey,
           buttonStateDigestKey, buttonA11yDigestKey)
         : {report: readReport(args.after), actionDigest: null, actionDigests: null,
-          renderedTextDigests: null, buttonStateDigests: null, buttonA11yDigests: null};
+          renderedTextDigests: null, buttonStateDigests: null, buttonA11yDigests: null,
+          declaredButtonA11yDigests: null};
       const observed = afterRun.report;
       const result = compareBrowserCaptureSummaries(baseline, observed);
       if (actionDigestKey) {
@@ -467,7 +485,17 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           result.ok = false;
           result.changedSummaryFields.push('buttonA11yParity');
         }
-        result.note = 'Opt-in real Chromium Button accessibility snapshot equality; no private names or digests exported';
+        const oldDeclared = beforeRun.declaredButtonA11yDigests;
+        const newDeclared = afterRun.declaredButtonA11yDigests;
+        const firstDeclared = Array.from({length: Math.max(oldDeclared.length, newDeclared.length)},
+          (_, index) => index).find(index => oldDeclared[index] !== newDeclared[index]);
+        result.declaredButtonA11yParity = firstDeclared === undefined ? 'match' : 'drift';
+        if (firstDeclared !== undefined) {
+          result.firstDifferentDeclaredButtonA11yEventIndex = firstDeclared;
+          result.ok = false;
+          result.changedSummaryFields.push('declaredButtonA11yParity');
+        }
+        result.note = 'Opt-in declared A2UI versus observed Chromium Button accessibility comparisons; no private names or digests exported';
       }
       const content = args.format === 'markdown' ? markdownComparisonReport(result, baseline, observed) :
         args.format === 'junit' ? junitComparisonReport(result, baseline, observed) :
