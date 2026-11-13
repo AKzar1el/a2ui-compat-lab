@@ -344,11 +344,14 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     const labelDiff = run(['--before-capture', labelBeforePath,
       '--after-capture', labelAfterPath, '--compare-button-a11y', '--strict',
       '--out', labelDiffPath]);
-    assert.equal(labelDiff.status, 1, 'Assistive Button-name drift must be detected in Chromium');
+    assert.equal(labelDiff.status, 1,
+      'Declared Button-label drift must be detected even if the pinned renderer ignores it');
     const labelReport = JSON.parse(readFileSync(labelDiffPath, 'utf8'));
-    assert.equal(labelReport.buttonA11yParity, 'drift');
-    assert.equal(labelReport.firstDifferentButtonA11yEventIndex, 1);
-    assert.deepEqual(labelReport.changedSummaryFields, ['buttonA11yParity']);
+    assert.equal(labelReport.buttonA11yParity, 'match',
+      'Published React 0.14 does not reflect this explicit v0.9 Button label in the a11y tree');
+    assert.equal(labelReport.declaredButtonA11yParity, 'drift');
+    assert.equal(labelReport.firstDifferentDeclaredButtonA11yEventIndex, 1);
+    assert.deepEqual(labelReport.changedSummaryFields, ['declaredButtonA11yParity']);
     assert.equal(labelReport.differingSteps, 0);
     assert.doesNotMatch(JSON.stringify(labelReport),
       /PRIVATE_ASSISTIVE_NAME|private-label-|__private|[a-f0-9]{64}/,
