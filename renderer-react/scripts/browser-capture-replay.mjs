@@ -377,10 +377,10 @@ export async function runBrowserCapture(messages, {
         }
         if (operation === 'deleteSurface')
           declaredLabelsBySurface.delete(message.deleteSurface.surfaceId);
-        const declared = [...declaredLabelsBySurface.entries()]
-          .sort(([a], [b]) => String(a).localeCompare(String(b)))
-          .map(([surface, labels]) => [surface, [...labels.entries()]
-            .sort(([a], [b]) => String(a).localeCompare(String(b)))]);
+        // Capture-local surface/component identifiers are not accessibility
+        // semantics. Compare label order only so private ID renames match.
+        const declared = [...declaredLabelsBySurface.values()]
+          .map(labels => [...labels.values()]);
         declaredButtonA11yDigests.push(createHmac('sha256',
           Buffer.from(buttonA11yDigestKey, 'hex'))
           .update('declared-button-accessibility-v1:')
