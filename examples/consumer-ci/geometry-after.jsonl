@@ -1,0 +1,3 @@
+{"version":"v0.9","createSurface":{"surfaceId":"action-replay","catalogId":"__BASIC_CATALOG__"}}
+{"version":"v0.9","updateComponents":{"surfaceId":"action-replay","components":[{"id":"root","component":"Row","children":["status","submit"]},{"id":"status","component":"Text","text":"PUBLIC_STABLE_GEOMETRY_DEMO"},{"id":"submit","component":"Button","child":"label","variant":"primary","action":{"event":{"name":"confirm-choice","context":{"selection":{"path":"/selection"}}}}},{"id":"label","component":"Text","text":"Confirm"}]}}
+{"version":"v0.9","updateDataModel":{"surfaceId":"action-replay","path":"/","value":{"selection":"alpha","confirmed":false}}}
