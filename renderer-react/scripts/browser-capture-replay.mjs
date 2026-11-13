@@ -83,7 +83,6 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.actionSteps.length > 0 && (actionModes !== 0 || parsed.actionAfterEventIndex !== null)) ||
       (parsed.stopAfterEventIndex !== null &&
         (actionModes !== 0 || parsed.actionSteps.length > 0 || parsed.actionAfterEventIndex !== null)) ||
-      (parsed.internalActionDigest && parsed.internalRenderedTextDigest) ||
       (parsed.reportFirstError && (actionModes !== 0 || parsed.actionSteps.length > 0 ||
         parsed.stopAfterEventIndex !== null || parsed.actionAfterEventIndex !== null ||
         parsed.inspectLoadingPlaceholders || parsed.rejectLoadingPlaceholders ||
@@ -149,8 +148,6 @@ export async function runBrowserCapture(messages, {
     throw new Error('Invalid internal action digest key');
   if (renderedTextDigestKey !== null && !/^[a-f0-9]{64}$/.test(renderedTextDigestKey))
     throw new Error('Invalid internal rendered text digest key');
-  if (actionDigestKey !== null && renderedTextDigestKey !== null)
-    throw new Error('Choose one internal comparison digest mode');
   if (typeof reportFirstError !== 'boolean')
     throw new Error('Invalid first-error reporting mode');
   if (typeof surfaceErrorProbe !== 'boolean')
@@ -426,10 +423,15 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     const args = parseBrowserCaptureOptions(process.argv.slice(2));
     if (args.help) console.log(USAGE);
     else {
-      const internalDigest = args.internalActionDigest || args.internalRenderedTextDigest;
-      const digestKey = internalDigest ? process.env.A2UI_PRIVATE_ACTION_DIGEST_KEY : null;
-      if (internalDigest && (args.out || !/^[a-f0-9]{64}$/.test(digestKey ?? '')))
-        throw new Error('Internal comparison digest must be pipe-only with a valid ephemeral key');
+      const actionKey = args.internalActionDigest
+        ? process.env.A2UI_PRIVATE_ACTION_DIGEST_KEY : null;
+      const textKey = args.internalRenderedTextDigest
+        ? process.env.A2UI_PRIVATE_RENDERED_TEXT_DIGEST_KEY : null;
+      if ((args.internalActionDigest || args.internalRenderedTextDigest) &&
+          (args.out ||
+            (args.internalActionDigest && !/^[a-f0-9]{64}$/.test(actionKey ?? '')) ||
+            (args.internalRenderedTextDigest && !/^[a-f0-9]{64}$/.test(textKey ?? ''))))
+        throw new Error('Internal comparison digest must be pipe-only with valid ephemeral keys');
       const report = await runBrowserCapture(readCapture(args.input),
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
@@ -437,8 +439,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           stopAfterEventIndex: args.stopAfterEventIndex, reportFirstError: args.reportFirstError,
           inspectLoadingPlaceholders: args.inspectLoadingPlaceholders,
           rejectLoadingPlaceholders: args.rejectLoadingPlaceholders,
-          actionDigestKey: args.internalActionDigest ? digestKey : null,
-          renderedTextDigestKey: args.internalRenderedTextDigest ? digestKey : null});
+          actionDigestKey: actionKey, renderedTextDigestKey: textKey});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);

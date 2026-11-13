@@ -257,7 +257,7 @@ export function parseBrowserCaptureSummaryCompareOptions(argv) {
       (options.compareActions && (!options['before-capture'] || !options['after-capture'] ||
         !options['action-plan'])) ||
       (options.compareRenderedText && (!options['before-capture'] || !options['after-capture'] ||
-        options['action-plan'] || options.compareActions)))
+        (options['action-plan'] && !options.compareActions))))
     throw new Error(USAGE);
   return options;
 }
@@ -285,7 +285,8 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null, textD
       encoding: 'utf8', maxBuffer: MAX_BYTES, timeout: 120000,
       // One fresh key is shared by the two children, never logged or saved.
       ...((actionDigestKey || textDigestKey) ? {env: {...process.env,
-        A2UI_PRIVATE_ACTION_DIGEST_KEY: actionDigestKey ?? textDigestKey}} : {}),
+        ...(actionDigestKey ? {A2UI_PRIVATE_ACTION_DIGEST_KEY: actionDigestKey} : {}),
+        ...(textDigestKey ? {A2UI_PRIVATE_RENDERED_TEXT_DIGEST_KEY: textDigestKey} : {})}} : {}),
     });
   } catch {
     throw invalid();
