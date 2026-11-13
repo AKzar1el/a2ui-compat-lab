@@ -30,7 +30,7 @@ jobs:
       - name: Install offline Chromium replay runtime
         working-directory: a2ui-lab/renderer-react
         run: npx playwright install --with-deps chromium
-      - name: Compare two developer-owned private captures
+      - name: Compare private replay health and rendered Text parity
         shell: bash
         env:
           # Replace these paths with outputs of your trusted capture-producing step.
@@ -47,6 +47,11 @@ jobs:
             --before-capture "$BEFORE_CAPTURE" --after-capture "$AFTER_CAPTURE" \
             --require-no-observed-failures --strict \
             --report-dir "$RUNNER_TEMP/a2ui-comparison" || status=$?
+          # A healthy replay can still render changed Text; check both dimensions.
+          node a2ui-lab/src/browser-capture-summary-compare.mjs \
+            --before-capture "$BEFORE_CAPTURE" --after-capture "$AFTER_CAPTURE" \
+            --compare-rendered-text --strict --format junit \
+            --out "$RUNNER_TEMP/a2ui-comparison/rendered-text.xml" || status=$?
           exit "$status"
       # Privacy-reduced reports still expose event counts and indices.
       # Explicitly opt in by setting A2UI_SHARE_COMPARISON_METADATA=true
@@ -63,6 +68,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: a2ui-private-comparison
-          path: ${{ runner.temp }}/a2ui-comparison/comparison.*
+          path: |
+            ${{ runner.temp }}/a2ui-comparison/comparison.*
+            ${{ runner.temp }}/a2ui-comparison/rendered-text.xml
           if-no-files-found: ignore
           retention-days: 1
