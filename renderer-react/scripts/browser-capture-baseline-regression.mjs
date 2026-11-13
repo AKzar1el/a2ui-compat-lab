@@ -127,6 +127,23 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     assert.equal(moved.beforeFirstObservedFailureEventIndex, 1);
     assert.equal(moved.afterFirstObservedFailureEventIndex, 2);
 
+    const movedJUnit = runErrorCompare(['--before-capture', secondFailurePath,
+      '--after-capture', thirdFailurePath, '--strict', '--format', 'junit']);
+    assert.equal(movedJUnit.status, 1);
+    assert.match(movedJUnit.stdout, /<testsuite[^>]*tests="2" failures="1"/);
+    assert.match(movedJUnit.stdout, /<failure message="observed error boundary drift"/);
+    const failureMarkdown = runErrorCompare(['--before-capture', thirdFailurePath,
+      '--after-capture', thirdFailurePath, '--require-no-observed-failures',
+      '--strict', '--format', 'markdown']);
+    assert.equal(failureMarkdown.status, 1);
+    assert.match(failureMarkdown.stdout, /\*\*Opt-in no-observed-failures policy:\*\* FAIL/);
+    assert.doesNotMatch(failureMarkdown.stdout,
+      /private-error|selection|alpha|surfaceId|stack|__private/);
+    const badFormat = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', capturePath, '--format', 'html']);
+    assert.equal(badFormat.status, 2, 'Unrecognized report formats must fail closed');
+    assert.equal(badFormat.stdout, '');
+
     const incompatibleMode = runErrorCompare(['--before-capture', capturePath,
       '--after-capture', thirdFailurePath, '--action-plan', baselinePath]);
     assert.equal(incompatibleMode.status, 2, 'First-error compare must never authorize actions');
