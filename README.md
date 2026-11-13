@@ -385,6 +385,25 @@ isolate the first event that fails, without publishing model values, labels,
 surface IDs or private file paths. Like other structural reports, event
 chronology may still be sensitive and is not anonymized.
 
+For an immediate **first-observed failing event index** without manually trying
+several prefixes, opt into the isolated diagnostic mode:
+
+```sh
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --report-first-error --out ../out/first-error.json
+```
+
+This replays the fully validated JSONL once in real Chromium without activating
+Buttons. On an error **during a replayed event**, the value-free diagnostic
+reports `firstObservedFailureEventIndex` (zero-based) and
+`processedEventCount` and exits 1 after saving the report. A successful full
+replay returns the normal structural report plus a null failure index and exits
+0. Input rejection, startup or finalization errors still fail with generic,
+path-free diagnostics and exit 2 rather than attributing them to an event.
+The observed index is **not proof of root cause**; the failure may have begun
+earlier. This mode is mutually exclusive with planned Button interactions,
+prefix stopping, and loading-placeholder inspection. Its limited event-count
+metadata is not anonymized; review it before publishing.
+
 To inspect a streaming-UX regression that only appears **between** v0.9
 messages, opt into intermediate Chromium loading-placeholder diagnostics:
 

@@ -8,7 +8,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -30,7 +30,7 @@ export function parseBrowserCaptureOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
     clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null,
-    actionSteps: [], stopAfterEventIndex: null, inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
+    actionSteps: [], stopAfterEventIndex: null, reportFirstError: false, inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
     internalActionDigest: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -57,6 +57,8 @@ export function parseBrowserCaptureOptions(argv) {
     } else if (arg === '--internal-action-digest' && !parsed.internalActionDigest) {
       // Internal one-run transport: only the comparator injects a fresh key.
       parsed.internalActionDigest = true;
+    } else if (arg === '--report-first-error' && !parsed.reportFirstError) {
+      parsed.reportFirstError = true;
     } else if (arg === '--inspect-loading-placeholders' && !parsed.inspectLoadingPlaceholders) {
       parsed.inspectLoadingPlaceholders = true;
     } else if (arg === '--reject-loading-placeholders' && !parsed.rejectLoadingPlaceholders) {
@@ -78,6 +80,9 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.actionSteps.length > 0 && (actionModes !== 0 || parsed.actionAfterEventIndex !== null)) ||
       (parsed.stopAfterEventIndex !== null &&
         (actionModes !== 0 || parsed.actionSteps.length > 0 || parsed.actionAfterEventIndex !== null)) ||
+      (parsed.reportFirstError && (actionModes !== 0 || parsed.actionSteps.length > 0 ||
+        parsed.stopAfterEventIndex !== null || parsed.actionAfterEventIndex !== null ||
+        parsed.inspectLoadingPlaceholders || parsed.rejectLoadingPlaceholders || parsed.internalActionDigest)) ||
       parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
         (i > 0 && step.eventIndex < parsed.actionSteps[i - 1].eventIndex)))
     throw new Error(USAGE);
@@ -129,7 +134,7 @@ function readCapture(input) {
 export async function runBrowserCapture(messages, {
   clickSingleButton = false, pressSingleButtonEnter = false,
   clickButtonIndex = null, pressButtonIndexEnter = null, actionAfterEventIndex = null,
-  actionSteps = [], stopAfterEventIndex = null,
+  actionSteps = [], stopAfterEventIndex = null, reportFirstError = false,
   inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
   actionDigestKey = null, surfaceErrorProbe = false,
 } = {}) {
@@ -137,6 +142,8 @@ export async function runBrowserCapture(messages, {
     throw new Error('Invalid browser capture events');
   if (actionDigestKey !== null && !/^[a-f0-9]{64}$/.test(actionDigestKey))
     throw new Error('Invalid internal action digest key');
+  if (typeof reportFirstError !== 'boolean')
+    throw new Error('Invalid first-error reporting mode');
   if (typeof surfaceErrorProbe !== 'boolean')
     throw new Error('Invalid internal surface error probe');
   const actionModes = Number(clickSingleButton) + Number(pressSingleButtonEnter) +
@@ -168,6 +175,10 @@ export async function runBrowserCapture(messages, {
   if (stopAfterEventIndex !== null &&
       (actionModes !== 0 || actionSteps.length > 0 || actionAfterEventIndex !== null))
     throw new Error('Prefix replay cannot activate browser controls');
+  if (reportFirstError && (actionModes !== 0 || actionSteps.length > 0 ||
+      stopAfterEventIndex !== null || actionAfterEventIndex !== null ||
+      inspectLoadingPlaceholders || rejectLoadingPlaceholders || actionDigestKey !== null))
+    throw new Error('Error-event diagnostics cannot activate controls or combine replay modes');
   const replayedMessages = stopAfterEventIndex === null
     ? messages : messages.slice(0, stopAfterEventIndex + 1);
   if (!replayedMessages.some(message => message && typeof message === 'object' &&
@@ -179,6 +190,7 @@ export async function runBrowserCapture(messages, {
   const consoleErrors = [];
   let deniedRequests = 0;
   let deniedSockets = 0;
+  let currentEventIndex = null;
   try {
     server = await createServer({
       root, configFile: resolve(root, 'vite.config.mjs'),
@@ -268,6 +280,7 @@ export async function runBrowserCapture(messages, {
     const trackLoadingPlaceholders = inspectLoadingPlaceholders || rejectLoadingPlaceholders;
     let loadingPlaceholderEvents = 0;
     for (let index = 0; index < replayedMessages.length; index++) {
+      currentEventIndex = index;
       const message = replayedMessages[index];
       const operation = OPERATIONS.find(key => Object.hasOwn(message, key));
       if (message.version !== 'v0.9' || !operation)
@@ -318,6 +331,7 @@ export async function runBrowserCapture(messages, {
           true);
       if (!scriptedActions.length && index === actionAfterEventIndex) await activateButton();
     }
+    currentEventIndex = null;
     if (selectedIndex !== null && actionAfterEventIndex === null)
       await activateButton();
     const final = await page.evaluate(() => window.__a2uiLab.trace());
@@ -355,7 +369,22 @@ export async function runBrowserCapture(messages, {
           createHmac('sha256', Buffer.from(actionDigestKey, 'hex'))
             .update(canonicalActionJSON(action)).digest('hex')),
       } : {}),
+      ...(reportFirstError ? {firstObservedFailureEventIndex: null} : {}),
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
+    };
+  } catch (error) {
+    if (!reportFirstError || currentEventIndex === null) throw error;
+    // The index is where failure was observed, not proof this message caused it.
+    // Never serialize browser exceptions, SDK data, surface IDs or input paths.
+    return {
+      schemaVersion: 1,
+      kind: 'a2ui-react-capture-event-diagnostic',
+      protocol: 'v0.9',
+      renderer: '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0',
+      events: messages.length,
+      processedEventCount: currentEventIndex,
+      firstObservedFailureEventIndex: currentEventIndex,
+      note: 'First observed failure event, not proven cause; structural metadata is not anonymized',
     };
   } finally {
     if (browser) await browser.close();
@@ -384,13 +413,15 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
           actionAfterEventIndex: args.actionAfterEventIndex, actionSteps: args.actionSteps,
-          stopAfterEventIndex: args.stopAfterEventIndex,
+          stopAfterEventIndex: args.stopAfterEventIndex, reportFirstError: args.reportFirstError,
           inspectLoadingPlaceholders: args.inspectLoadingPlaceholders,
           rejectLoadingPlaceholders: args.rejectLoadingPlaceholders,
           actionDigestKey: digestKey});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
+      if (args.reportFirstError && report.firstObservedFailureEventIndex !== null)
+        process.exitCode = 1;
     }
   } catch {
     // SDK errors and browser diagnostics can quote private model values.
