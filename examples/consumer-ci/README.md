@@ -4,8 +4,8 @@ This is a **copyable integration recipe**, not a hosted service or official
 A2UI conformance certificate. It uses the pinned published React/core 0.14
 renderer to replay developer-owned v0.9 JSONL captures. It is designed to fail CI on changed observed error boundaries, on *either*
 replay showing an observed failure, **or on changed visible Text** even when
-both captures replay without errors. The last check uses a separate Chromium
-pair and costs additional browser runtime; neither check activates Buttons.
+both captures replay without errors. The two checks now share **one pair of Chromium replays**, using transient keyed
+Text comparisons. Neither check activates Buttons.
 
 ## Verify the local demo first
 
@@ -33,19 +33,23 @@ Expected result: exit **1** with `renderedTextParity: "drift"` and
 intentional regression demonstration, not proof of a renderer defect.
 Use a fresh output path for subsequent runs: the tool refuses overwrite.
 
-For a three-format **first-observed-error** health report of the same inputs:
+For a **combined one-pair replay-health and rendered-Text CI gate**, generate
+JSON, Markdown and JUnit in one new directory:
 
 ```sh
-node src/browser-capture-error-boundary-compare.mjs --before-capture fixtures/lifecycle-v09.jsonl --after-capture examples/consumer-ci/after.jsonl --require-no-observed-failures --strict --report-dir out/consumer-error-demo
+node src/browser-capture-error-boundary-compare.mjs --before-capture fixtures/lifecycle-v09.jsonl --after-capture examples/consumer-ci/after.jsonl --require-no-observed-failures --compare-rendered-text --strict --report-dir out/consumer-one-pair-demo
 ```
 
-Expected result: exit **0** when both captures replay without observed
-errors, creating `comparison.json`, `comparison.md` and
-`comparison.xml` (JUnit) with just one pair of Chromium replays.
-The two checks intentionally examine **different dimensions**: matching
-failure boundaries does not imply matching rendered text. A malformed
-capture or output collision exits **2**. The report directory must not
-already exist; a partial directory left by an I/O error is not a success.
+Expected result: exit **1** because Text drift is observed at event 2, although
+both replays have **no observed failures**. The combined `comparison.json`
+includes `observedFailuresAbsent: true`, `renderedTextParity: "drift"`, and
+`firstDifferentRenderedTextEventIndex: 2`. The combined JUnit file
+`comparison.xml` fails its rendered-Text assertion without a second Chromium
+pair. If either replay fails, Text parity is reported as **unavailable**, not
+misleadingly marked matching; strict failure policy remains enforced.
+A malformed capture or output collision exits **2**. An existing report
+directory is never overwritten. Transient HMACs stay inside the comparator
+and its child processes and are not saved with reports.
 
 Both scenarios run in the existing `react-browser` CI job using the published
 renderer, not a mocked DOM or unverified example command.
@@ -60,21 +64,22 @@ supply trusted capture generation. Replace `ci/a2ui-before.jsonl` and
 capture step. The example does not invent capture tooling and will fail
 closed when those files are missing.
 
-The workflow checks out this lab at a **fixed verified commit**, installs
-the isolated published React/core dependencies, runs `--require-no-observed-failures --strict --report-dir` for replay health
-**and** a separate `--compare-rendered-text --strict --format junit` check
-for visible Text drift. Both return codes are preserved, so either failure
-fails CI. The second Chromium pair costs additional runtime and creates
-`rendered-text.xml` next to the three health reports. Other UI properties
-(such as Button focus/geometry) are not covered by this starter.
+The workflow checks out the lab at an **immutable source commit**, installs
+the isolated published React/core dependencies, then uses a single
+`--require-no-observed-failures --compare-rendered-text --strict --report-dir`
+comparison. Either observed replay failures or rendered-Text drift fail CI.
+It creates three combined reports with **one** Chromium pair; there is no
+second rendered-Text JUnit file. Other UI properties (such as Button
+focus/geometry) are not covered by this starter.
 
 By default, the workflow **does not** upload artifacts or add a GitHub step
-summary. The generated JSON, Markdown and two JUnit reports live only in the
+summary. The generated JSON, Markdown and combined JUnit reports live only in the
 runner's temporary directory. After you inspect your capture metadata and
 decide publication is acceptable, explicitly set the repository Actions
 variable `A2UI_SHARE_COMPARISON_METADATA=true` to enable a one-day
 artifact and step summary. The optional artifact also includes the Text
-parity JUnit report; the step summary shows only the health Markdown.
+parity assertion inside the combined JUnit report; the step summary shows
+the combined health and Text Markdown.
 Never upload the raw JSONL captures.
 
 Privacy-reduced is **not anonymous**: event counts, failure indices and
