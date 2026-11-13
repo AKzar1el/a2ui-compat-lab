@@ -143,6 +143,13 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     // published browser structural report still observes identical counts.
     const geometryMessages = encodedCapture.toString('utf8').trimEnd()
       .split('\n').map(line => JSON.parse(line));
+    // Stable, nonempty Text guarantees that Row and Column relocate the Button
+    // before any model path is initialized; both captures use identical Text.
+    geometryMessages[1].updateComponents.components.find(
+      component => component.id === 'status').text = 'PRIVATE_STATIC_GEOMETRY_STATUS';
+    const geometryBeforePath = join(dir, 'private-geometry-baseline.jsonl');
+    writeFileSync(geometryBeforePath,
+      geometryMessages.map(message => JSON.stringify(message)).join('\n') + '\n');
     const geometryShifted = structuredClone(geometryMessages);
     const geometryRoot = geometryShifted[1].updateComponents.components.find(
       component => component.id === 'root');
@@ -151,16 +158,16 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     const geometryAfterPath = join(dir, 'private-geometry-shift.jsonl');
     writeFileSync(geometryAfterPath,
       geometryShifted.map(message => JSON.stringify(message)).join('\n') + '\n');
-    const layoutBlind = run(['--before-capture', capturePath,
+    const layoutBlind = run(['--before-capture', geometryBeforePath,
       '--after-capture', geometryAfterPath, '--strict']);
     assert.equal(layoutBlind.status, 0, 'Structural browser parity does not test geometry');
     assert.equal(JSON.parse(layoutBlind.stdout).ok, true);
-    const geometrySame = run(['--before-capture', capturePath,
-      '--after-capture', capturePath, '--compare-button-geometry', '--strict']);
+    const geometrySame = run(['--before-capture', geometryBeforePath,
+      '--after-capture', geometryBeforePath, '--compare-button-geometry', '--strict']);
     assert.equal(geometrySame.status, 0,
       'Identical private captures must preserve real Chromium Button positions');
     assert.equal(JSON.parse(geometrySame.stdout).buttonGeometryParity, 'match');
-    const geometryDiff = run(['--before-capture', capturePath,
+    const geometryDiff = run(['--before-capture', geometryBeforePath,
       '--after-capture', geometryAfterPath, '--compare-button-geometry', '--strict']);
     assert.equal(geometryDiff.status, 1,
       'Real Chromium should detect Button relocation without changed structural counts');
@@ -174,7 +181,7 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
       'Button geometry reports must not disclose private inputs or reusable digests');
     const geometrySavedRefusal = run(['--before', baselinePath,
       '--after-capture', geometryAfterPath, '--compare-button-geometry']);
-    const geometryActionRefusal = run(['--before-capture', capturePath,
+    const geometryActionRefusal = run(['--before-capture', geometryBeforePath,
       '--after-capture', geometryAfterPath, '--action-plan', baselinePath,
       '--compare-button-geometry']);
     assert.equal(geometrySavedRefusal.status, 2);
