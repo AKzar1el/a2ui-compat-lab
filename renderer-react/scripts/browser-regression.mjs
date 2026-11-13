@@ -2483,7 +2483,7 @@ const lateFailureReport = await runBrowserCapture([...decodedExample, invalidLat
   {reportFirstError: true});
 assert.equal(lateFailureReport.firstObservedFailureEventIndex, decodedExample.length);
 assert.equal(lateFailureReport.processedEventCount, decodedExample.length);
-assert.doesNotMatch(JSON.stringify(lateFailureReport), /private-surface|private-content|\\/private/,
+assert.doesNotMatch(JSON.stringify(lateFailureReport), /private-surface|private-content|\/private/,
   'Later failure reports must not expose malformed event payloads');
 assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
   '--report-first-error', '--report-first-error']), /Usage:/);
