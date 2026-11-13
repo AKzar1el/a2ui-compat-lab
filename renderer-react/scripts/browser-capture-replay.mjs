@@ -14,6 +14,7 @@ const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
 const MAX_BUTTON_INDEX = 31;
 const MAX_ACTION_STEPS = 8;
+const MAX_RENDERED_TEXT_BYTES = 128 * 1024;
 const MAX_KEYBOARD_TABS = 64;
 const OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
 
@@ -31,7 +32,7 @@ export function parseBrowserCaptureOptions(argv) {
   const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
     clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null,
     actionSteps: [], stopAfterEventIndex: null, reportFirstError: false, inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
-    internalActionDigest: false};
+    internalActionDigest: false, internalRenderedTextDigest: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -57,6 +58,8 @@ export function parseBrowserCaptureOptions(argv) {
     } else if (arg === '--internal-action-digest' && !parsed.internalActionDigest) {
       // Internal one-run transport: only the comparator injects a fresh key.
       parsed.internalActionDigest = true;
+    } else if (arg === '--internal-rendered-text-digest' && !parsed.internalRenderedTextDigest) {
+      parsed.internalRenderedTextDigest = true;
     } else if (arg === '--report-first-error' && !parsed.reportFirstError) {
       parsed.reportFirstError = true;
     } else if (arg === '--inspect-loading-placeholders' && !parsed.inspectLoadingPlaceholders) {
@@ -80,9 +83,11 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.actionSteps.length > 0 && (actionModes !== 0 || parsed.actionAfterEventIndex !== null)) ||
       (parsed.stopAfterEventIndex !== null &&
         (actionModes !== 0 || parsed.actionSteps.length > 0 || parsed.actionAfterEventIndex !== null)) ||
+      (parsed.internalActionDigest && parsed.internalRenderedTextDigest) ||
       (parsed.reportFirstError && (actionModes !== 0 || parsed.actionSteps.length > 0 ||
         parsed.stopAfterEventIndex !== null || parsed.actionAfterEventIndex !== null ||
-        parsed.inspectLoadingPlaceholders || parsed.rejectLoadingPlaceholders || parsed.internalActionDigest)) ||
+        parsed.inspectLoadingPlaceholders || parsed.rejectLoadingPlaceholders ||
+        parsed.internalActionDigest || parsed.internalRenderedTextDigest)) ||
       parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
         (i > 0 && step.eventIndex < parsed.actionSteps[i - 1].eventIndex)))
     throw new Error(USAGE);
@@ -136,12 +141,16 @@ export async function runBrowserCapture(messages, {
   clickButtonIndex = null, pressButtonIndexEnter = null, actionAfterEventIndex = null,
   actionSteps = [], stopAfterEventIndex = null, reportFirstError = false,
   inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
-  actionDigestKey = null, surfaceErrorProbe = false,
+  actionDigestKey = null, renderedTextDigestKey = null, surfaceErrorProbe = false,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
   if (actionDigestKey !== null && !/^[a-f0-9]{64}$/.test(actionDigestKey))
     throw new Error('Invalid internal action digest key');
+  if (renderedTextDigestKey !== null && !/^[a-f0-9]{64}$/.test(renderedTextDigestKey))
+    throw new Error('Invalid internal rendered text digest key');
+  if (actionDigestKey !== null && renderedTextDigestKey !== null)
+    throw new Error('Choose one internal comparison digest mode');
   if (typeof reportFirstError !== 'boolean')
     throw new Error('Invalid first-error reporting mode');
   if (typeof surfaceErrorProbe !== 'boolean')
@@ -177,7 +186,8 @@ export async function runBrowserCapture(messages, {
     throw new Error('Prefix replay cannot activate browser controls');
   if (reportFirstError && (actionModes !== 0 || actionSteps.length > 0 ||
       stopAfterEventIndex !== null || actionAfterEventIndex !== null ||
-      inspectLoadingPlaceholders || rejectLoadingPlaceholders || actionDigestKey !== null))
+      inspectLoadingPlaceholders || rejectLoadingPlaceholders || actionDigestKey !== null ||
+      renderedTextDigestKey !== null))
     throw new Error('Error-event diagnostics cannot activate controls or combine replay modes');
   const replayedMessages = stopAfterEventIndex === null
     ? messages : messages.slice(0, stopAfterEventIndex + 1);
@@ -279,6 +289,7 @@ export async function runBrowserCapture(messages, {
     const steps = [];
     const trackLoadingPlaceholders = inspectLoadingPlaceholders || rejectLoadingPlaceholders;
     let loadingPlaceholderEvents = 0;
+    const renderedTextDigests = [];
     for (let index = 0; index < replayedMessages.length; index++) {
       currentEventIndex = index;
       const message = replayedMessages[index];
@@ -313,6 +324,14 @@ export async function runBrowserCapture(messages, {
           /^\[Loading [^\[\]\r\n]{1,128}\.\.\.\]$/.test(node.textContent?.trim() ?? '')).length;
       }) : null;
       if (loadingPlaceholderCount > 0) loadingPlaceholderEvents++;
+      if (renderedTextDigestKey) {
+        // The comparator sends a fresh HMAC key and discards these transient digests.
+        const visibleText = await page.locator('section[aria-label="Real A2UI surface"]').innerText();
+        if (Buffer.byteLength(visibleText, 'utf8') > MAX_RENDERED_TEXT_BYTES)
+          throw new Error('Browser capture visible text exceeded the comparison limit');
+        renderedTextDigests.push(createHmac('sha256', Buffer.from(renderedTextDigestKey, 'hex'))
+          .update(visibleText, 'utf8').digest('hex'));
+      }
       steps.push({
         ...(trackLoadingPlaceholders ? {loadingPlaceholderCount} : {}),
         index, operation, surfaceCount: trace.surfaceIds.length,
@@ -369,6 +388,7 @@ export async function runBrowserCapture(messages, {
           createHmac('sha256', Buffer.from(actionDigestKey, 'hex'))
             .update(canonicalActionJSON(action)).digest('hex')),
       } : {}),
+      ...(renderedTextDigestKey ? {__privateRenderedTextDigests: renderedTextDigests} : {}),
       ...(reportFirstError ? {firstObservedFailureEventIndex: null} : {}),
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
     };
@@ -406,9 +426,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     const args = parseBrowserCaptureOptions(process.argv.slice(2));
     if (args.help) console.log(USAGE);
     else {
-      const digestKey = args.internalActionDigest ? process.env.A2UI_PRIVATE_ACTION_DIGEST_KEY : null;
-      if (args.internalActionDigest && (args.out || !/^[a-f0-9]{64}$/.test(digestKey ?? '')))
-        throw new Error('Internal action digest must be pipe-only with a valid ephemeral key');
+      const internalDigest = args.internalActionDigest || args.internalRenderedTextDigest;
+      const digestKey = internalDigest ? process.env.A2UI_PRIVATE_ACTION_DIGEST_KEY : null;
+      if (internalDigest && (args.out || !/^[a-f0-9]{64}$/.test(digestKey ?? '')))
+        throw new Error('Internal comparison digest must be pipe-only with a valid ephemeral key');
       const report = await runBrowserCapture(readCapture(args.input),
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
@@ -416,7 +437,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           stopAfterEventIndex: args.stopAfterEventIndex, reportFirstError: args.reportFirstError,
           inspectLoadingPlaceholders: args.inspectLoadingPlaceholders,
           rejectLoadingPlaceholders: args.rejectLoadingPlaceholders,
-          actionDigestKey: digestKey});
+          actionDigestKey: args.internalActionDigest ? digestKey : null,
+          renderedTextDigestKey: args.internalRenderedTextDigest ? digestKey : null});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);

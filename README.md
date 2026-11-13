@@ -192,6 +192,35 @@ offline after dependencies are installed and preserve strict 0/1/2 exit codes,
 no-overwrite protection and generic path-free diagnostics. Structural event
 patterns may remain sensitive; review reports before sharing.
 
+### Detect changes in private rendered Text without publishing its value
+
+Two captures can have the same events, Button counts and action payloads yet
+show **different Text to the user**. Structural comparison deliberately treats
+those as MATCH. To opt into real Chromium rendered-text equality at each agent
+event boundary, compare **two private local JSONL captures**:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --compare-rendered-text --strict --out rendered-text-diff.json
+```
+
+This uses the published React/core 0.14.0 renderer and captures only the
+rendered text of the A2UI surface after each event, before any user actions.
+A fresh per-comparison HMAC key protects transient equality fingerprints;
+the parent deletes all fingerprints before writing JSON, Markdown or JUnit.
+Output contains `renderedTextParity: match|drift` and, on drift,
+`firstDifferentRenderedTextEventIndex` (zero-based). Changing private
+`updateDataModel` text is detected even when every structural count matches.
+It does **not** compare styles, geometry, offscreen content or semantic
+intent, and an event index is not proof of the change's cause.
+
+The flag refuses saved reports and approved Button action plans: no controls
+are activated. Input limits, strict exit codes (0 match / 1 drift /
+2 invalid), no-overwrite evidence and path-free refusals still apply.
+The values and the ephemeral HMAC key are never saved, but the match/drift
+bit and event chronology are still potentially sensitive; this is **not**
+anonymization or a guarantee that no secrets can be inferred. Inspect output
+before sharing it publicly.
+
 For a readable, value-free GitHub Actions step summary, opt into Markdown output
 from the same validated structural comparison (the default remains JSON):
 
