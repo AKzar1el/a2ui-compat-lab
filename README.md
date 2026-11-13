@@ -213,8 +213,23 @@ Output contains `renderedTextParity: match|drift` and, on drift,
 It does **not** compare styles, geometry, offscreen content or semantic
 intent, and an event index is not proof of the change's cause.
 
-The flag refuses saved reports and approved Button action plans: no controls
-are activated. Input limits, strict exit codes (0 match / 1 drift /
+Text-only mode refuses saved reports and approved Button action plans:
+no controls are activated. For developers who have **already reviewed and
+explicitly authorized** a saved action plan, both signals can instead be
+compared in one real Chromium replay:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --action-plan vetted-browser-report.json --compare-actions --compare-rendered-text --strict --out dual-parity-diff.json
+```
+
+This combination intentionally performs the vetted Button actions in both
+capture sessions. It refuses an absent or invalid plan and cannot activate
+unreviewed actions. It samples rendered text after each agent message before
+planned interactions, while independently keyed, per-run HMACs compare
+emitted action payloads; the keys and transient digests are discarded before
+the fixed-schema report is written. The result exposes only both parity
+match/drift decisions and first differing indices (when applicable).
+Input limits, strict exit codes (0 match / 1 drift /
 2 invalid), no-overwrite evidence and path-free refusals still apply.
 The values and the ephemeral HMAC key are never saved, but the match/drift
 bit and event chronology are still potentially sensitive; this is **not**
