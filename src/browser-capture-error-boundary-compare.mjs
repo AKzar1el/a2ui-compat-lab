@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import {spawnSync} from 'node:child_process';
-import {mkdirSync, writeFileSync} from 'node:fs';
-import {dirname, resolve} from 'node:path';
+import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {compareBrowserCaptureSummaries} from './browser-capture-summary-compare.mjs';
 
-const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--require-no-observed-failures] [--format json|markdown|junit] [--out NEW-REPORT]';
+const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--require-no-observed-failures] [--format json|markdown|junit] [--out NEW-REPORT | --report-dir NEW-DIRECTORY]';
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
 const RENDERER = '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0';
@@ -25,12 +25,13 @@ export function parseErrorBoundaryOptions(argv) {
       args.requireNoObservedFailures = true;
     else if (arg === '--format' && !Object.hasOwn(args, 'format') &&
       ['json', 'markdown', 'junit'].includes(argv[i + 1])) args.format = argv[++i];
-    else if (['--before-capture', '--after-capture', '--out'].includes(arg) &&
+    else if (['--before-capture', '--after-capture', '--out', '--report-dir'].includes(arg) &&
       !Object.hasOwn(args, arg.slice(2)) && argv[i + 1] &&
       !argv[i + 1].startsWith('--')) args[arg.slice(2)] = resolve(argv[++i]);
     else throw invalid();
   }
-  if (!args['before-capture'] || !args['after-capture']) throw invalid();
+  if (!args['before-capture'] || !args['after-capture'] ||
+      (args['report-dir'] && (args.out || Object.hasOwn(args, 'format')))) throw invalid();
   return args;
 }
 
@@ -187,17 +188,39 @@ function exclusiveWrite(path, content) {
   }
 }
 
+/** A new directory is the exclusive CI-artifact boundary; never reuse evidence. */
+function writeReportDirectory(dir, result) {
+  // Format everything first so a validation error cannot leave a partial suite.
+  const files = [
+    ['comparison.json', formatErrorBoundaryReport(result, 'json')],
+    ['comparison.md', formatErrorBoundaryReport(result, 'markdown')],
+    ['comparison.xml', formatErrorBoundaryReport(result, 'junit')],
+  ];
+  try {
+    mkdirSync(dirname(dir), {recursive: true});
+    mkdirSync(dir); // EEXIST (including symlinks) refuses overwrite.
+    for (const [name, content] of files)
+      writeFileSync(join(dir, name), content, {flag: 'wx'});
+  } catch {
+    // If disk IO fails after creating the directory, leave any partial
+    // evidence intact for manual inspection rather than deleting it.
+    throw invalid();
+  }
+}
+
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
     const args = parseErrorBoundaryOptions(process.argv.slice(2));
     if (args.help) console.log(USAGE);
     else {
+      if (args['report-dir'] && existsSync(args['report-dir'])) throw invalid();
       const before = runDiagnostic(args['before-capture']);
       const after = runDiagnostic(args['after-capture']);
       const result = compareErrorBoundaries(before, after,
         {requireNoObservedFailures: args.requireNoObservedFailures});
       const content = formatErrorBoundaryReport(result, args.format);
-      if (args.out) exclusiveWrite(args.out, content);
+      if (args['report-dir']) writeReportDirectory(args['report-dir'], result);
+      else if (args.out) exclusiveWrite(args.out, content);
       else process.stdout.write(content);
       if (args.strict && !result.ok) process.exitCode = 1;
     }

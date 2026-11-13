@@ -139,6 +139,33 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     assert.match(failureMarkdown.stdout, /\*\*Opt-in no-observed-failures policy:\*\* FAIL/);
     assert.doesNotMatch(failureMarkdown.stdout,
       /private-error|selection|alpha|surfaceId|stack|__private/);
+    // CI users need JSON, Markdown and JUnit from one pair of real Chromium
+    // replays, without writing raw captures or overwriting old evidence.
+    const reportDir = join(dir, 'one-pass-ci-reports');
+    const onePass = runErrorCompare(['--before-capture', thirdFailurePath,
+      '--after-capture', thirdFailurePath, '--require-no-observed-failures',
+      '--strict', '--report-dir', reportDir]);
+    assert.equal(onePass.status, 1,
+      'One-pass CI report directory must preserve strict failure exit status');
+    assert.equal(onePass.stdout, '', 'Private comparison must not print report contents');
+    const jsonReport = readFileSync(join(reportDir, 'comparison.json'), 'utf8');
+    assert.equal(JSON.parse(jsonReport).observedFailuresAbsent, false);
+    assert.equal(JSON.parse(jsonReport).ok, false);
+    const markdownReport = readFileSync(join(reportDir, 'comparison.md'), 'utf8');
+    assert.match(markdownReport, /\*\*Opt-in no-observed-failures policy:\*\* FAIL/);
+    const junitReport = readFileSync(join(reportDir, 'comparison.xml'), 'utf8');
+    assert.match(junitReport, /<testsuite[^>]*failures="1"/);
+    for (const output of [jsonReport, markdownReport, junitReport])
+      assert.doesNotMatch(output, /private-error|selection|alpha|surfaceId|stack|__private/);
+    const overwriteAttempt = runErrorCompare(['--before-capture', thirdFailurePath,
+      '--after-capture', thirdFailurePath, '--strict', '--report-dir', reportDir]);
+    assert.equal(overwriteAttempt.status, 2, 'An existing report directory must fail closed');
+    assert.equal(readFileSync(join(reportDir, 'comparison.json'), 'utf8'), jsonReport);
+    const conflictingOutputs = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', capturePath, '--format', 'junit',
+      '--report-dir', join(dir, 'conflicting-options')]);
+    assert.equal(conflictingOutputs.status, 2, 'A report directory must reject --format');
+
     const badFormat = runErrorCompare(['--before-capture', capturePath,
       '--after-capture', capturePath, '--format', 'html']);
     assert.equal(badFormat.status, 2, 'Unrecognized report formats must fail closed');
