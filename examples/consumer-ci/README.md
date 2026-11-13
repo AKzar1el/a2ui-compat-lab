@@ -60,6 +60,36 @@ Zod4 or npm peer-dependency overrides to make an unsupported pair appear
 compatible. No npm registry calls or paid services are involved in
 the preflight.
 
+## Run a verified consumer-lane gate in the same Chromium command (opt-in)
+
+Instead of trusting a separate preflight invocation, the private Chromium
+comparator also accepts the existing offline manifest/protocol check directly:
+
+```sh
+node src/browser-capture-error-boundary-compare.mjs \
+  --before-capture old-private.jsonl --after-capture new-private.jsonl \
+  --consumer-manifest /path/to/app/package.json --consumer-protocol v0.9 \
+  --consumer-lockfile /path/to/app/package-lock.json \
+  --require-no-observed-failures --compare-rendered-text --strict \
+  --report-dir out/consumer-lane-reviewed
+```
+
+Supply your own **actual** application manifest, capture protocol and private
+capture paths. `--consumer-manifest` and `--consumer-protocol` must be used
+together. `--consumer-lockfile` is optional and requires both; it accepts only
+a root npm v2/v3 lockfile. An unsupported declared SDK/protocol lane returns
+exit **1** with a fixed reason and **does not launch Chromium or write a report**.
+Unreadable or malformed private metadata, incomplete flags and invalid
+capture inputs return exit **2** without revealing input data or paths.
+Passing the declaration gate does **not** authenticate installed dependencies,
+prove the capture's true protocol or validate a 0.15/v1.0 third-party renderer.
+
+The manually copied `workflow.yml` still intentionally does **not** invoke this
+new opt-in gate. Before running against your own consumer, review the workflow
+and explicitly add these arguments only after supplying real application paths
+and protocol provenance. This improvement changes the comparator CLI, not
+the protected workflow template or an existing consumer's CI configuration.
+
 ## Verify the local demo first
 
 From the repository root, install the isolated renderer dependencies and

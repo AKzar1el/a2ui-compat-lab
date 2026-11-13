@@ -5,8 +5,9 @@ import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {compareBrowserCaptureSummaries} from './browser-capture-summary-compare.mjs';
+import {evaluateConsumer, readManifest, readLockfile} from './consumer-version-preflight.mjs';
 
-const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--require-no-observed-failures] [--compare-rendered-text] [--compare-button-geometry] [--compare-button-focus] [--format json|markdown|junit] [--out NEW-REPORT | --report-dir NEW-DIRECTORY]';
+const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--require-no-observed-failures] [--compare-rendered-text] [--compare-button-geometry] [--compare-button-focus] [--format json|markdown|junit] [--out NEW-REPORT | --report-dir NEW-DIRECTORY] [--consumer-manifest APP/package.json --consumer-protocol v0.9 [--consumer-lockfile APP/package-lock.json]]';
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
 const RENDERER = '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0';
@@ -32,7 +33,10 @@ export function parseErrorBoundaryOptions(argv) {
       args.compareButtonFocus = true;
     else if (arg === '--format' && !Object.hasOwn(args, 'format') &&
       ['json', 'markdown', 'junit'].includes(argv[i + 1])) args.format = argv[++i];
-    else if (['--before-capture', '--after-capture', '--out', '--report-dir'].includes(arg) &&
+    else if (arg === '--consumer-protocol' && !Object.hasOwn(args, 'consumer-protocol') &&
+      argv[i + 1] && !argv[i + 1].startsWith('--')) args['consumer-protocol'] = argv[++i];
+    else if (['--before-capture', '--after-capture', '--out', '--report-dir',
+      '--consumer-manifest', '--consumer-lockfile'].includes(arg) &&
       !Object.hasOwn(args, arg.slice(2)) && argv[i + 1] &&
       !argv[i + 1].startsWith('--')) args[arg.slice(2)] = resolve(argv[++i]);
     else throw invalid();
@@ -40,6 +44,10 @@ export function parseErrorBoundaryOptions(argv) {
   if (!args['before-capture'] || !args['after-capture'] ||
       (args['report-dir'] && (args.out || Object.hasOwn(args, 'format'))) ||
       ((args.compareRenderedText || args.compareButtonGeometry || args.compareButtonFocus) && !args.requireNoObservedFailures)) throw invalid();
+  const hasConsumerOptions = ['consumer-manifest', 'consumer-protocol', 'consumer-lockfile']
+    .some(key => Object.hasOwn(args, key));
+  if (hasConsumerOptions && (!args['consumer-manifest'] || !args['consumer-protocol']))
+    throw invalid();
   return args;
 }
 
@@ -326,12 +334,22 @@ function writeReportDirectory(dir, result) {
   }
 }
 
+class UnsupportedConsumerLaneError extends Error {}
+
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
     const args = parseErrorBoundaryOptions(process.argv.slice(2));
     if (args.help) console.log(USAGE);
     else {
       if (args['report-dir'] && existsSync(args['report-dir'])) throw invalid();
+      if (args['consumer-manifest']) {
+        // An opt-in consumer declaration gate runs before any private Chromium replay.
+        // Neither the application manifest nor its lockfile is included in reports.
+        const preflight = evaluateConsumer(readManifest(args['consumer-manifest']),
+          args['consumer-protocol'], args['consumer-lockfile'] ?
+            readLockfile(args['consumer-lockfile']) : undefined);
+        if (!preflight.eligible) throw new UnsupportedConsumerLaneError(preflight.reason);
+      }
       // One ephemeral key shared by both Chromium children, never logged or persisted.
       const textKey = args.compareRenderedText ? randomBytes(32).toString('hex') : null;
       const geometryKey = args.compareButtonGeometry ? randomBytes(32).toString('hex') : null;
@@ -349,9 +367,15 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       else process.stdout.write(content);
       if (args.strict && !result.ok) process.exitCode = 1;
     }
-  } catch {
-    // No thrown parser, SDK, Chromium, path or subprocess content is echoed.
-    console.error('A2UI private Chromium error-boundary comparison refused; paths and contents omitted');
-    process.exitCode = 2;
+  } catch (error) {
+    // Only fixed, comparator-owned labels are ever shown; no private input or path.
+    if (error instanceof UnsupportedConsumerLaneError) {
+      console.error('A2UI Chromium comparison skipped: unverified consumer SDK/protocol lane (' +
+        error.message + '); paths and contents omitted');
+      process.exitCode = 1;
+    } else {
+      console.error('A2UI private Chromium error-boundary comparison refused; paths and contents omitted');
+      process.exitCode = 2;
+    }
   }
 }
