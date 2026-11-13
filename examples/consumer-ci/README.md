@@ -80,7 +80,7 @@ supply trusted capture generation. Replace `ci/a2ui-before.jsonl` and
 capture step. The example does not invent capture tooling and will fail
 closed when those files are missing.
 
-The workflow checks out the lab at an **immutable source commit**, installs
+The workflow checks out the lab at an **immutable source commit containing the verified no-action Button geometry runtime** (source-head React browser CI passed), installs
 the isolated published React/core dependencies, then uses a single
 `--require-no-observed-failures --compare-rendered-text --compare-button-geometry --strict --report-dir`
 comparison. Observed replay failures, rendered-Text drift or Button relocation fail CI.
