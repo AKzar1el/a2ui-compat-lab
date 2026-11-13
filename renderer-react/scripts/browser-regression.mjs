@@ -2472,6 +2472,19 @@ const firstErrorSuccess = await runBrowserCapture(decodedExample, {reportFirstEr
 assert.equal(firstErrorSuccess.firstObservedFailureEventIndex, null,
   'A successful real Chromium replay has no observed failing boundary');
 assert.equal(firstErrorSuccess.events, decodedExample.length);
+// A later malformed programmatic event must not be confused with the first
+// valid Chromium events. The public CLI rejects such a malformed JSONL upfront.
+const invalidLateMessage = {version: 'v0.8', updateDataModel: {
+  surfaceId: 'private-surface', path: '/private', value: 'private-content',
+}};
+const lateFailureReport = await runBrowserCapture([...decodedExample, invalidLateMessage],
+  {reportFirstError: true});
+assert.equal(lateFailureReport.firstObservedFailureEventIndex, decodedExample.length);
+assert.equal(lateFailureReport.processedEventCount, decodedExample.length);
+assert.doesNotMatch(JSON.stringify(lateFailureReport), /private-surface|private-content|\\/private/,
+  'Later failure reports must not expose malformed event payloads');
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--report-first-error', '--report-first-error']), /Usage:/);
 // A developer can isolate a failing private capture prefix without copying its
 // JSONL into smaller files or activating any captured controls.
 assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl',
