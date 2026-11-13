@@ -33,7 +33,7 @@ export function parseBrowserCaptureOptions(argv) {
     clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null,
     actionSteps: [], stopAfterEventIndex: null, reportFirstError: false, inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
     internalActionDigest: false, internalRenderedTextDigest: false,
-    internalButtonStateDigest: false};
+    internalButtonStateDigest: false, internalButtonA11yDigest: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -63,6 +63,8 @@ export function parseBrowserCaptureOptions(argv) {
       parsed.internalRenderedTextDigest = true;
     } else if (arg === '--internal-button-state-digest' && !parsed.internalButtonStateDigest) {
       parsed.internalButtonStateDigest = true;
+    } else if (arg === '--internal-button-a11y-digest' && !parsed.internalButtonA11yDigest) {
+      parsed.internalButtonA11yDigest = true;
     } else if (arg === '--report-first-error' && !parsed.reportFirstError) {
       parsed.reportFirstError = true;
     } else if (arg === '--inspect-loading-placeholders' && !parsed.inspectLoadingPlaceholders) {
@@ -90,7 +92,7 @@ export function parseBrowserCaptureOptions(argv) {
         parsed.stopAfterEventIndex !== null || parsed.actionAfterEventIndex !== null ||
         parsed.inspectLoadingPlaceholders || parsed.rejectLoadingPlaceholders ||
         parsed.internalActionDigest || parsed.internalRenderedTextDigest ||
-        parsed.internalButtonStateDigest)) ||
+        parsed.internalButtonStateDigest || parsed.internalButtonA11yDigest)) ||
       parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
         (i > 0 && step.eventIndex < parsed.actionSteps[i - 1].eventIndex)))
     throw new Error(USAGE);
@@ -145,7 +147,7 @@ export async function runBrowserCapture(messages, {
   actionSteps = [], stopAfterEventIndex = null, reportFirstError = false,
   inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
   actionDigestKey = null, renderedTextDigestKey = null, buttonStateDigestKey = null,
-  surfaceErrorProbe = false,
+  buttonA11yDigestKey = null, surfaceErrorProbe = false,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
@@ -155,6 +157,8 @@ export async function runBrowserCapture(messages, {
     throw new Error('Invalid internal rendered text digest key');
   if (buttonStateDigestKey !== null && !/^[a-f0-9]{64}$/.test(buttonStateDigestKey))
     throw new Error('Invalid internal Button-state digest key');
+  if (buttonA11yDigestKey !== null && !/^[a-f0-9]{64}$/.test(buttonA11yDigestKey))
+    throw new Error('Invalid internal Button accessibility digest key');
   if (typeof reportFirstError !== 'boolean')
     throw new Error('Invalid first-error reporting mode');
   if (typeof surfaceErrorProbe !== 'boolean')
@@ -191,7 +195,8 @@ export async function runBrowserCapture(messages, {
   if (reportFirstError && (actionModes !== 0 || actionSteps.length > 0 ||
       stopAfterEventIndex !== null || actionAfterEventIndex !== null ||
       inspectLoadingPlaceholders || rejectLoadingPlaceholders || actionDigestKey !== null ||
-      renderedTextDigestKey !== null || buttonStateDigestKey !== null))
+      renderedTextDigestKey !== null || buttonStateDigestKey !== null ||
+      buttonA11yDigestKey !== null))
     throw new Error('Error-event diagnostics cannot activate controls or combine replay modes');
   const replayedMessages = stopAfterEventIndex === null
     ? messages : messages.slice(0, stopAfterEventIndex + 1);
@@ -295,6 +300,7 @@ export async function runBrowserCapture(messages, {
     let loadingPlaceholderEvents = 0;
     const renderedTextDigests = [];
     const buttonStateDigests = [];
+    const buttonA11yDigests = [];
     for (let index = 0; index < replayedMessages.length; index++) {
       currentEventIndex = index;
       const message = replayedMessages[index];
@@ -348,6 +354,26 @@ export async function runBrowserCapture(messages, {
         buttonStateDigests.push(createHmac('sha256',
           Buffer.from(buttonStateDigestKey, 'hex'))
           .update(JSON.stringify(disabledStates)).digest('hex'));
+      }
+      if (buttonA11yDigestKey) {
+        // Playwright's accessibility snapshot contains private accessible
+        // names. HMAC each ordered Button snapshot in memory, never the report.
+        const buttons = await page.getByRole('button').all();
+        if (buttons.length > MAX_BUTTON_INDEX + 1)
+          throw new Error('Browser capture Button accessibility comparison exceeded limit');
+        const snapshots = [];
+        let totalSnapshotBytes = 0;
+        for (const button of buttons) {
+          const snapshot = await button.ariaSnapshot();
+          const byteLength = Buffer.byteLength(snapshot, 'utf8');
+          totalSnapshotBytes += byteLength;
+          if (byteLength > 4096 || totalSnapshotBytes > MAX_RENDERED_TEXT_BYTES)
+            throw new Error('Browser capture Button accessibility snapshot exceeded limit');
+          snapshots.push(snapshot);
+        }
+        buttonA11yDigests.push(createHmac('sha256',
+          Buffer.from(buttonA11yDigestKey, 'hex'))
+          .update(JSON.stringify(snapshots)).digest('hex'));
       }
       steps.push({
         ...(trackLoadingPlaceholders ? {loadingPlaceholderCount} : {}),
@@ -407,6 +433,7 @@ export async function runBrowserCapture(messages, {
       } : {}),
       ...(renderedTextDigestKey ? {__privateRenderedTextDigests: renderedTextDigests} : {}),
       ...(buttonStateDigestKey ? {__privateButtonStateDigests: buttonStateDigests} : {}),
+      ...(buttonA11yDigestKey ? {__privateButtonA11yDigests: buttonA11yDigests} : {}),
       ...(reportFirstError ? {firstObservedFailureEventIndex: null} : {}),
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
     };
@@ -450,12 +477,15 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
         ? process.env.A2UI_PRIVATE_RENDERED_TEXT_DIGEST_KEY : null;
       const buttonStateKey = args.internalButtonStateDigest
         ? process.env.A2UI_PRIVATE_BUTTON_STATE_DIGEST_KEY : null;
+      const buttonA11yKey = args.internalButtonA11yDigest
+        ? process.env.A2UI_PRIVATE_BUTTON_A11Y_DIGEST_KEY : null;
       if ((args.internalActionDigest || args.internalRenderedTextDigest ||
-          args.internalButtonStateDigest) &&
+          args.internalButtonStateDigest || args.internalButtonA11yDigest) &&
           (args.out ||
             (args.internalActionDigest && !/^[a-f0-9]{64}$/.test(actionKey ?? '')) ||
             (args.internalRenderedTextDigest && !/^[a-f0-9]{64}$/.test(textKey ?? '')) ||
-            (args.internalButtonStateDigest && !/^[a-f0-9]{64}$/.test(buttonStateKey ?? ''))))
+            (args.internalButtonStateDigest && !/^[a-f0-9]{64}$/.test(buttonStateKey ?? '')) ||
+            (args.internalButtonA11yDigest && !/^[a-f0-9]{64}$/.test(buttonA11yKey ?? ''))))
         throw new Error('Internal comparison digest must be pipe-only with valid ephemeral keys');
       const report = await runBrowserCapture(readCapture(args.input),
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
@@ -465,7 +495,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           inspectLoadingPlaceholders: args.inspectLoadingPlaceholders,
           rejectLoadingPlaceholders: args.rejectLoadingPlaceholders,
           actionDigestKey: actionKey, renderedTextDigestKey: textKey,
-          buttonStateDigestKey: buttonStateKey});
+          buttonStateDigestKey: buttonStateKey, buttonA11yDigestKey: buttonA11yKey});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
