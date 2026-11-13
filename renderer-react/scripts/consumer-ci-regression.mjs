@@ -35,7 +35,7 @@ export function testConsumerCiStarter() {
   const workflow = readFileSync(resolve(repo, 'examples/consumer-ci/workflow.yml'), 'utf8');
   // The consumer uses a separate immutable checkout. Pin to the verified
   // source revision containing BOTH CLI parse and runtime diagnostic guards.
-  assert.match(workflow, /ref: 6fa9d19fcdd322a32c41c62e50ce4f3e59fc7850\b/,
+  assert.match(workflow, /ref: a743f944e0f0e17c17acb74ac46ac01e434d1622\b/,
     'Consumer checkout must pin the full one-pass focus and geometry runtime, not a prior comparator-only commit');
   assert.match(workflow, /--require-no-observed-failures --compare-rendered-text --compare-button-geometry --compare-button-focus --strict/,
     'Consumer CI must gate replay health, real rendered Text and Tab reachability');
