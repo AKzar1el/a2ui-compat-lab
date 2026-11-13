@@ -274,13 +274,12 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     const gatedButton = gatedBefore[2].updateComponents.components.find(component =>
       component.id === 'submit');
     gatedButton.checks = [{
-      call: 'required',
-      args: {value: {path: '/gate'}},
+      condition: {path: '/gate'},
       message: 'PRIVATE_GATE_REQUIRED',
     }];
-    gatedBefore[1].updateDataModel.value.gate = 'allowed';
+    gatedBefore[1].updateDataModel.value.gate = true;
     const gatedAfter = structuredClone(gatedBefore);
-    gatedAfter[1].updateDataModel.value.gate = '';
+    gatedAfter[1].updateDataModel.value.gate = false;
     const gateBeforePath = join(dir, 'private-button-enabled.jsonl');
     const gateAfterPath = join(dir, 'private-button-disabled.jsonl');
     const gateMatchPath = join(dir, 'private-button-state-match.json');
