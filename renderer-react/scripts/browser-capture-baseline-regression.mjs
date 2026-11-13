@@ -253,6 +253,18 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
       /PRIVATE_DIFFERENT_ACTION_DO_NOT_REPORT|private-renamed|alpha|selection|surfaceId|__[A-Za-z]*Digest|[a-f0-9]{64}/,
       'Both private signals must discard keys, hashes and capture values');
 
+    const dualTextPath = join(dir, 'dual-parity-text-drift.json');
+    const dualTextDrift = run(['--before-capture', capturePath,
+      '--after-capture', visibleChangePath, '--action-plan', baselinePath,
+      '--compare-actions', '--compare-rendered-text', '--strict', '--out', dualTextPath]);
+    assert.equal(dualTextDrift.status, 1, 'Combined replay must detect a private Text-only change');
+    const dualTextReport = JSON.parse(readFileSync(dualTextPath, 'utf8'));
+    assert.equal(dualTextReport.renderedTextParity, 'drift');
+    assert.equal(dualTextReport.firstDifferentRenderedTextEventIndex, 2);
+    assert.doesNotMatch(JSON.stringify(dualTextReport),
+      /PRIVATE_RENDERED_TEXT_DIFFERENCE|private-visible-after|alpha|selection|surfaceId|__[A-Za-z]*Digest|[a-f0-9]{64}/,
+      'Combined text drift must not disclose private rendered text or comparison keys');
+
     const unreachablePlanPath = join(dir, 'private-unreachable-plan.json');
     writeFileSync(unreachablePlanPath, JSON.stringify({...baseline,
       clickSingleButton: false, clickButtonIndex: 31}));
