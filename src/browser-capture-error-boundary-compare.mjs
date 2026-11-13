@@ -5,7 +5,7 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {compareBrowserCaptureSummaries} from './browser-capture-summary-compare.mjs';
 
-const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--require-no-observed-failures] [--out NEW-DIFF.json]';
+const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--require-no-observed-failures] [--format json|markdown|junit] [--out NEW-REPORT]';
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
 const RENDERER = '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0';
@@ -23,6 +23,8 @@ export function parseErrorBoundaryOptions(argv) {
     if (arg === '--strict' && !args.strict) args.strict = true;
     else if (arg === '--require-no-observed-failures' && !args.requireNoObservedFailures)
       args.requireNoObservedFailures = true;
+    else if (arg === '--format' && !Object.hasOwn(args, 'format') &&
+      ['json', 'markdown', 'junit'].includes(argv[i + 1])) args.format = argv[++i];
     else if (['--before-capture', '--after-capture', '--out'].includes(arg) &&
       !Object.hasOwn(args, arg.slice(2)) && argv[i + 1] &&
       !argv[i + 1].startsWith('--')) args[arg.slice(2)] = resolve(argv[++i]);
@@ -121,6 +123,61 @@ export function compareErrorBoundaries(before, after, {requireNoObservedFailures
   };
 }
 
+/** Only comparator-owned, fixed-schema values appear in these CI artifacts. */
+export function formatErrorBoundaryReport(result, format = 'json') {
+  if (!['json', 'markdown', 'junit'].includes(format) || !isRecord(result) ||
+      result.kind !== 'a2ui-react-capture-error-boundary-diff' ||
+      result.schemaVersion !== 1 || result.protocol !== 'v0.9' ||
+      result.renderer !== RENDERER || typeof result.ok !== 'boolean' ||
+      !['match', 'drift'].includes(result.eventCountParity) ||
+      !['match', 'drift'].includes(result.errorBoundaryParity) ||
+      (Object.hasOwn(result, 'observedFailuresAbsent') &&
+        (result.requireNoObservedFailures !== true ||
+          typeof result.observedFailuresAbsent !== 'boolean')))
+    throw invalid();
+  if (format === 'json') return JSON.stringify(result, null, 2) + '\n';
+  if (format === 'markdown') return [
+    '## A2UI Chromium first-error boundary comparison',
+    '',
+    '**Result:** ' + (result.ok ? 'MATCH' : 'DRIFT'),
+    '**Event counts:** ' + result.beforeEvents + ' before / ' + result.afterEvents + ' after',
+    '**Event count parity:** ' + result.eventCountParity.toUpperCase(),
+    '**Observed failure-boundary parity:** ' + result.errorBoundaryParity.toUpperCase(),
+    '**First observed failure event indices:** ' +
+      String(result.beforeFirstObservedFailureEventIndex) + ' before / ' +
+      String(result.afterFirstObservedFailureEventIndex) + ' after',
+    ...(result.requireNoObservedFailures ? [
+      '**Opt-in no-observed-failures policy:** ' +
+        (result.observedFailuresAbsent ? 'PASS' : 'FAIL'),
+    ] : []),
+    '',
+    '_Observed error boundaries do not prove cause or health; event metadata may be sensitive and is not anonymized._',
+    '',
+  ].join('\n');
+  const checks = [
+    {name: 'event-count-parity', pass: result.eventCountParity === 'match',
+      message: 'event count drift'},
+    {name: 'error-boundary-parity', pass: result.errorBoundaryParity === 'match',
+      message: 'observed error boundary drift'},
+    ...(result.requireNoObservedFailures ? [{
+      name: 'observed-failure-policy', pass: result.observedFailuresAbsent,
+      message: 'observed replay failures',
+    }] : []),
+  ];
+  // Every JUnit failure is a separate assertion, including two identical
+  // failing replays when the health policy is enabled.
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<testsuite name="a2ui-react-capture-error-boundary" tests="' + checks.length +
+      '" failures="' + checks.filter(check => !check.pass).length + '" errors="0">',
+    ...checks.map(check => '  <testcase classname="a2ui.react.error-boundary" name="' +
+      check.name + '"' + (check.pass ? ' />' : '><failure message="' +
+        check.message + '" /></testcase>')),
+    '</testsuite>',
+    '',
+  ].join('\n');
+}
+
 function exclusiveWrite(path, content) {
   try {
     mkdirSync(dirname(path), {recursive: true});
@@ -139,9 +196,9 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const after = runDiagnostic(args['after-capture']);
       const result = compareErrorBoundaries(before, after,
         {requireNoObservedFailures: args.requireNoObservedFailures});
-      const json = JSON.stringify(result, null, 2) + '\n';
-      if (args.out) exclusiveWrite(args.out, json);
-      else process.stdout.write(json);
+      const content = formatErrorBoundaryReport(result, args.format);
+      if (args.out) exclusiveWrite(args.out, content);
+      else process.stdout.write(content);
       if (args.strict && !result.ok) process.exitCode = 1;
     }
   } catch {
