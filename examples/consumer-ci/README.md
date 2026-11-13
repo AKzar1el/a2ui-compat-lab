@@ -22,8 +22,28 @@ before adapting the copied workflow:
 node src/consumer-version-preflight.mjs --manifest /path/to/your/package.json --protocol v0.9
 ```
 
+For npm applications with a root `package-lock.json` (v2/v3), opt into the
+stronger **offline lockfile metadata cross-check**:
+
+```sh
+node src/consumer-version-preflight.mjs --manifest /path/to/your/package.json --lockfile /path/to/your/package-lock.json --protocol v0.9
+```
+
+With `--lockfile`, exit 0 additionally requires the root lockfile's A2UI
+declarations to match the manifest and its direct
+`node_modules/@a2ui/react` and `node_modules/@a2ui/web_core` records to
+both say version `0.14.0` (not symlinked). A stale lockfile, missing direct
+package record, unsupported npm lockfile v1, or workspace-only lockfile
+fails closed with exit 1. Malformed/oversized lockfile input fails with
+exit 2. Package names, paths, resolution URLs and private manifest values
+never appear in the fixed-label report; the input lockfile is not uploaded.
+This check is for the **root npm application**, not an arbitrary monorepo
+subworkspace. It checks metadata, not actual installed files, npm peer
+resolution, browser-loaded code or capture contents. It makes no new
+claims about 0.15/v1.0 compatibility.
+
 Give the *real target application's* manifest and the **actual** capture
-protocol, not a guessed v0.9 value to make CI pass. This tool checks
+protocol, not a guessed v0.9 value to make CI pass. Without `--lockfile`, this tool checks
 manifest declarations only: 0 means both SDKs are explicitly pinned to
 0.14.0 and the declared protocol is v0.9; 1 means unsupported or
 unverifiable and requires review; 2 means invalid input. It emits a
