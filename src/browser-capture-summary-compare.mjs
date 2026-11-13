@@ -5,7 +5,7 @@ import {lstatSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
-const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs (--before OLD.json | --before-capture PRIVATE-OLD.jsonl) (--after NEW.json | --after-capture PRIVATE-NEW.jsonl) [--action-plan SAVED-VETTED-REPORT.json] [--compare-actions | --compare-rendered-text] [--strict] [--format json|markdown|junit] [--out NEW-DIFF.json|summary.md|report.xml]';
+const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs (--before OLD.json | --before-capture PRIVATE-OLD.jsonl) (--after NEW.json | --after-capture PRIVATE-NEW.jsonl) [--action-plan SAVED-VETTED-REPORT.json] [--compare-actions] [--compare-rendered-text] [--compare-button-state] [--strict] [--format json|markdown|junit] [--out NEW-DIFF.json|summary.md|report.xml]';
 const MAX_BYTES = 256 * 1024;
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
@@ -172,11 +172,16 @@ function markdownComparisonReport(diff, before, after) {
       diff.actionPayloadParity.toUpperCase()] : []),
     ...(diff.renderedTextParity ? ['**Private rendered text parity:** ' +
       diff.renderedTextParity.toUpperCase()] : []),
+    ...(diff.buttonStateParity ? ['**Private Button enablement parity:** ' +
+      diff.buttonStateParity.toUpperCase()] : []),
     ...(Number.isSafeInteger(diff.firstDifferentActionIndex)
       ? ['**First differing planned action (0-based):** ' + diff.firstDifferentActionIndex] : []),
     ...(Number.isSafeInteger(diff.firstDifferentRenderedTextEventIndex)
       ? ['**First differing rendered-text event (0-based):** ' +
         diff.firstDifferentRenderedTextEventIndex] : []),
+    ...(Number.isSafeInteger(diff.firstDifferentButtonStateEventIndex)
+      ? ['**First differing Button-state event (0-based):** ' +
+        diff.firstDifferentButtonStateEventIndex] : []),
     '**Changed event steps:** ' + diff.differingSteps,
     '',
     '| Event index | Structural changes (before -> after) |',
@@ -211,7 +216,10 @@ function junitComparisonReport(diff, before, after) {
           '; first differing planned action index: ' + diff.firstDifferentActionIndex : '') +
         (Number.isSafeInteger(diff.firstDifferentRenderedTextEventIndex) ?
           '; first differing rendered-text event index: ' +
-          diff.firstDifferentRenderedTextEventIndex : '')) +
+          diff.firstDifferentRenderedTextEventIndex : '') +
+        (Number.isSafeInteger(diff.firstDifferentButtonStateEventIndex) ?
+          '; first differing Button-state event index: ' +
+          diff.firstDifferentButtonStateEventIndex : '')) +
       '</failure>');
   }
   lines.push('  </testcase>');
@@ -236,13 +244,16 @@ function junitComparisonReport(diff, before, after) {
 
 export function parseBrowserCaptureSummaryCompareOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const options = {strict: false, compareActions: false, compareRenderedText: false};
+  const options = {strict: false, compareActions: false, compareRenderedText: false,
+    compareButtonState: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !options.strict) options.strict = true;
     else if (arg === '--compare-actions' && !options.compareActions) options.compareActions = true;
     else if (arg === '--compare-rendered-text' && !options.compareRenderedText)
       options.compareRenderedText = true;
+    else if (arg === '--compare-button-state' && !options.compareButtonState)
+      options.compareButtonState = true;
     else if (arg === '--format' && !Object.hasOwn(options, 'format') &&
       ['json', 'markdown', 'junit'].includes(argv[i + 1])) options.format = argv[++i];
     else if (['--before', '--before-capture', '--after', '--after-capture', '--action-plan', '--out'].includes(arg) &&
@@ -257,6 +268,8 @@ export function parseBrowserCaptureSummaryCompareOptions(argv) {
       (options.compareActions && (!options['before-capture'] || !options['after-capture'] ||
         !options['action-plan'])) ||
       (options.compareRenderedText && (!options['before-capture'] || !options['after-capture'] ||
+        (options['action-plan'] && !options.compareActions))) ||
+      (options.compareButtonState && (!options['before-capture'] || !options['after-capture'] ||
         (options['action-plan'] && !options.compareActions))))
     throw new Error(USAGE);
   return options;
@@ -274,19 +287,22 @@ function readReport(path) {
   }
 }
 
-function replayPrivateCapture(inputPath, baseline, actionDigestKey = null, textDigestKey = null) {
+function replayPrivateCapture(inputPath, baseline, actionDigestKey = null,
+  textDigestKey = null, buttonStateDigestKey = null) {
   const args = baseline ? browserCaptureReplayArguments(baseline) : [];
   let child;
   try {
     child = spawnSync(process.execPath, [RENDERER_SCRIPT, '--input', inputPath, ...args,
       ...(actionDigestKey ? ['--internal-action-digest'] : []),
-      ...(textDigestKey ? ['--internal-rendered-text-digest'] : [])], {
+      ...(textDigestKey ? ['--internal-rendered-text-digest'] : []),
+      ...(buttonStateDigestKey ? ['--internal-button-state-digest'] : [])], {
       cwd: RENDERER_DIR, shell: false, windowsHide: true,
       encoding: 'utf8', maxBuffer: MAX_BYTES, timeout: 120000,
       // One fresh key is shared by the two children, never logged or saved.
-      ...((actionDigestKey || textDigestKey) ? {env: {...process.env,
+      ...((actionDigestKey || textDigestKey || buttonStateDigestKey) ? {env: {...process.env,
         ...(actionDigestKey ? {A2UI_PRIVATE_ACTION_DIGEST_KEY: actionDigestKey} : {}),
-        ...(textDigestKey ? {A2UI_PRIVATE_RENDERED_TEXT_DIGEST_KEY: textDigestKey} : {})}} : {}),
+        ...(textDigestKey ? {A2UI_PRIVATE_RENDERED_TEXT_DIGEST_KEY: textDigestKey} : {}),
+        ...(buttonStateDigestKey ? {A2UI_PRIVATE_BUTTON_STATE_DIGEST_KEY: buttonStateDigestKey} : {})}} : {}),
     });
   } catch {
     throw invalid();
@@ -300,6 +316,7 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null, textD
     let actionDigest = null;
     let actionDigests = null;
     let renderedTextDigests = null;
+    let buttonStateDigests = null;
     if (actionDigestKey) {
       if (!isRecord(parsed) || !/^[a-f0-9]{64}$/.test(parsed.__privateActionDigest) ||
           !Array.isArray(parsed.__privateActionDigests) ||
@@ -322,7 +339,17 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null, textD
       renderedTextDigests = digests;
       delete parsed.__privateRenderedTextDigests;
     }
-    return {report: validate(parsed), actionDigest, actionDigests, renderedTextDigests};
+    if (buttonStateDigestKey) {
+      const digests = parsed.__privateButtonStateDigests;
+      if (!Array.isArray(digests) || digests.length !== parsed.events ||
+          digests.length > MAX_EVENTS || digests.some(value =>
+            typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)))
+        throw invalid();
+      buttonStateDigests = digests;
+      delete parsed.__privateButtonStateDigests;
+    }
+    return {report: validate(parsed), actionDigest, actionDigests, renderedTextDigests,
+      buttonStateDigests};
   } catch {
     throw invalid();
   }
@@ -348,13 +375,18 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       if (actionPlan && actionPlan.actionsVerified < 1) throw invalid();
       const actionDigestKey = args.compareActions ? randomBytes(32).toString('hex') : null;
       const textDigestKey = args.compareRenderedText ? randomBytes(32).toString('hex') : null;
+      const buttonStateDigestKey = args.compareButtonState ? randomBytes(32).toString('hex') : null;
       const beforeRun = args['before-capture']
-        ? replayPrivateCapture(args['before-capture'], actionPlan, actionDigestKey, textDigestKey)
-        : {report: readReport(args.before), actionDigest: null, actionDigests: null, renderedTextDigests: null};
+        ? replayPrivateCapture(args['before-capture'], actionPlan, actionDigestKey, textDigestKey,
+          buttonStateDigestKey)
+        : {report: readReport(args.before), actionDigest: null, actionDigests: null,
+          renderedTextDigests: null, buttonStateDigests: null};
       const baseline = beforeRun.report;
       const afterRun = args['after-capture']
-        ? replayPrivateCapture(args['after-capture'], baseline, actionDigestKey, textDigestKey)
-        : {report: readReport(args.after), actionDigest: null, actionDigests: null, renderedTextDigests: null};
+        ? replayPrivateCapture(args['after-capture'], baseline, actionDigestKey, textDigestKey,
+          buttonStateDigestKey)
+        : {report: readReport(args.after), actionDigest: null, actionDigests: null,
+          renderedTextDigests: null, buttonStateDigests: null};
       const observed = afterRun.report;
       const result = compareBrowserCaptureSummaries(baseline, observed);
       if (actionDigestKey) {
@@ -385,6 +417,19 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           result.changedSummaryFields.push('renderedTextParity');
         }
         result.note = 'Opt-in rendered-text equality in real Chromium; no reusable hashes or private values are exported';
+      }
+      if (buttonStateDigestKey) {
+        const oldStates = beforeRun.buttonStateDigests;
+        const newStates = afterRun.buttonStateDigests;
+        const first = Array.from({length: Math.max(oldStates.length, newStates.length)},
+          (_, index) => index).find(index => oldStates[index] !== newStates[index]);
+        result.buttonStateParity = first === undefined ? 'match' : 'drift';
+        if (first !== undefined) {
+          result.firstDifferentButtonStateEventIndex = first;
+          result.ok = false;
+          result.changedSummaryFields.push('buttonStateParity');
+        }
+        result.note = 'Opt-in real Chromium Button enabled-state equality; no reusable digests or private values exported';
       }
       const content = args.format === 'markdown' ? markdownComparisonReport(result, baseline, observed) :
         args.format === 'junit' ? junitComparisonReport(result, baseline, observed) :

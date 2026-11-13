@@ -265,6 +265,63 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
       /PRIVATE_RENDERED_TEXT_DIFFERENCE|private-visible-after|alpha|selection|surfaceId|__[A-Za-z]*Digest|[a-f0-9]{64}/,
       'Combined text drift must not disclose private rendered text or comparison keys');
 
+    // Published v0.9 Button checks can disable activation without changing
+    // visible Text or the number of rendered controls. This is a consumer-
+    // visible interaction regression that structural/text parity must not hide.
+    // Seed the private gate before mounting the Button so validation never
+    // observes an unresolved model path during component creation.
+    const gatedBefore = [JSON.parse(lines[0]), JSON.parse(lines[2]), JSON.parse(lines[1])];
+    const gatedButton = gatedBefore[2].updateComponents.components.find(component =>
+      component.id === 'submit');
+    gatedButton.checks = [{
+      condition: {path: '/gate'},
+      message: 'PRIVATE_GATE_REQUIRED',
+    }];
+    gatedBefore[1].updateDataModel.value.gate = true;
+    const gatedAfter = structuredClone(gatedBefore);
+    gatedAfter[1].updateDataModel.value.gate = false;
+    const gateBeforePath = join(dir, 'private-button-enabled.jsonl');
+    const gateAfterPath = join(dir, 'private-button-disabled.jsonl');
+    const gateMatchPath = join(dir, 'private-button-state-match.json');
+    const gateDiffPath = join(dir, 'private-button-state-diff.json');
+    writeFileSync(gateBeforePath, gatedBefore.map(x => JSON.stringify(x)).join('\n') + '\n');
+    writeFileSync(gateAfterPath, gatedAfter.map(x => JSON.stringify(x)).join('\n') + '\n');
+
+    const textOnlyGate = run(['--before-capture', gateBeforePath, '--after-capture',
+      gateAfterPath, '--compare-rendered-text', '--strict']);
+    assert.equal(textOnlyGate.status, 0,
+      'Text parity alone cannot detect Button enabled-state changes');
+    assert.equal(JSON.parse(textOnlyGate.stdout).renderedTextParity, 'match');
+
+    const stateMatch = run(['--before-capture', gateBeforePath,
+      '--after-capture', gateBeforePath, '--compare-button-state', '--strict',
+      '--out', gateMatchPath]);
+    assert.equal(stateMatch.status, 0, 'Identical Button enablement must match');
+    const matchedState = JSON.parse(readFileSync(gateMatchPath, 'utf8'));
+    assert.equal(matchedState.buttonStateParity, 'match');
+    assert.equal(matchedState.ok, true);
+
+    const stateDrift = run(['--before-capture', gateBeforePath,
+      '--after-capture', gateAfterPath, '--compare-button-state', '--strict',
+      '--out', gateDiffPath]);
+    assert.equal(stateDrift.status, 1,
+      'Real Chromium must detect disabled Button when text and counts match');
+    const changedState = JSON.parse(readFileSync(gateDiffPath, 'utf8'));
+    assert.equal(changedState.buttonStateParity, 'drift');
+    assert.equal(changedState.firstDifferentButtonStateEventIndex, 2);
+    assert.deepEqual(changedState.changedSummaryFields, ['buttonStateParity']);
+    assert.equal(changedState.differingSteps, 0);
+    assert.doesNotMatch(JSON.stringify(changedState),
+      /PRIVATE_GATE_REQUIRED|private-button-disabled|private-button-enabled|gate|allowed|surfaceId|__private|[a-f0-9]{64}/,
+      'Only bounded event indices and fixed enum fields may leave the process');
+
+    const invalidGateMode = run(['--before', baselinePath,
+      '--after-capture', gateAfterPath, '--compare-button-state']);
+    assert.equal(invalidGateMode.status, 2,
+      'Button-state comparison is only valid between two private captures');
+    assert.equal(invalidGateMode.stdout, '');
+    assert.doesNotMatch(invalidGateMode.stderr, /private-button-disabled|PRIVATE_GATE_REQUIRED/);
+
     const unreachablePlanPath = join(dir, 'private-unreachable-plan.json');
     writeFileSync(unreachablePlanPath, JSON.stringify({...baseline,
       clickSingleButton: false, clickButtonIndex: 31}));

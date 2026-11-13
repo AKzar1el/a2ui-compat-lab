@@ -32,7 +32,8 @@ export function parseBrowserCaptureOptions(argv) {
   const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
     clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null,
     actionSteps: [], stopAfterEventIndex: null, reportFirstError: false, inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
-    internalActionDigest: false, internalRenderedTextDigest: false};
+    internalActionDigest: false, internalRenderedTextDigest: false,
+    internalButtonStateDigest: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -60,6 +61,8 @@ export function parseBrowserCaptureOptions(argv) {
       parsed.internalActionDigest = true;
     } else if (arg === '--internal-rendered-text-digest' && !parsed.internalRenderedTextDigest) {
       parsed.internalRenderedTextDigest = true;
+    } else if (arg === '--internal-button-state-digest' && !parsed.internalButtonStateDigest) {
+      parsed.internalButtonStateDigest = true;
     } else if (arg === '--report-first-error' && !parsed.reportFirstError) {
       parsed.reportFirstError = true;
     } else if (arg === '--inspect-loading-placeholders' && !parsed.inspectLoadingPlaceholders) {
@@ -86,7 +89,8 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.reportFirstError && (actionModes !== 0 || parsed.actionSteps.length > 0 ||
         parsed.stopAfterEventIndex !== null || parsed.actionAfterEventIndex !== null ||
         parsed.inspectLoadingPlaceholders || parsed.rejectLoadingPlaceholders ||
-        parsed.internalActionDigest || parsed.internalRenderedTextDigest)) ||
+        parsed.internalActionDigest || parsed.internalRenderedTextDigest ||
+        parsed.internalButtonStateDigest)) ||
       parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
         (i > 0 && step.eventIndex < parsed.actionSteps[i - 1].eventIndex)))
     throw new Error(USAGE);
@@ -140,7 +144,8 @@ export async function runBrowserCapture(messages, {
   clickButtonIndex = null, pressButtonIndexEnter = null, actionAfterEventIndex = null,
   actionSteps = [], stopAfterEventIndex = null, reportFirstError = false,
   inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
-  actionDigestKey = null, renderedTextDigestKey = null, surfaceErrorProbe = false,
+  actionDigestKey = null, renderedTextDigestKey = null, buttonStateDigestKey = null,
+  surfaceErrorProbe = false,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
@@ -148,6 +153,8 @@ export async function runBrowserCapture(messages, {
     throw new Error('Invalid internal action digest key');
   if (renderedTextDigestKey !== null && !/^[a-f0-9]{64}$/.test(renderedTextDigestKey))
     throw new Error('Invalid internal rendered text digest key');
+  if (buttonStateDigestKey !== null && !/^[a-f0-9]{64}$/.test(buttonStateDigestKey))
+    throw new Error('Invalid internal Button-state digest key');
   if (typeof reportFirstError !== 'boolean')
     throw new Error('Invalid first-error reporting mode');
   if (typeof surfaceErrorProbe !== 'boolean')
@@ -184,7 +191,7 @@ export async function runBrowserCapture(messages, {
   if (reportFirstError && (actionModes !== 0 || actionSteps.length > 0 ||
       stopAfterEventIndex !== null || actionAfterEventIndex !== null ||
       inspectLoadingPlaceholders || rejectLoadingPlaceholders || actionDigestKey !== null ||
-      renderedTextDigestKey !== null))
+      renderedTextDigestKey !== null || buttonStateDigestKey !== null))
     throw new Error('Error-event diagnostics cannot activate controls or combine replay modes');
   const replayedMessages = stopAfterEventIndex === null
     ? messages : messages.slice(0, stopAfterEventIndex + 1);
@@ -287,6 +294,7 @@ export async function runBrowserCapture(messages, {
     const trackLoadingPlaceholders = inspectLoadingPlaceholders || rejectLoadingPlaceholders;
     let loadingPlaceholderEvents = 0;
     const renderedTextDigests = [];
+    const buttonStateDigests = [];
     for (let index = 0; index < replayedMessages.length; index++) {
       currentEventIndex = index;
       const message = replayedMessages[index];
@@ -328,6 +336,18 @@ export async function runBrowserCapture(messages, {
           throw new Error('Browser capture visible text exceeded the comparison limit');
         renderedTextDigests.push(createHmac('sha256', Buffer.from(renderedTextDigestKey, 'hex'))
           .update(visibleText, 'utf8').digest('hex'));
+      }
+      if (buttonStateDigestKey) {
+        // Snapshot actual accessible Button control enablement at the agent
+        // event boundary. Do not read labels, IDs, attributes or input values.
+        const disabledStates = await page.getByRole('button').evaluateAll(buttons =>
+          buttons.map(button => button.matches(':disabled') ||
+            button.getAttribute('aria-disabled') === 'true'));
+        if (disabledStates.length > MAX_BUTTON_INDEX + 1)
+          throw new Error('Browser capture Button-state comparison exceeded limit');
+        buttonStateDigests.push(createHmac('sha256',
+          Buffer.from(buttonStateDigestKey, 'hex'))
+          .update(JSON.stringify(disabledStates)).digest('hex'));
       }
       steps.push({
         ...(trackLoadingPlaceholders ? {loadingPlaceholderCount} : {}),
@@ -386,6 +406,7 @@ export async function runBrowserCapture(messages, {
             .update(canonicalActionJSON(action)).digest('hex')),
       } : {}),
       ...(renderedTextDigestKey ? {__privateRenderedTextDigests: renderedTextDigests} : {}),
+      ...(buttonStateDigestKey ? {__privateButtonStateDigests: buttonStateDigests} : {}),
       ...(reportFirstError ? {firstObservedFailureEventIndex: null} : {}),
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
     };
@@ -427,10 +448,14 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
         ? process.env.A2UI_PRIVATE_ACTION_DIGEST_KEY : null;
       const textKey = args.internalRenderedTextDigest
         ? process.env.A2UI_PRIVATE_RENDERED_TEXT_DIGEST_KEY : null;
-      if ((args.internalActionDigest || args.internalRenderedTextDigest) &&
+      const buttonStateKey = args.internalButtonStateDigest
+        ? process.env.A2UI_PRIVATE_BUTTON_STATE_DIGEST_KEY : null;
+      if ((args.internalActionDigest || args.internalRenderedTextDigest ||
+          args.internalButtonStateDigest) &&
           (args.out ||
             (args.internalActionDigest && !/^[a-f0-9]{64}$/.test(actionKey ?? '')) ||
-            (args.internalRenderedTextDigest && !/^[a-f0-9]{64}$/.test(textKey ?? ''))))
+            (args.internalRenderedTextDigest && !/^[a-f0-9]{64}$/.test(textKey ?? '')) ||
+            (args.internalButtonStateDigest && !/^[a-f0-9]{64}$/.test(buttonStateKey ?? ''))))
         throw new Error('Internal comparison digest must be pipe-only with valid ephemeral keys');
       const report = await runBrowserCapture(readCapture(args.input),
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
@@ -439,7 +464,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           stopAfterEventIndex: args.stopAfterEventIndex, reportFirstError: args.reportFirstError,
           inspectLoadingPlaceholders: args.inspectLoadingPlaceholders,
           rejectLoadingPlaceholders: args.rejectLoadingPlaceholders,
-          actionDigestKey: actionKey, renderedTextDigestKey: textKey});
+          actionDigestKey: actionKey, renderedTextDigestKey: textKey,
+          buttonStateDigestKey: buttonStateKey});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);

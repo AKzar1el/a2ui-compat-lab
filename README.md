@@ -236,6 +236,39 @@ bit and event chronology are still potentially sensitive; this is **not**
 anonymization or a guarantee that no secrets can be inferred. Inspect output
 before sharing it publicly.
 
+### Detect Button enablement changes that text parity misses
+
+A v0.9 Button's validation checks may disable it while the UI still displays
+the same text and Button count. For example, a private form field can become
+invalid, leaving a visible but non-activatable Submit Button. Structural and
+rendered-text equality do not detect that interaction regression.
+
+Use opt-in, real React/Chromium Button-state parity on two developer-owned
+private JSONL captures:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --compare-button-state --strict --out button-state-diff.json
+```
+
+For every agent-event boundary, the comparison observes the ordered enabled/
+disabled states of up to 32 accessible Buttons (native :disabled or
+aria-disabled="true") in the mounted surface. A separate fresh per-run
+HMAC key protects transient fingerprints; no labels, IDs, model values, private
+paths or reusable digests appear in the fixed-schema JSON/Markdown/JUnit output.
+Only `buttonStateParity: match|drift` and, on drift,
+`firstDifferentButtonStateEventIndex` (zero-based) are added.
+The index is an observation boundary, not proof of cause. The report remains
+potentially sensitive and is **not anonymized**.
+
+Without an explicit reviewed action plan, no Button is activated. This option
+can be combined with `--compare-rendered-text`; to replay approved
+actions and compare their payloads in the same sessions, additionally supply
+`--action-plan SAVED-REPORT.json --compare-actions`. Saved-report-only
+comparisons and unapproved action plans are refused. The state snapshot occurs
+before any planned Button action at that event; it is **not** a comprehensive
+accessibility audit, focus/keyboard test, CSS comparison, or input-field validator.
+Only the existing compatible published React/core 0.14.0 pair is tested.
+
 For a readable, value-free GitHub Actions step summary, opt into Markdown output
 from the same validated structural comparison (the default remains JSON):
 
