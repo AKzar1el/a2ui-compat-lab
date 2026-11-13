@@ -76,6 +76,24 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
       /private-error|selection|alpha|surfaceId|stack|__private/,
       'Policy failure must not disclose private capture values');
 
+    // JUnit CI ingestion must fail when the new no-observed-failures policy
+    // rejects two equally broken Chromium replays, without private details.
+    const unhealthyJUnit = runErrorCompare(['--before-capture', thirdFailurePath,
+      '--after-capture', thirdFailurePath, '--require-no-observed-failures',
+      '--strict', '--format', 'junit']);
+    assert.equal(unhealthyJUnit.status, 1,
+      'A matching failure must be represented as a failing JUnit suite');
+    assert.match(unhealthyJUnit.stdout, /<testsuite[^>]*failures="1"/);
+    assert.match(unhealthyJUnit.stdout, /<failure message="observed replay failures"/);
+    assert.doesNotMatch(unhealthyJUnit.stdout,
+      /private-error|selection|alpha|surfaceId|stack|__private/);
+    const healthyJUnit = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', capturePath, '--require-no-observed-failures',
+      '--strict', '--format', 'junit']);
+    assert.equal(healthyJUnit.status, 0);
+    assert.match(healthyJUnit.stdout, /<testsuite[^>]*failures="0"/);
+    assert.doesNotMatch(healthyJUnit.stdout, /<failure\b/);
+
     const cleanRequired = runErrorCompare(['--before-capture', capturePath,
       '--after-capture', capturePath, '--require-no-observed-failures', '--strict']);
     assert.equal(cleanRequired.status, 0);
