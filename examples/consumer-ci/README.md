@@ -11,16 +11,16 @@ both captures replay without errors. The replay-health, rendered-Text, Button-ge
 The browser starter validates the **published React/core 0.14.0 pair and
 v0.9 captures only**. An external A2UI v1.0 consumer, for example the public
 [Kaltura A2UI catalog](https://github.com/kaltura/kaltura-a2ui-components/blob/main/package.json)
-which declares \`@a2ui/react@^0.15.0\` and \`@a2ui/web_core@^0.15.0\`,
+which declares `@a2ui/react@^0.15.0` and `@a2ui/web_core@^0.15.0`,
 is **outside this tested lane**. A green test here does not validate
 Kaltura or any other 0.15 renderer.
 
 Use the offline, no-install manifest preflight from a fresh lab checkout
 before adapting the copied workflow:
 
-\`\`\`sh
+```sh
 node src/consumer-version-preflight.mjs --manifest /path/to/your/package.json --protocol v0.9
-\`\`\`
+```
 
 Give the *real target application's* manifest and the **actual** capture
 protocol, not a guessed v0.9 value to make CI pass. This tool checks
