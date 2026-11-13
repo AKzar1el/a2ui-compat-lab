@@ -315,6 +315,76 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
       /PRIVATE_GATE_REQUIRED|private-button-disabled|private-button-enabled|gate|allowed|surfaceId|__private|[a-f0-9]{64}/,
       'Only bounded event indices and fixed enum fields may leave the process');
 
+    // The published v0.9 accessibility label may change the Button's
+    // screen-reader name without changing visible Text, Button count, state,
+    // or action payloads. Compare actual Chromium accessibility snapshots.
+    const labelBefore = lines.map(line => JSON.parse(line));
+    const labeledButton = labelBefore[1].updateComponents.components.find(component =>
+      component.id === 'submit');
+    assert.ok(labeledButton);
+    labeledButton.accessibility = {label: 'PRIVATE_ASSISTIVE_NAME_BEFORE'};
+    const labelAfter = structuredClone(labelBefore);
+    labelAfter[1].updateComponents.components.find(component =>
+      component.id === 'submit').accessibility.label = 'PRIVATE_ASSISTIVE_NAME_AFTER';
+    const labelBeforePath = join(dir, 'private-label-before.jsonl');
+    const labelAfterPath = join(dir, 'private-label-after.jsonl');
+    writeFileSync(labelBeforePath, labelBefore.map(x => JSON.stringify(x)).join('\n') + '\n');
+    writeFileSync(labelAfterPath, labelAfter.map(x => JSON.stringify(x)).join('\n') + '\n');
+    const labelTextOnly = run(['--before-capture', labelBeforePath,
+      '--after-capture', labelAfterPath, '--compare-rendered-text', '--strict']);
+    assert.equal(labelTextOnly.status, 0,
+      'Changing accessible Button labels must not alter visible Text');
+    const labelMatchPath = join(dir, 'a11y-label-match.json');
+    const labelMatch = run(['--before-capture', labelBeforePath,
+      '--after-capture', labelBeforePath, '--compare-button-a11y', '--strict',
+      '--out', labelMatchPath]);
+    assert.equal(labelMatch.status, 0, 'Identical real Chromium Button accessibility must match');
+    assert.equal(JSON.parse(readFileSync(labelMatchPath, 'utf8')).buttonA11yParity, 'match');
+    const labelDiffPath = join(dir, 'a11y-label-diff.json');
+    const labelDiff = run(['--before-capture', labelBeforePath,
+      '--after-capture', labelAfterPath, '--compare-button-a11y', '--strict',
+      '--out', labelDiffPath]);
+    assert.equal(labelDiff.status, 1,
+      'Declared Button-label drift must be detected even if the pinned renderer ignores it');
+    const labelReport = JSON.parse(readFileSync(labelDiffPath, 'utf8'));
+    assert.equal(labelReport.buttonA11yParity, 'match',
+      'Published React 0.14 does not reflect this explicit v0.9 Button label in the a11y tree');
+    assert.equal(labelReport.declaredButtonA11yParity, 'drift');
+    assert.equal(labelReport.firstDifferentDeclaredButtonA11yEventIndex, 1);
+    assert.deepEqual(labelReport.changedSummaryFields, ['declaredButtonA11yParity']);
+    assert.equal(labelReport.differingSteps, 0);
+    assert.doesNotMatch(JSON.stringify(labelReport),
+      /PRIVATE_ASSISTIVE_NAME|private-label-|__private|[a-f0-9]{64}/,
+      'Comparison must never expose private a11y labels, input paths or digests');
+
+    // Private surface IDs are capture-local, not assistive semantics. A
+    // capture with another surface ID but identical Button labels must match.
+    const renamedSurface = structuredClone(labelBefore);
+    const privateOldId = renamedSurface[0].createSurface.surfaceId;
+    for (const event of renamedSurface) {
+      for (const operation of ['createSurface', 'updateComponents', 'updateDataModel']) {
+        if (event[operation]?.surfaceId === privateOldId)
+          event[operation].surfaceId = 'DIFFERENT_PRIVATE_SURFACE_ID';
+      }
+    }
+    const renamedSurfacePath = join(dir, 'private-renamed-surface.jsonl');
+    writeFileSync(renamedSurfacePath, renamedSurface.map(x => JSON.stringify(x)).join('\n') + '\n');
+    const idOnlyMatch = run(['--before-capture', labelBeforePath,
+      '--after-capture', renamedSurfacePath, '--compare-button-a11y', '--strict']);
+    assert.equal(idOnlyMatch.status, 0, 'ID-only changes must not cause Button accessibility drift');
+    const idOnlyReport = JSON.parse(idOnlyMatch.stdout);
+    assert.equal(idOnlyReport.declaredButtonA11yParity, 'match');
+    assert.equal(idOnlyReport.buttonA11yParity, 'match');
+    assert.doesNotMatch(idOnlyMatch.stdout, /DIFFERENT_PRIVATE_SURFACE_ID|PRIVATE_ASSISTIVE_NAME/);
+
+    const invalidA11yMode = run(['--before', baselinePath,
+      '--after-capture', labelAfterPath, '--compare-button-a11y']);
+    assert.equal(invalidA11yMode.status, 2,
+      'Accessibility parity must refuse a saved report versus a private capture');
+    assert.equal(invalidA11yMode.stdout, '');
+    assert.doesNotMatch(invalidA11yMode.stderr,
+      /private-label-after|PRIVATE_ASSISTIVE_NAME_AFTER/);
+
     const invalidGateMode = run(['--before', baselinePath,
       '--after-capture', gateAfterPath, '--compare-button-state']);
     assert.equal(invalidGateMode.status, 2,
