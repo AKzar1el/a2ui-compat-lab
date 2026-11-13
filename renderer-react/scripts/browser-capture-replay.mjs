@@ -301,6 +301,8 @@ export async function runBrowserCapture(messages, {
     const renderedTextDigests = [];
     const buttonStateDigests = [];
     const buttonA11yDigests = [];
+    const declaredButtonA11yDigests = [];
+    const declaredLabelsBySurface = new Map();
     for (let index = 0; index < replayedMessages.length; index++) {
       currentEventIndex = index;
       const message = replayedMessages[index];
@@ -356,6 +358,33 @@ export async function runBrowserCapture(messages, {
           .update(JSON.stringify(disabledStates)).digest('hex'));
       }
       if (buttonA11yDigestKey) {
+        // Hash A2UI's declared accessibility labels separately from the
+        // actual Chromium accessibility tree. A pinned renderer may ignore
+        // one of these labels; source drift must not be called DOM drift.
+        if (operation === 'createSurface')
+          declaredLabelsBySurface.set(message.createSurface.surfaceId, new Map());
+        if (operation === 'updateComponents' &&
+            Array.isArray(message.updateComponents.components)) {
+          const surface = message.updateComponents.surfaceId;
+          const labels = declaredLabelsBySurface.get(surface) ?? new Map();
+          for (const component of message.updateComponents.components) {
+            if (component?.component !== 'Button') continue;
+            if (Object.hasOwn(component.accessibility ?? {}, 'label'))
+              labels.set(component.id, component.accessibility.label);
+            else labels.delete(component.id);
+          }
+          declaredLabelsBySurface.set(surface, labels);
+        }
+        if (operation === 'deleteSurface')
+          declaredLabelsBySurface.delete(message.deleteSurface.surfaceId);
+        const declared = [...declaredLabelsBySurface.entries()]
+          .sort(([a], [b]) => String(a).localeCompare(String(b)))
+          .map(([surface, labels]) => [surface, [...labels.entries()]
+            .sort(([a], [b]) => String(a).localeCompare(String(b)))]);
+        declaredButtonA11yDigests.push(createHmac('sha256',
+          Buffer.from(buttonA11yDigestKey, 'hex'))
+          .update('declared-button-accessibility-v1:')
+          .update(JSON.stringify(declared)).digest('hex'));
         // Playwright's accessibility snapshot contains private accessible
         // names. HMAC each ordered Button snapshot in memory, never the report.
         const buttons = await page.getByRole('button').all();
@@ -433,7 +462,8 @@ export async function runBrowserCapture(messages, {
       } : {}),
       ...(renderedTextDigestKey ? {__privateRenderedTextDigests: renderedTextDigests} : {}),
       ...(buttonStateDigestKey ? {__privateButtonStateDigests: buttonStateDigests} : {}),
-      ...(buttonA11yDigestKey ? {__privateButtonA11yDigests: buttonA11yDigests} : {}),
+      ...(buttonA11yDigestKey ? {__privateButtonA11yDigests: buttonA11yDigests,
+        __privateDeclaredButtonA11yDigests: declaredButtonA11yDigests} : {}),
       ...(reportFirstError ? {firstObservedFailureEventIndex: null} : {}),
       note: 'Real local Chromium renderer; counts/operation order only, not anonymity or SDK parity',
     };
