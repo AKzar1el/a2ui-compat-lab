@@ -8,7 +8,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ...] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -30,7 +30,7 @@ export function parseBrowserCaptureOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
     clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null,
-    actionSteps: [], inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
+    actionSteps: [], stopAfterEventIndex: null, inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
     internalActionDigest: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -46,6 +46,9 @@ export function parseBrowserCaptureOptions(argv) {
     } else if (arg === '--action-after-event-index' &&
       /^(0|[1-9][0-9]?)$/.test(argv[i + 1] ?? '') && parsed.actionAfterEventIndex === null) {
       parsed.actionAfterEventIndex = Number(argv[++i]);
+    } else if (arg === '--stop-after-event-index' &&
+      /^(0|[1-9][0-9]?)$/.test(argv[i + 1] ?? '') && parsed.stopAfterEventIndex === null) {
+      parsed.stopAfterEventIndex = Number(argv[++i]);
     } else if (arg === '--action-step' &&
       /^(0|[1-9][0-9]?):(0|[1-9][0-9]?):(click|enter|space)$/.test(argv[i + 1] ?? '')) {
       const [, eventIndex, buttonIndex, mode] =
@@ -73,6 +76,8 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX) ||
       parsed.actionSteps.length > MAX_ACTION_STEPS ||
       (parsed.actionSteps.length > 0 && (actionModes !== 0 || parsed.actionAfterEventIndex !== null)) ||
+      (parsed.stopAfterEventIndex !== null &&
+        (actionModes !== 0 || parsed.actionSteps.length > 0 || parsed.actionAfterEventIndex !== null)) ||
       parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
         (i > 0 && step.eventIndex < parsed.actionSteps[i - 1].eventIndex)))
     throw new Error(USAGE);
@@ -124,7 +129,8 @@ function readCapture(input) {
 export async function runBrowserCapture(messages, {
   clickSingleButton = false, pressSingleButtonEnter = false,
   clickButtonIndex = null, pressButtonIndexEnter = null, actionAfterEventIndex = null,
-  actionSteps = [], inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
+  actionSteps = [], stopAfterEventIndex = null,
+  inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
   actionDigestKey = null, surfaceErrorProbe = false,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
@@ -155,7 +161,16 @@ export async function runBrowserCapture(messages, {
       (!Number.isSafeInteger(actionAfterEventIndex) || actionAfterEventIndex < 0 ||
        actionAfterEventIndex >= messages.length || actionModes !== 1))
     throw new Error('Invalid browser action event index or missing action mode');
-  if (!messages.some(message => message && typeof message === 'object' &&
+  if (stopAfterEventIndex !== null &&
+      (!Number.isSafeInteger(stopAfterEventIndex) || stopAfterEventIndex < 0 ||
+       stopAfterEventIndex >= messages.length))
+    throw new Error('Invalid browser capture stop event index');
+  if (stopAfterEventIndex !== null &&
+      (actionModes !== 0 || actionSteps.length > 0 || actionAfterEventIndex !== null))
+    throw new Error('Prefix replay cannot activate browser controls');
+  const replayedMessages = stopAfterEventIndex === null
+    ? messages : messages.slice(0, stopAfterEventIndex + 1);
+  if (!replayedMessages.some(message => message && typeof message === 'object' &&
       message.version === 'v0.9' && Object.hasOwn(message, 'createSurface')))
     throw new Error('Browser capture requires a createSurface event');
   let server;
@@ -252,8 +267,8 @@ export async function runBrowserCapture(messages, {
     const steps = [];
     const trackLoadingPlaceholders = inspectLoadingPlaceholders || rejectLoadingPlaceholders;
     let loadingPlaceholderEvents = 0;
-    for (let index = 0; index < messages.length; index++) {
-      const message = messages[index];
+    for (let index = 0; index < replayedMessages.length; index++) {
+      const message = replayedMessages[index];
       const operation = OPERATIONS.find(key => Object.hasOwn(message, key));
       if (message.version !== 'v0.9' || !operation)
         throw new Error('Invalid browser capture event');
@@ -319,7 +334,7 @@ export async function runBrowserCapture(messages, {
       kind: 'a2ui-react-capture-browser-replay',
       protocol: 'v0.9',
       renderer: '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0',
-      events: messages.length,
+      events: replayedMessages.length,
       steps,
       ...(trackLoadingPlaceholders ? {loadingPlaceholderEvents} : {}),
       clickSingleButton,
@@ -369,6 +384,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
           actionAfterEventIndex: args.actionAfterEventIndex, actionSteps: args.actionSteps,
+          stopAfterEventIndex: args.stopAfterEventIndex,
           inspectLoadingPlaceholders: args.inspectLoadingPlaceholders,
           rejectLoadingPlaceholders: args.rejectLoadingPlaceholders,
           actionDigestKey: digestKey});

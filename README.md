@@ -367,6 +367,24 @@ not comprehensive accessibility certification.
 Browser HTTP and WebSocket traffic is limited to the ephemeral loopback
 Vite origin; no external service or inference endpoint is contacted.
 
+For a private capture that fails only after several agent events, isolate a
+**renderer replay prefix** without editing or splitting the JSONL:
+
+```sh
+node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --stop-after-event-index 7 --out ../out/prefix-0-through-7.json
+```
+
+`--stop-after-event-index N` replays only events **0 through N (inclusive)**
+in real Chromium, where N is zero-based (0–99 and within the input event count).
+The entire capture still undergoes bounded JSONL validation before rendering.
+The structural report's `events` and `steps` describe only the replayed
+prefix; a passing prefix does **not** certify the full capture.
+This diagnostic cannot be combined with pointer, keyboard or scripted Button
+actions; it never activates captured controls. Use successive prefixes to
+isolate the first event that fails, without publishing model values, labels,
+surface IDs or private file paths. Like other structural reports, event
+chronology may still be sensitive and is not anonymized.
+
 To inspect a streaming-UX regression that only appears **between** v0.9
 messages, opt into intermediate Chromium loading-placeholder diagnostics:
 
