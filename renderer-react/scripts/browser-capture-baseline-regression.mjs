@@ -54,6 +54,58 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     assert.equal(JSON.parse(readFileSync(rawPairMatch, 'utf8')).ok, true);
     assert.equal(pairMatch.stdout, '', 'Raw private capture must not appear in stdout');
 
+    // Changing only private text preserves all structural counts, but the real
+    // rendered Text node changes. The opt-in comparison must detect that.
+    const changedVisible = encodedCapture.toString('utf8').trimEnd()
+      .split('\n').map(line => JSON.parse(line));
+    assert.equal(changedVisible[2].updateDataModel.value.selection, 'alpha');
+    changedVisible[2].updateDataModel.value.selection = 'PRIVATE_RENDERED_TEXT_DIFFERENCE';
+    const visibleChangePath = join(dir, 'private-visible-after.jsonl');
+    writeFileSync(visibleChangePath,
+      changedVisible.map(message => JSON.stringify(message)).join('\n') + '\n');
+
+    const unchangedStructure = run(['--before-capture', capturePath,
+      '--after-capture', visibleChangePath, '--strict']);
+    assert.equal(unchangedStructure.status, 0,
+      'Existing structural counts intentionally do not compare rendered values');
+    assert.equal(JSON.parse(unchangedStructure.stdout).ok, true);
+
+    const visibleMatchPath = join(dir, 'rendered-text-match.json');
+    const visibleMatch = run(['--before-capture', capturePath,
+      '--after-capture', capturePath, '--compare-rendered-text', '--strict',
+      '--out', visibleMatchPath]);
+    assert.equal(visibleMatch.status, 0,
+      'Identical private captures must render the same text in real Chromium');
+    const visibleMatchReport = JSON.parse(readFileSync(visibleMatchPath, 'utf8'));
+    assert.equal(visibleMatchReport.renderedTextParity, 'match');
+    assert.equal(visibleMatchReport.ok, true);
+    assert.equal(Object.hasOwn(visibleMatchReport, 'firstDifferentRenderedTextEventIndex'), false);
+
+    const visibleDiffPath = join(dir, 'rendered-text-drift.json');
+    const visibleDrift = run(['--before-capture', capturePath,
+      '--after-capture', visibleChangePath, '--compare-rendered-text', '--strict',
+      '--out', visibleDiffPath]);
+    assert.equal(visibleDrift.status, 1,
+      'Changed rendered private Text must DRIFT even when UI counts MATCH');
+    const visibleDiff = JSON.parse(readFileSync(visibleDiffPath, 'utf8'));
+    assert.equal(visibleDiff.renderedTextParity, 'drift');
+    assert.equal(visibleDiff.firstDifferentRenderedTextEventIndex, 2);
+    assert.deepEqual(visibleDiff.changedSummaryFields, ['renderedTextParity']);
+    assert.equal(visibleDiff.differingSteps, 0);
+    assert.doesNotMatch(JSON.stringify(visibleDiff),
+      /PRIVATE_RENDERED_TEXT_DIFFERENCE|private-visible-after|alpha|selection|surfaceId|__[A-Za-z]*Digest|[a-f0-9]{64}/,
+      'Private rendered text, paths, digest keys and reusable hashes must not leave the process');
+
+    const illegalVisiblePlan = run(['--before-capture', capturePath,
+      '--after-capture', visibleChangePath, '--action-plan', baselinePath,
+      '--compare-rendered-text']);
+    assert.equal(illegalVisiblePlan.status, 2,
+      'Private rendered-text comparison cannot activate Button actions');
+    assert.equal(illegalVisiblePlan.stdout, '');
+    assert.doesNotMatch(illegalVisiblePlan.stderr,
+      /private-visible-after|PRIVATE_RENDERED_TEXT_DIFFERENCE|alpha/,
+      'Mode errors must redact capture values and file names');
+
     // A vetted saved report may explicitly authorize the SAME bounded real
     // Button interaction in both private captures, without leaking its data.
     assert.equal(baseline.actionsVerified, 1);
