@@ -566,6 +566,51 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     assert.doesNotMatch(invalidFocusMode.stderr + focusWithPlan.stderr,
       /private-button-disabled|PRIVATE_GATE_REQUIRED|surfaceId/);
 
+    // One real Chromium pair should also catch lost keyboard Tab reachability
+    // when visible Text, counts and replay health all stay unchanged.
+    const focusReports = join(dir, 'one-pair-keyboard-focus-ci');
+    const onePairFocus = runErrorCompare(['--before-capture', gateBeforePath,
+      '--after-capture', gateAfterPath, '--require-no-observed-failures',
+      '--compare-rendered-text', '--compare-button-focus', '--strict',
+      '--report-dir', focusReports]);
+    assert.equal(onePairFocus.status, 1,
+      'One-pass CI must reject a Button that becomes unreachable by real Tab');
+    assert.equal(onePairFocus.stdout, '');
+    const onePairFocusJson = readFileSync(join(focusReports, 'comparison.json'), 'utf8');
+    const onePairFocusReport = JSON.parse(onePairFocusJson);
+    assert.equal(onePairFocusReport.observedFailuresAbsent, true);
+    assert.equal(onePairFocusReport.renderedTextParity, 'match');
+    assert.equal(onePairFocusReport.buttonFocusParity, 'drift');
+    assert.equal(onePairFocusReport.firstDifferentButtonFocusEventIndex, 2);
+    assert.equal(onePairFocusReport.ok, false);
+    const onePairFocusJUnit = readFileSync(join(focusReports, 'comparison.xml'), 'utf8');
+    assert.match(onePairFocusJUnit, /<testsuite[^>]*tests="5" failures="1"/);
+    assert.match(onePairFocusJUnit, /<testcase[^>]*name="button-focus-parity"><failure/);
+    assert.match(readFileSync(join(focusReports, 'comparison.md'), 'utf8'),
+      /Real Chromium Button Tab-focus parity:\*\* DRIFT/);
+    for (const report of [onePairFocusJson, onePairFocusJUnit])
+      assert.doesNotMatch(report,
+        /PRIVATE_GATE_REQUIRED|private-button-disabled|surfaceId|__private|[a-f0-9]{64}/,
+        'Private Button values, paths and keyed focus traces must stay private');
+
+    const focusUnavailable = runErrorCompare(['--before-capture', thirdFailurePath,
+      '--after-capture', thirdFailurePath, '--require-no-observed-failures',
+      '--compare-button-focus', '--strict', '--format', 'junit']);
+    assert.equal(focusUnavailable.status, 1);
+    assert.match(focusUnavailable.stdout, /tests="4" failures="2"/);
+    assert.match(focusUnavailable.stdout,
+      /Button focus unavailable due to observed replay failure/);
+    const focusWithoutHealth = runErrorCompare(['--before-capture', gateBeforePath,
+      '--after-capture', gateAfterPath, '--compare-button-focus', '--strict']);
+    assert.equal(focusWithoutHealth.status, 2,
+      'Focus comparison requires the strict no-observed-failures policy');
+    const focusWithActions = runErrorCompare(['--before-capture', gateBeforePath,
+      '--after-capture', gateAfterPath, '--require-no-observed-failures',
+      '--compare-button-focus', '--action-plan', baselinePath]);
+    assert.equal(focusWithActions.status, 2,
+      'One-pass focus probes must reject Button actions and saved plans');
+    assert.equal(focusWithoutHealth.stdout + focusWithActions.stdout, '');
+
     // The published v0.9 accessibility label may change the Button's
     // screen-reader name without changing visible Text, Button count, state,
     // or action payloads. Compare actual Chromium accessibility snapshots.
