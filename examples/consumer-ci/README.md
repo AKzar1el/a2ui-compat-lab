@@ -6,6 +6,40 @@ renderer to replay developer-owned v0.9 JSONL captures. It is designed to fail C
 replay showing an observed failure, **or on changed visible Text, Button geometry or keyboard Tab reachability** even when
 both captures replay without errors. The replay-health, rendered-Text, Button-geometry and Tab-focus checks share **one pair of Chromium replays**, using transient keyed comparisons. No check activates Buttons.
 
+## Check your consumer SDK lane before copying this workflow
+
+The browser starter validates the **published React/core 0.14.0 pair and
+v0.9 captures only**. An external A2UI v1.0 consumer, for example the public
+[Kaltura A2UI catalog](https://github.com/kaltura/kaltura-a2ui-components/blob/main/package.json)
+which declares \`@a2ui/react@^0.15.0\` and \`@a2ui/web_core@^0.15.0\`,
+is **outside this tested lane**. A green test here does not validate
+Kaltura or any other 0.15 renderer.
+
+Use the offline, no-install manifest preflight from a fresh lab checkout
+before adapting the copied workflow:
+
+\`\`\`sh
+node src/consumer-version-preflight.mjs --manifest /path/to/your/package.json --protocol v0.9
+\`\`\`
+
+Give the *real target application's* manifest and the **actual** capture
+protocol, not a guessed v0.9 value to make CI pass. This tool checks
+manifest declarations only: 0 means both SDKs are explicitly pinned to
+0.14.0 and the declared protocol is v0.9; 1 means unsupported or
+unverifiable and requires review; 2 means invalid input. It emits a
+fixed-label JSON diagnostic without manifest values or paths. A caret
+range, transitive-only dependency, conflicting peer declaration, 0.15
+SDK, or v1.0 protocol cannot receive a false passing verdict.
+
+**Passing is only permission to attempt a real browser comparison**, not
+proof of the installed package graph, lockfile, generated capture or
+third-party compatibility. The separately immutable-pinned, manually
+copied [workflow](workflow.yml) does not yet execute this new preflight;
+run it yourself as an opt-in prerequisite. In particular do not force
+Zod4 or npm peer-dependency overrides to make an unsupported pair appear
+compatible. No npm registry calls or paid services are involved in
+the preflight.
+
 ## Verify the local demo first
 
 From the repository root, install the isolated renderer dependencies and
