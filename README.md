@@ -4,6 +4,14 @@
 
 [![A2UI Compatibility CI](https://github.com/AKzar1el/a2ui-compat-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/AKzar1el/a2ui-compat-lab/actions/workflows/ci.yml)
 
+## Try a real Chromium CI regression
+
+The [consumer CI starter](examples/consumer-ci/README.md) includes a public v0.9
+capture pair with a reproducible Text-rendering drift, an actual Chromium
+regression assertion, and a copyable **manual** GitHub Actions recipe for
+comparing private captures. Artifacts and step summaries are opt-in because
+structural metadata can still be sensitive. It requires no paid APIs.
+
 ## What it tests
 
 **1. Actual published SDK behavior:** Run 25 controlled JSON Schema Draft 2020-12 fixtures against `@a2ui/web_core@0.15.0` and Ajv. The observed pinned baseline contains **9 TypeScript validation discrepancies**: 3 in [upstream issue #3998](https://github.com/a2ui-project/a2ui/issues/3998) and 6 additional cases. The expectation baseline records *observed defects*, not desirable behavior. A future upstream fix should be reported as a baseline change, not silently discarded.
