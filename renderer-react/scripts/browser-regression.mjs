@@ -2495,7 +2495,7 @@ try {
   const inputFile = join(errorCliDir, 'private-input.jsonl');
   const outputFile = join(errorCliDir, 'safe-output.json');
   writeFileSync(inputFile, JSON.stringify({version: 'v0.9',
-    createSurface: null, secretMarker: 'PRIVATE_BROWSER_ERROR_CANARY'}) + '\\n');
+    createSurface: null, secretMarker: 'PRIVATE_BROWSER_ERROR_CANARY'}) + '\n');
   const cliResult = spawnSync(process.execPath,
     [resolve(root, 'scripts/browser-capture-replay.mjs'), '--input', inputFile,
       '--report-first-error', '--out', outputFile],
@@ -2505,7 +2505,7 @@ try {
   assert.equal(firstErrorCliReport.firstObservedFailureEventIndex, 0);
   assert.equal(firstErrorCliReport.processedEventCount, 0);
   assert.doesNotMatch(JSON.stringify(firstErrorCliReport) + cliResult.stderr,
-    /PRIVATE_BROWSER_ERROR_CANARY|private-input\\.jsonl|surfaceId|stack/,
+    /PRIVATE_BROWSER_ERROR_CANARY|private-input\.jsonl|surfaceId|stack/,
     'Only fixed error-event metadata may escape the private CLI');
 } finally {
   rmSync(errorCliDir, {recursive: true, force: true});
