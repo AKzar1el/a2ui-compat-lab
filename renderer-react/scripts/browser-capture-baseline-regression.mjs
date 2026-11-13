@@ -315,6 +315,45 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
       /PRIVATE_GATE_REQUIRED|private-button-disabled|private-button-enabled|gate|allowed|surfaceId|__private|[a-f0-9]{64}/,
       'Only bounded event indices and fixed enum fields may leave the process');
 
+    // The published v0.9 accessibility label may change the Button's
+    // screen-reader name without changing visible Text, Button count, state,
+    // or action payloads. Compare actual Chromium accessibility snapshots.
+    const labelBefore = lines.map(line => JSON.parse(line));
+    const labeledButton = labelBefore[1].updateComponents.components.find(component =>
+      component.id === 'submit');
+    assert.ok(labeledButton);
+    labeledButton.accessibility = {label: 'PRIVATE_ASSISTIVE_NAME_BEFORE'};
+    const labelAfter = structuredClone(labelBefore);
+    labelAfter[1].updateComponents.components.find(component =>
+      component.id === 'submit').accessibility.label = 'PRIVATE_ASSISTIVE_NAME_AFTER';
+    const labelBeforePath = join(dir, 'private-label-before.jsonl');
+    const labelAfterPath = join(dir, 'private-label-after.jsonl');
+    writeFileSync(labelBeforePath, labelBefore.map(x => JSON.stringify(x)).join('\n') + '\n');
+    writeFileSync(labelAfterPath, labelAfter.map(x => JSON.stringify(x)).join('\n') + '\n');
+    const labelTextOnly = run(['--before-capture', labelBeforePath,
+      '--after-capture', labelAfterPath, '--compare-rendered-text', '--strict']);
+    assert.equal(labelTextOnly.status, 0,
+      'Changing accessible Button labels must not alter visible Text');
+    const labelMatchPath = join(dir, 'a11y-label-match.json');
+    const labelMatch = run(['--before-capture', labelBeforePath,
+      '--after-capture', labelBeforePath, '--compare-button-a11y', '--strict',
+      '--out', labelMatchPath]);
+    assert.equal(labelMatch.status, 0, 'Identical real Chromium Button accessibility must match');
+    assert.equal(JSON.parse(readFileSync(labelMatchPath, 'utf8')).buttonA11yParity, 'match');
+    const labelDiffPath = join(dir, 'a11y-label-diff.json');
+    const labelDiff = run(['--before-capture', labelBeforePath,
+      '--after-capture', labelAfterPath, '--compare-button-a11y', '--strict',
+      '--out', labelDiffPath]);
+    assert.equal(labelDiff.status, 1, 'Assistive Button-name drift must be detected in Chromium');
+    const labelReport = JSON.parse(readFileSync(labelDiffPath, 'utf8'));
+    assert.equal(labelReport.buttonA11yParity, 'drift');
+    assert.equal(labelReport.firstDifferentButtonA11yEventIndex, 1);
+    assert.deepEqual(labelReport.changedSummaryFields, ['buttonA11yParity']);
+    assert.equal(labelReport.differingSteps, 0);
+    assert.doesNotMatch(JSON.stringify(labelReport),
+      /PRIVATE_ASSISTIVE_NAME|private-label-|__private|[a-f0-9]{64}/,
+      'Comparison must never expose private a11y labels, input paths or digests');
+
     const invalidGateMode = run(['--before', baselinePath,
       '--after-capture', gateAfterPath, '--compare-button-state']);
     assert.equal(invalidGateMode.status, 2,
