@@ -135,7 +135,7 @@ export function formatErrorBoundaryReport(result, format = 'json') {
         (result.requireNoObservedFailures !== true ||
           typeof result.observedFailuresAbsent !== 'boolean')))
     throw invalid();
-  if (format === 'json') return JSON.stringify(result, null, 2) + '\\n';
+  if (format === 'json') return JSON.stringify(result, null, 2) + '\n';
   if (format === 'markdown') return [
     '## A2UI Chromium first-error boundary comparison',
     '',
@@ -153,7 +153,7 @@ export function formatErrorBoundaryReport(result, format = 'json') {
     '',
     '_Observed error boundaries do not prove cause or health; event metadata may be sensitive and is not anonymized._',
     '',
-  ].join('\\n');
+  ].join('\n');
   const checks = [
     {name: 'event-count-parity', pass: result.eventCountParity === 'match',
       message: 'event count drift'},
@@ -175,7 +175,7 @@ export function formatErrorBoundaryReport(result, format = 'json') {
         check.message + '" /></testcase>')),
     '</testsuite>',
     '',
-  ].join('\\n');
+  ].join('\n');
 }
 
 function exclusiveWrite(path, content) {
