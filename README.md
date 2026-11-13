@@ -602,6 +602,22 @@ this bounded replay, **not** that an app is generally healthy. Without the
 flag, existing parity behavior and report shape are unchanged. Duplicate
 policy flags fail closed with exit 2.
 
+For CI systems that ingest JUnit, use `--format junit` to produce a fixed-schema
+XML test suite. Event-count drift, observed failure-boundary drift and the
+optional no-observed-failures policy each become distinct failing testcases.
+A matched failure under the opt-in policy therefore has `failures="1"`, not
+a falsely green report. Use `--format markdown` for a human-readable review;
+the default `--format json` is unchanged.
+
+```sh
+node src/browser-capture-error-boundary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --require-no-observed-failures --strict --format junit --out out/error-boundary.xml
+```
+
+JUnit and Markdown contain only fixed comparator labels and bounded event
+counts or indices, never raw capture values or browser error details. Reports
+remain sensitive metadata rather than anonymized artifacts, and output files
+are never overwritten.
+
 No source paths, model values, browser diagnostics or reusable digests are
 exported. Event counts and boundary positions may still be sensitive and are
 not anonymized; review output before sharing. Existing output is never overwritten.
