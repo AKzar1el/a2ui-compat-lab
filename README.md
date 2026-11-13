@@ -299,6 +299,33 @@ not identity when two Buttons exchange positions, all focusable elements,
 screen-reader output, WCAG compliance or behavior of other SDK versions.
 Even value-free event metadata may be sensitive; this is **not anonymization**.
 
+### Detect real Chromium Button layout shifts without sharing private captures
+
+Two private v0.9 captures can render the same number of Buttons and unchanged
+action/event structure yet place a control somewhere else on screen. To compare
+actual Chromium Button bounding rectangles at each agent event boundary:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --compare-button-geometry --strict --out button-geometry-diff.json
+```
+
+This opt-in mode replays both captures independently in the pinned published
+React/core 0.14.0 renderer. It quantizes each visible accessible Button's
+viewport `x`, `y`, width and height to whole CSS pixels before using a
+new per-comparison HMAC key. Intermediate positions and digests are discarded;
+only `buttonGeometryParity: match|drift` and the first differing zero-based
+event index are emitted. The mode refuses saved reports and action plans; no
+Button is activated. It can be combined with other passive comparison modes.
+
+**Scope:** This is deterministic *within the pinned Chromium test viewport*
+for stable fonts and CSS. It is not pixel/screenshot equality, responsive
+coverage, styling/color parity, or accessibility certification. Reordering
+equal-size controls at identical positions or changes under one rounded CSS
+pixel can match. Font, viewport or browser version differences can shift
+rectangles; pin the environment for CI. Event indices and parity results
+remain sensitive metadata and are not anonymized. No private text, IDs,
+coordinates, filenames, or reusable fingerprints are written to the report.
+
 ### Compare declared and observed Button accessibility separately
 
 A v0.9 Button may declare `accessibility.label` without the currently pinned
