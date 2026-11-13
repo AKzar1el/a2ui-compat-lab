@@ -89,7 +89,7 @@ export function evaluateManifest(manifest, protocol) {
   else if (Object.values(classifications).includes('0.15-family'))
     reason = 'sdk_generation_not_tested';
   else reason = 'non_exact_sdk_pin';
-  return result(reason, protocol, classifications);
+  return result(reason, protocol === 'v0.9' ? 'v0.9' : 'unverified', classifications);
 }
 
 export function readManifest(path) {
