@@ -62,6 +62,10 @@ test('v1.0 capture protocol cannot inherit a v0.9 green check', () => {
   const run = invoke(pinned, 'v1.0');
   assert.equal(run.status, 1, run.stderr);
   assert.equal(JSON.parse(run.stdout).reason, 'protocol_outside_test_lane');
+  const privateProtocol = invoke(pinned, 'PRIVATE-PROTOCOL-SECRET');
+  assert.equal(privateProtocol.status, 1);
+  assert.equal(JSON.parse(privateProtocol.stdout).protocol, 'unverified');
+  assert.equal(privateProtocol.stdout.includes('PRIVATE-PROTOCOL-SECRET'), false);
 });
 
 test('caret ranges and transitive-only manifests cannot pass a pinned-package preflight', () => {
