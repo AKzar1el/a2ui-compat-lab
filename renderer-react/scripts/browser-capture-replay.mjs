@@ -207,8 +207,7 @@ export async function runBrowserCapture(messages, {
       stopAfterEventIndex !== null || actionAfterEventIndex !== null ||
       inspectLoadingPlaceholders || rejectLoadingPlaceholders || actionDigestKey !== null ||
       buttonStateDigestKey !== null ||
-      buttonA11yDigestKey !== null || buttonFocusDigestKey !== null ||
-      buttonGeometryDigestKey !== null))
+      buttonA11yDigestKey !== null || buttonFocusDigestKey !== null))
     throw new Error('Error-event diagnostics cannot activate controls or combine replay modes');
   if (buttonFocusDigestKey !== null && (actionModes !== 0 || actionSteps.length > 0 ||
       actionAfterEventIndex !== null))
