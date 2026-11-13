@@ -629,6 +629,25 @@ three times:
 node src/browser-capture-error-boundary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --require-no-observed-failures --strict --report-dir out/new-error-boundary-run
 ```
 
+To check actual **keyboard Tab reachability** in that same pair, add
+`--compare-button-focus` with `--require-no-observed-failures`. This reuses
+the published React/Chromium no-action replay and its bounded Tab probe,
+rather than running the separate structural focus comparator for a second
+pair. It reports `buttonFocusParity: match|drift|unavailable` and only the
+first differing event index; JSON/Markdown/JUnit all fail strict CI on drift.
+If either replay observes a failure, focus parity is `unavailable`, **never
+a passing MATCH**. Tab focus is measured at each completed v0.9 event; this
+is not a full accessibility audit or proof of safe action behavior.
+
+```sh
+node src/browser-capture-error-boundary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --require-no-observed-failures --compare-rendered-text --compare-button-geometry --compare-button-focus --strict --report-dir out/new-focus-ci
+```
+
+The focus probe does not click or activate Buttons; like the Text and geometry
+probes, it uses a fresh per-comparison keyed digest that is never exported.
+Tab sampling adds browser work, so no measured runtime saving or third-party
+adoption is claimed.
+
 This creates `comparison.json`, `comparison.md` and `comparison.xml` in a
 **new** directory; a pre-existing directory (including a symlink), `--out`,
 or `--format` used with `--report-dir` is refused with exit 2. Parent

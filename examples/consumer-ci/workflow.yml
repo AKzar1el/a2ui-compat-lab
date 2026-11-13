@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AKzar1el/a2ui-compat-lab
-          ref: a26bd19ca2cbbec128f1c7a8d6071ff1eaa53ddb
+          ref: a743f944e0f0e17c17acb74ac46ac01e434d1622
           path: a2ui-lab
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -30,7 +30,7 @@ jobs:
       - name: Install offline Chromium replay runtime
         working-directory: a2ui-lab/renderer-react
         run: npx playwright install --with-deps chromium
-      - name: Compare private replay health and rendered Text parity
+      - name: Compare private replay health, Text, layout and keyboard-focus parity
         shell: bash
         env:
           # Replace these paths with outputs of your trusted capture-producing step.
@@ -42,10 +42,10 @@ jobs:
             echo "Capture inputs missing; this template requires explicit inputs" >&2
             exit 2
           }
-          # One Chromium pair checks replay health, rendered Text, and Button geometry.
+          # One Chromium pair checks replay health, Text, Button geometry and Tab focus.
           node a2ui-lab/src/browser-capture-error-boundary-compare.mjs \
             --before-capture "$BEFORE_CAPTURE" --after-capture "$AFTER_CAPTURE" \
-            --require-no-observed-failures --compare-rendered-text --compare-button-geometry --strict \
+            --require-no-observed-failures --compare-rendered-text --compare-button-geometry --compare-button-focus --strict \
             --report-dir "$RUNNER_TEMP/a2ui-comparison"
       # Privacy-reduced reports still expose event counts and indices.
       # Explicitly opt in by setting A2UI_SHARE_COMPARISON_METADATA=true
