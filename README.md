@@ -269,6 +269,40 @@ before any planned Button action at that event; it is **not** a comprehensive
 accessibility audit, focus/keyboard test, CSS comparison, or input-field validator.
 Only the existing compatible published React/core 0.14.0 pair is tested.
 
+### Compare declared and observed Button accessibility separately
+
+A v0.9 Button may declare `accessibility.label` without the currently pinned
+React/core 0.14.0 renderer reflecting that label in Chromium's accessibility tree.
+A capture can therefore change its *declared* assistive label while its rendered
+Button accessibility snapshot stays the same. The following opt-in comparison
+makes the distinction visible without exporting private names:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --compare-button-a11y --strict --out button-a11y-diff.json
+```
+
+At each agent event boundary, the tool independently compares the declared
+`accessibility.label` values of v0.9 Button definitions and Playwright's
+`ariaSnapshot()` for up to 32 actually rendered accessible Buttons. Each stream
+is hashed with an ephemeral, per-comparison HMAC key; private strings, identifiers,
+paths, keys and reusable digests are discarded before JSON, Markdown or JUnit
+output. The fixed report distinguishes `declaredButtonA11yParity` from
+`buttonA11yParity` (each `match|drift`) and provides their separate first
+differing zero-based event indices, if any. Strict exits are 0 for match, 1
+for drift, 2 for invalid input or failed replay.
+
+In a regression observed with the pinned published renderer, changing only a
+v0.9 Button's declared `accessibility.label` changed the declaration comparison
+but **did not** change Chromium's observed accessibility snapshot. This is a
+specific tested compatibility limitation, not proof about all A2UI renderers or
+versions and not an accessibility certification. It does not measure focus
+order, spoken screen-reader behavior, color contrast or arbitrary controls.
+
+Two private capture inputs are required; saved-report-only comparisons are
+refused. No Button is activated unless an explicit reviewed action plan is
+also provided with `--compare-actions`. Event counts and parity bits may still
+be sensitive; the result is privacy-reduced, **not anonymized**.
+
 For a readable, value-free GitHub Actions step summary, opt into Markdown output
 from the same validated structural comparison (the default remains JSON):
 
