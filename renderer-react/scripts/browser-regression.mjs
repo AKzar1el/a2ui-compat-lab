@@ -2451,6 +2451,27 @@ const exampleMessages = JSON.parse(fixture).map(entry => entry.message);
 const encodedExample = Buffer.from(exampleMessages.map(message => JSON.stringify(message)).join('\n') + '\n');
 const decodedExample = decodeBrowserCapture(encodedExample);
 assert.deepEqual(decodedExample, exampleMessages);
+// First-observed event diagnostics must isolate a real Chromium SDK error
+// without echoing caller-controlled payloads or claiming the error's cause.
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--report-first-error']).reportFirstError, true);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--report-first-error', '--click-single-button']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--report-first-error', '--stop-after-event-index', '1']), /Usage:/);
+const firstErrorReport = await runBrowserCapture(decodedExample,
+  {reportFirstError: true, surfaceErrorProbe: true});
+assert.equal(firstErrorReport.firstObservedFailureEventIndex, 0,
+  'A published SDK surface error at the first event must be localized');
+assert.equal(firstErrorReport.kind, 'a2ui-react-capture-event-diagnostic');
+assert.equal(firstErrorReport.processedEventCount, 0);
+assert.doesNotMatch(JSON.stringify(firstErrorReport),
+  /action-replay|alpha|Confirm|selection|surfaceId|stack|Error:/,
+  'A failure-event diagnostic must not echo private values or SDK errors');
+const firstErrorSuccess = await runBrowserCapture(decodedExample, {reportFirstError: true});
+assert.equal(firstErrorSuccess.firstObservedFailureEventIndex, null,
+  'A successful real Chromium replay has no observed failing boundary');
+assert.equal(firstErrorSuccess.events, decodedExample.length);
 // A developer can isolate a failing private capture prefix without copying its
 // JSONL into smaller files or activating any captured controls.
 assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl',
