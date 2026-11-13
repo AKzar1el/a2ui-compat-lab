@@ -269,6 +269,36 @@ before any planned Button action at that event; it is **not** a comprehensive
 accessibility audit, focus/keyboard test, CSS comparison, or input-field validator.
 Only the existing compatible published React/core 0.14.0 pair is tested.
 
+### Compare actual Chromium Button Tab-focus traversal
+
+An enabled Button is not necessarily keyboard reachable. To compare the
+**observed Tab traversal** at every v0.9 agent-event boundary in two
+developer-owned private captures, opt in to a separate real-Chromium check:
+
+```sh
+node src/browser-capture-summary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --compare-button-focus --strict --out focus-diff.json
+```
+
+The browser creates a temporary focus anchor, presses real **Tab** keys (up to
+64 per event), and records only the ordered DOM positions of the reachable
+accessible Buttons (up to 32), not names, model values, IDs or element markup.
+A fresh one-comparison HMAC key protects transient event fingerprints; the
+parent discards all fingerprints and exports only
+`buttonFocusParity: match|drift` and, on drift,
+`firstDifferentButtonFocusEventIndex` (zero-based). A disabled Button that
+drops out of Tab navigation can differ even when Text and Button counts match.
+Strict exits: 0 match, 1 drift, 2 invalid input or browser failure.
+
+Unlike an approved-action replay, this mode **refuses** any saved action plan:
+it never clicks or presses Enter/Space on a Button. It may be combined with
+`--compare-button-state`, `--compare-rendered-text` or
+`--compare-button-a11y` with no action plan. Focus traversal is reset at each
+event by a temporary DOM anchor; any observed action emission is a hard error.
+The result measures only ordered positions of reachable rendered Buttons,
+not identity when two Buttons exchange positions, all focusable elements,
+screen-reader output, WCAG compliance or behavior of other SDK versions.
+Even value-free event metadata may be sensitive; this is **not anonymization**.
+
 ### Compare declared and observed Button accessibility separately
 
 A v0.9 Button may declare `accessibility.label` without the currently pinned
