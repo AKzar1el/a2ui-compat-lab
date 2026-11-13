@@ -268,17 +268,19 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     // Published v0.9 Button checks can disable activation without changing
     // visible Text or the number of rendered controls. This is a consumer-
     // visible interaction regression that structural/text parity must not hide.
-    const gatedBefore = lines.map(line => JSON.parse(line));
-    const gatedButton = gatedBefore[1].updateComponents.components.find(component =>
+    // Seed the private gate before mounting the Button so validation never
+    // observes an unresolved model path during component creation.
+    const gatedBefore = [JSON.parse(lines[0]), JSON.parse(lines[2]), JSON.parse(lines[1])];
+    const gatedButton = gatedBefore[2].updateComponents.components.find(component =>
       component.id === 'submit');
     gatedButton.checks = [{
       call: 'required',
       args: {value: {path: '/gate'}},
       message: 'PRIVATE_GATE_REQUIRED',
     }];
-    gatedBefore[2].updateDataModel.value.gate = 'allowed';
+    gatedBefore[1].updateDataModel.value.gate = 'allowed';
     const gatedAfter = structuredClone(gatedBefore);
-    gatedAfter[2].updateDataModel.value.gate = '';
+    gatedAfter[1].updateDataModel.value.gate = '';
     const gateBeforePath = join(dir, 'private-button-enabled.jsonl');
     const gateAfterPath = join(dir, 'private-button-disabled.jsonl');
     const gateMatchPath = join(dir, 'private-button-state-match.json');
