@@ -5,7 +5,7 @@ import {lstatSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
-const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs (--before OLD.json | --before-capture PRIVATE-OLD.jsonl) (--after NEW.json | --after-capture PRIVATE-NEW.jsonl) [--action-plan SAVED-VETTED-REPORT.json] [--compare-actions] [--compare-rendered-text] [--compare-button-state] [--compare-button-a11y] [--strict] [--format json|markdown|junit] [--out NEW-DIFF.json|summary.md|report.xml]';
+const USAGE = 'Usage: node src/browser-capture-summary-compare.mjs (--before OLD.json | --before-capture PRIVATE-OLD.jsonl) (--after NEW.json | --after-capture PRIVATE-NEW.jsonl) [--action-plan SAVED-VETTED-REPORT.json] [--compare-actions] [--compare-rendered-text] [--compare-button-state] [--compare-button-a11y] [--compare-button-focus] [--strict] [--format json|markdown|junit] [--out NEW-DIFF.json|summary.md|report.xml]';
 const MAX_BYTES = 256 * 1024;
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
@@ -174,6 +174,8 @@ function markdownComparisonReport(diff, before, after) {
       diff.renderedTextParity.toUpperCase()] : []),
     ...(diff.buttonStateParity ? ['**Private Button enablement parity:** ' +
       diff.buttonStateParity.toUpperCase()] : []),
+    ...(diff.buttonFocusParity ? ['**Observed Chromium Button Tab-focus parity:** ' +
+      diff.buttonFocusParity.toUpperCase()] : []),
     ...(diff.buttonA11yParity ? ['**Observed Chromium Button accessibility parity:** ' +
       diff.buttonA11yParity.toUpperCase()] : []),
     ...(diff.declaredButtonA11yParity ? ['**Declared A2UI Button accessibility parity:** ' +
@@ -186,6 +188,9 @@ function markdownComparisonReport(diff, before, after) {
     ...(Number.isSafeInteger(diff.firstDifferentButtonStateEventIndex)
       ? ['**First differing Button-state event (0-based):** ' +
         diff.firstDifferentButtonStateEventIndex] : []),
+    ...(Number.isSafeInteger(diff.firstDifferentButtonFocusEventIndex)
+      ? ['**First differing Button-focus event (0-based):** ' +
+        diff.firstDifferentButtonFocusEventIndex] : []),
     ...(Number.isSafeInteger(diff.firstDifferentButtonA11yEventIndex)
       ? ['**First differing observed Button accessibility event (0-based):** ' +
         diff.firstDifferentButtonA11yEventIndex] : []),
@@ -230,6 +235,9 @@ function junitComparisonReport(diff, before, after) {
         (Number.isSafeInteger(diff.firstDifferentButtonStateEventIndex) ?
           '; first differing Button-state event index: ' +
           diff.firstDifferentButtonStateEventIndex : '') +
+        (Number.isSafeInteger(diff.firstDifferentButtonFocusEventIndex) ?
+          '; first differing Button-focus event index: ' +
+          diff.firstDifferentButtonFocusEventIndex : '') +
         (Number.isSafeInteger(diff.firstDifferentButtonA11yEventIndex) ?
           '; first differing observed Button accessibility event index: ' +
           diff.firstDifferentButtonA11yEventIndex : '') +
@@ -261,7 +269,8 @@ function junitComparisonReport(diff, before, after) {
 export function parseBrowserCaptureSummaryCompareOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
   const options = {strict: false, compareActions: false, compareRenderedText: false,
-    compareButtonState: false, compareButtonA11y: false};
+    compareButtonState: false, compareButtonA11y: false,
+    compareButtonFocus: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !options.strict) options.strict = true;
@@ -272,6 +281,8 @@ export function parseBrowserCaptureSummaryCompareOptions(argv) {
       options.compareButtonState = true;
     else if (arg === '--compare-button-a11y' && !options.compareButtonA11y)
       options.compareButtonA11y = true;
+    else if (arg === '--compare-button-focus' && !options.compareButtonFocus)
+      options.compareButtonFocus = true;
     else if (arg === '--format' && !Object.hasOwn(options, 'format') &&
       ['json', 'markdown', 'junit'].includes(argv[i + 1])) options.format = argv[++i];
     else if (['--before', '--before-capture', '--after', '--after-capture', '--action-plan', '--out'].includes(arg) &&
@@ -290,7 +301,9 @@ export function parseBrowserCaptureSummaryCompareOptions(argv) {
       (options.compareButtonState && (!options['before-capture'] || !options['after-capture'] ||
         (options['action-plan'] && !options.compareActions))) ||
       (options.compareButtonA11y && (!options['before-capture'] || !options['after-capture'] ||
-        (options['action-plan'] && !options.compareActions))))
+        (options['action-plan'] && !options.compareActions))) ||
+      (options.compareButtonFocus && (!options['before-capture'] || !options['after-capture'] ||
+        options['action-plan'])))
     throw new Error(USAGE);
   return options;
 }
@@ -308,7 +321,8 @@ function readReport(path) {
 }
 
 function replayPrivateCapture(inputPath, baseline, actionDigestKey = null,
-  textDigestKey = null, buttonStateDigestKey = null, buttonA11yDigestKey = null) {
+  textDigestKey = null, buttonStateDigestKey = null, buttonA11yDigestKey = null,
+  buttonFocusDigestKey = null) {
   const args = baseline ? browserCaptureReplayArguments(baseline) : [];
   let child;
   try {
@@ -316,15 +330,18 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null,
       ...(actionDigestKey ? ['--internal-action-digest'] : []),
       ...(textDigestKey ? ['--internal-rendered-text-digest'] : []),
       ...(buttonStateDigestKey ? ['--internal-button-state-digest'] : []),
-      ...(buttonA11yDigestKey ? ['--internal-button-a11y-digest'] : [])], {
+      ...(buttonA11yDigestKey ? ['--internal-button-a11y-digest'] : []),
+      ...(buttonFocusDigestKey ? ['--internal-button-focus-digest'] : [])], {
       cwd: RENDERER_DIR, shell: false, windowsHide: true,
       encoding: 'utf8', maxBuffer: MAX_BYTES, timeout: 120000,
       // One fresh key is shared by the two children, never logged or saved.
-      ...((actionDigestKey || textDigestKey || buttonStateDigestKey || buttonA11yDigestKey) ? {env: {...process.env,
+      ...((actionDigestKey || textDigestKey || buttonStateDigestKey || buttonA11yDigestKey ||
+        buttonFocusDigestKey) ? {env: {...process.env,
         ...(actionDigestKey ? {A2UI_PRIVATE_ACTION_DIGEST_KEY: actionDigestKey} : {}),
         ...(textDigestKey ? {A2UI_PRIVATE_RENDERED_TEXT_DIGEST_KEY: textDigestKey} : {}),
         ...(buttonStateDigestKey ? {A2UI_PRIVATE_BUTTON_STATE_DIGEST_KEY: buttonStateDigestKey} : {}),
-        ...(buttonA11yDigestKey ? {A2UI_PRIVATE_BUTTON_A11Y_DIGEST_KEY: buttonA11yDigestKey} : {})}} : {}),
+        ...(buttonA11yDigestKey ? {A2UI_PRIVATE_BUTTON_A11Y_DIGEST_KEY: buttonA11yDigestKey} : {}),
+        ...(buttonFocusDigestKey ? {A2UI_PRIVATE_BUTTON_FOCUS_DIGEST_KEY: buttonFocusDigestKey} : {})}} : {}),
     });
   } catch {
     throw invalid();
@@ -340,6 +357,7 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null,
     let renderedTextDigests = null;
     let buttonStateDigests = null;
     let buttonA11yDigests = null;
+    let buttonFocusDigests = null;
     let declaredButtonA11yDigests = null;
     if (actionDigestKey) {
       if (!isRecord(parsed) || !/^[a-f0-9]{64}$/.test(parsed.__privateActionDigest) ||
@@ -372,6 +390,15 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null,
       buttonStateDigests = digests;
       delete parsed.__privateButtonStateDigests;
     }
+    if (buttonFocusDigestKey) {
+      const digests = parsed.__privateButtonFocusDigests;
+      if (!Array.isArray(digests) || digests.length !== parsed.events ||
+          digests.length > MAX_EVENTS || digests.some(value =>
+            typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)))
+        throw invalid();
+      buttonFocusDigests = digests;
+      delete parsed.__privateButtonFocusDigests;
+    }
     if (buttonA11yDigestKey) {
       const digests = parsed.__privateButtonA11yDigests;
       if (!Array.isArray(digests) || digests.length !== parsed.events ||
@@ -389,7 +416,8 @@ function replayPrivateCapture(inputPath, baseline, actionDigestKey = null,
       delete parsed.__privateDeclaredButtonA11yDigests;
     }
     return {report: validate(parsed), actionDigest, actionDigests, renderedTextDigests,
-      buttonStateDigests, buttonA11yDigests, declaredButtonA11yDigests};
+      buttonStateDigests, buttonA11yDigests, declaredButtonA11yDigests,
+      buttonFocusDigests};
   } catch {
     throw invalid();
   }
@@ -417,19 +445,20 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const textDigestKey = args.compareRenderedText ? randomBytes(32).toString('hex') : null;
       const buttonStateDigestKey = args.compareButtonState ? randomBytes(32).toString('hex') : null;
       const buttonA11yDigestKey = args.compareButtonA11y ? randomBytes(32).toString('hex') : null;
+      const buttonFocusDigestKey = args.compareButtonFocus ? randomBytes(32).toString('hex') : null;
       const beforeRun = args['before-capture']
         ? replayPrivateCapture(args['before-capture'], actionPlan, actionDigestKey, textDigestKey,
-          buttonStateDigestKey, buttonA11yDigestKey)
+          buttonStateDigestKey, buttonA11yDigestKey, buttonFocusDigestKey)
         : {report: readReport(args.before), actionDigest: null, actionDigests: null,
           renderedTextDigests: null, buttonStateDigests: null, buttonA11yDigests: null,
-          declaredButtonA11yDigests: null};
+          declaredButtonA11yDigests: null, buttonFocusDigests: null};
       const baseline = beforeRun.report;
       const afterRun = args['after-capture']
         ? replayPrivateCapture(args['after-capture'], baseline, actionDigestKey, textDigestKey,
-          buttonStateDigestKey, buttonA11yDigestKey)
+          buttonStateDigestKey, buttonA11yDigestKey, buttonFocusDigestKey)
         : {report: readReport(args.after), actionDigest: null, actionDigests: null,
           renderedTextDigests: null, buttonStateDigests: null, buttonA11yDigests: null,
-          declaredButtonA11yDigests: null};
+          declaredButtonA11yDigests: null, buttonFocusDigests: null};
       const observed = afterRun.report;
       const result = compareBrowserCaptureSummaries(baseline, observed);
       if (actionDigestKey) {
@@ -473,6 +502,19 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           result.changedSummaryFields.push('buttonStateParity');
         }
         result.note = 'Opt-in real Chromium Button enabled-state equality; no reusable digests or private values exported';
+      }
+      if (buttonFocusDigestKey) {
+        const oldFocus = beforeRun.buttonFocusDigests;
+        const newFocus = afterRun.buttonFocusDigests;
+        const first = Array.from({length: Math.max(oldFocus.length, newFocus.length)},
+          (_, index) => index).find(index => oldFocus[index] !== newFocus[index]);
+        result.buttonFocusParity = first === undefined ? 'match' : 'drift';
+        if (first !== undefined) {
+          result.firstDifferentButtonFocusEventIndex = first;
+          result.ok = false;
+          result.changedSummaryFields.push('buttonFocusParity');
+        }
+        result.note = 'Opt-in actual Chromium Button Tab-focus order equality; no actions, private values or reusable digests exported';
       }
       if (buttonA11yDigestKey) {
         const oldSnapshots = beforeRun.buttonA11yDigests;
