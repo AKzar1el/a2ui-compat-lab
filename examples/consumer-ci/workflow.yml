@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AKzar1el/a2ui-compat-lab
-          ref: 1b3ddd3ecd5320504de7dcf8b9f998f34194ab5d
+          ref: 8337ac99ab9ab3e0c482a76d36110cc1f032ec99
           path: a2ui-lab
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -42,10 +42,10 @@ jobs:
             echo "Capture inputs missing; this template requires explicit inputs" >&2
             exit 2
           }
-          # One Chromium pair checks both replay health and rendered Text parity.
+          # One Chromium pair checks replay health, rendered Text, and Button geometry.
           node a2ui-lab/src/browser-capture-error-boundary-compare.mjs \
             --before-capture "$BEFORE_CAPTURE" --after-capture "$AFTER_CAPTURE" \
-            --require-no-observed-failures --compare-rendered-text --strict \
+            --require-no-observed-failures --compare-rendered-text --compare-button-geometry --strict \
             --report-dir "$RUNNER_TEMP/a2ui-comparison"
       # Privacy-reduced reports still expose event counts and indices.
       # Explicitly opt in by setting A2UI_SHARE_COMPARISON_METADATA=true
