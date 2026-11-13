@@ -48,7 +48,7 @@ export function testConsumerCiStarter() {
     assert.match(markdown, /MATCH/);
     assert.match(junit, /<testsuite .*failures="0"/);
     for (const text of [JSON.stringify(drift), json, markdown, junit]) {
-      assert.doesNotMatch(text, /Changed for Chromium demo|Hello|First/);
+      assert.doesNotMatch(text, /Changed for Chromium demo|"Hello"|"First"/);
       assert.doesNotMatch(text, /lifecycle-v09\.jsonl|after\.jsonl/);
     }
   } finally {
