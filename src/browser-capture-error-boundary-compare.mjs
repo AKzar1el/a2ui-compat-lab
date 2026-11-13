@@ -5,7 +5,7 @@ import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {compareBrowserCaptureSummaries} from './browser-capture-summary-compare.mjs';
 
-const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--out NEW-DIFF.json]';
+const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--require-no-observed-failures] [--out NEW-DIFF.json]';
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
 const RENDERER = '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0';
@@ -17,10 +17,12 @@ const isRecord = value => value !== null && typeof value === 'object' && !Array.
 
 export function parseErrorBoundaryOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const args = {strict: false};
+  const args = {strict: false, requireNoObservedFailures: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !args.strict) args.strict = true;
+    else if (arg === '--require-no-observed-failures' && !args.requireNoObservedFailures)
+      args.requireNoObservedFailures = true;
     else if (['--before-capture', '--after-capture', '--out'].includes(arg) &&
       !Object.hasOwn(args, arg.slice(2)) && argv[i + 1] &&
       !argv[i + 1].startsWith('--')) args[arg.slice(2)] = resolve(argv[++i]);
@@ -90,8 +92,9 @@ function runDiagnostic(capturePath) {
   }
 }
 
-export function compareErrorBoundaries(before, after) {
-  if (!isRecord(before) || !isRecord(after) ||
+export function compareErrorBoundaries(before, after, {requireNoObservedFailures = false} = {}) {
+  if (typeof requireNoObservedFailures !== 'boolean' ||
+      !isRecord(before) || !isRecord(after) ||
       !Number.isSafeInteger(before.events) || !Number.isSafeInteger(after.events) ||
       before.events < 1 || after.events < 1 ||
       before.events > MAX_EVENTS || after.events > MAX_EVENTS ||
@@ -100,16 +103,18 @@ export function compareErrorBoundaries(before, after) {
     throw invalid();
   const sameBoundary = before.index === after.index;
   const sameCount = before.events === after.events;
+  const observedFailuresAbsent = before.index === null && after.index === null;
   return {
     schemaVersion: 1,
     kind: 'a2ui-react-capture-error-boundary-diff',
     protocol: 'v0.9',
     renderer: RENDERER,
-    ok: sameBoundary && sameCount,
+    ok: sameBoundary && sameCount && (!requireNoObservedFailures || observedFailuresAbsent),
     beforeEvents: before.events,
     afterEvents: after.events,
     eventCountParity: sameCount ? 'match' : 'drift',
     errorBoundaryParity: sameBoundary ? 'match' : 'drift',
+    ...(requireNoObservedFailures ? {requireNoObservedFailures, observedFailuresAbsent} : {}),
     beforeFirstObservedFailureEventIndex: before.index,
     afterFirstObservedFailureEventIndex: after.index,
     note: 'Observed Chromium failure indices only; matching failures may have different causes and do not mean healthy or anonymous',
@@ -132,7 +137,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     else {
       const before = runDiagnostic(args['before-capture']);
       const after = runDiagnostic(args['after-capture']);
-      const result = compareErrorBoundaries(before, after);
+      const result = compareErrorBoundaries(before, after,
+        {requireNoObservedFailures: args.requireNoObservedFailures});
       const json = JSON.stringify(result, null, 2) + '\n';
       if (args.out) exclusiveWrite(args.out, json);
       else process.stdout.write(json);
