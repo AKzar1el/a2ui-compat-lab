@@ -21,6 +21,11 @@ function run(script, args) {
 
 /** Exercise the published React/Chromium paths used by the copyable CI recipe. */
 export function testConsumerCiStarter() {
+  const workflow = readFileSync(resolve(repo, 'examples/consumer-ci/workflow.yml'), 'utf8');
+  assert.match(workflow, /--compare-rendered-text --strict --format junit/,
+    'Consumer CI must gate real rendered Text drift, not only replay errors');
+  assert.match(workflow, /a2ui-comparison\/rendered-text\.xml/,
+    'Consumer CI must save its privacy-limited rendered Text JUnit report');
   const dir = mkdtempSync(join(tmpdir(), 'a2ui-consumer-ci-'));
   try {
     const driftPath = join(dir, 'rendered-text.json');
@@ -32,6 +37,16 @@ export function testConsumerCiStarter() {
     assert.equal(drift.ok, false);
     assert.equal(drift.renderedTextParity, 'drift');
     assert.equal(drift.firstDifferentRenderedTextEventIndex, 2);
+
+    const textJUnitPath = join(dir, 'rendered-text.xml');
+    const textJUnitRun = run(textComparator,
+      ['--compare-rendered-text', '--strict', '--format', 'junit', '--out', textJUnitPath]);
+    assert.equal(textJUnitRun.error, undefined, 'Chromium JUnit Text check must run');
+    assert.equal(textJUnitRun.status, 1,
+      'Healthy but visually drifted captures must fail the consumer CI Text gate');
+    const textJUnit = readFileSync(textJUnitPath, 'utf8');
+    assert.match(textJUnit, /renderedTextParity/);
+    assert.match(textJUnit, /<failure /);
 
     const reports = join(dir, 'review-bundle');
     const reportRun = run(errorComparator,
@@ -47,7 +62,7 @@ export function testConsumerCiStarter() {
     assert.equal(result.observedFailuresAbsent, true);
     assert.match(markdown, /MATCH/);
     assert.match(junit, /<testsuite .*failures="0"/);
-    for (const text of [JSON.stringify(drift), json, markdown, junit]) {
+    for (const text of [JSON.stringify(drift), textJUnit, json, markdown, junit]) {
       assert.doesNotMatch(text, /Changed for Chromium demo|"Hello"|"First"/);
       assert.doesNotMatch(text, /lifecycle-v09\.jsonl|after\.jsonl/);
     }
