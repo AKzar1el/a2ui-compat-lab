@@ -587,6 +587,21 @@ indices (`null` for healthy full replay). With `--strict`, unchanged boundaries
 and counts exit 0, drift exits 1, malformed input/unsupported modes or browser
 startup/finalization errors exit 2. A **MATCH can mean both captures fail at
 the same event**, not that either is healthy or that failures share a cause.
+For CI where **both replays must also have no observed Chromium errors**,
+add `--require-no-observed-failures` together with `--strict`:
+
+```sh
+node src/browser-capture-error-boundary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --require-no-observed-failures --strict
+```
+
+This opt-in policy preserves the separate `errorBoundaryParity` result, but
+sets `ok: false` and strict exit 1 if **either** replay reports an observed
+failure, including when both fail at the same event. Its additional
+`observedFailuresAbsent` field means only that no failures were observed by
+this bounded replay, **not** that an app is generally healthy. Without the
+flag, existing parity behavior and report shape are unchanged. Duplicate
+policy flags fail closed with exit 2.
+
 No source paths, model values, browser diagnostics or reusable digests are
 exported. Event counts and boundary positions may still be sensitive and are
 not anonymized; review output before sharing. Existing output is never overwritten.

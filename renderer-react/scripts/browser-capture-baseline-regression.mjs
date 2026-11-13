@@ -61,6 +61,35 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     assert.equal(sameFailureResult.beforeFirstObservedFailureEventIndex, 2);
     assert.equal(sameFailureResult.afterFirstObservedFailureEventIndex, 2);
 
+    // Parity can match two failing captures; CI consumers may additionally
+    // require that neither Chromium replay observed a failure.
+    const matchedFailureRejected = runErrorCompare(['--before-capture', thirdFailurePath,
+      '--after-capture', thirdFailurePath, '--require-no-observed-failures', '--strict']);
+    assert.equal(matchedFailureRejected.status, 1,
+      'A matched failure must fail the opt-in no-observed-failures CI policy');
+    const rejectedResult = JSON.parse(matchedFailureRejected.stdout);
+    assert.equal(rejectedResult.errorBoundaryParity, 'match');
+    assert.equal(rejectedResult.requireNoObservedFailures, true);
+    assert.equal(rejectedResult.observedFailuresAbsent, false);
+    assert.equal(rejectedResult.ok, false);
+    assert.doesNotMatch(matchedFailureRejected.stdout,
+      /private-error|selection|alpha|surfaceId|stack|__private/,
+      'Policy failure must not disclose private capture values');
+
+    const cleanRequired = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', capturePath, '--require-no-observed-failures', '--strict']);
+    assert.equal(cleanRequired.status, 0);
+    const cleanPolicy = JSON.parse(cleanRequired.stdout);
+    assert.equal(cleanPolicy.requireNoObservedFailures, true);
+    assert.equal(cleanPolicy.observedFailuresAbsent, true);
+    assert.equal(cleanPolicy.ok, true);
+
+    const repeatedPolicy = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', capturePath, '--require-no-observed-failures',
+      '--require-no-observed-failures', '--strict']);
+    assert.equal(repeatedPolicy.status, 2, 'Duplicate policy flags must fail closed');
+    assert.equal(repeatedPolicy.stdout, '');
+
     const newlyBroken = runErrorCompare(['--before-capture', capturePath,
       '--after-capture', thirdFailurePath, '--strict']);
     assert.equal(newlyBroken.status, 1, 'A newly failing Chromium event must be CI drift');
