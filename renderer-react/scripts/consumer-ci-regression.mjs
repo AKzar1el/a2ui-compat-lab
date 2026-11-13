@@ -33,6 +33,10 @@ function runGeometry(args, from = geometryBefore, to = geometryAfter) {
 /** Exercise the published React/Chromium paths used by the copyable CI recipe. */
 export function testConsumerCiStarter() {
   const workflow = readFileSync(resolve(repo, 'examples/consumer-ci/workflow.yml'), 'utf8');
+  // The consumer uses a separate immutable checkout. Pin to the verified
+  // source revision containing BOTH CLI parse and runtime diagnostic guards.
+  assert.match(workflow, /ref: a26bd19ca2cbbec128f1c7a8d6071ff1eaa53ddb\b/,
+    'Consumer checkout must pin the full tested geometry runtime, not its earlier comparator-only commit');
   assert.match(workflow, /--require-no-observed-failures --compare-rendered-text --compare-button-geometry --strict/,
     'Consumer CI must gate replay health AND real rendered Text drift');
   assert.doesNotMatch(workflow, /src\/browser-capture-summary-compare\.mjs/,
