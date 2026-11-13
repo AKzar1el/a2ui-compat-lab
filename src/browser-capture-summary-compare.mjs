@@ -257,7 +257,7 @@ export function parseBrowserCaptureSummaryCompareOptions(argv) {
       (options.compareActions && (!options['before-capture'] || !options['after-capture'] ||
         !options['action-plan'])) ||
       (options.compareRenderedText && (!options['before-capture'] || !options['after-capture'] ||
-        (options['action-plan'] && !options.compareActions)))
+        (options['action-plan'] && !options.compareActions))))
     throw new Error(USAGE);
   return options;
 }
