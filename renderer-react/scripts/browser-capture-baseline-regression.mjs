@@ -139,6 +139,48 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
       'Existing structural counts intentionally do not compare rendered values');
     assert.equal(JSON.parse(unchangedStructure.stdout).ok, true);
 
+    // A Row-versus-Column layout can move an interactive control while the
+    // published browser structural report still observes identical counts.
+    const geometryMessages = encodedCapture.toString('utf8').trimEnd()
+      .split('\n').map(line => JSON.parse(line));
+    const geometryShifted = structuredClone(geometryMessages);
+    const geometryRoot = geometryShifted[1].updateComponents.components.find(
+      component => component.id === 'root');
+    assert.equal(geometryRoot.component, 'Column');
+    geometryRoot.component = 'Row';
+    const geometryAfterPath = join(dir, 'private-geometry-shift.jsonl');
+    writeFileSync(geometryAfterPath,
+      geometryShifted.map(message => JSON.stringify(message)).join('\n') + '\n');
+    const layoutBlind = run(['--before-capture', capturePath,
+      '--after-capture', geometryAfterPath, '--strict']);
+    assert.equal(layoutBlind.status, 0, 'Structural browser parity does not test geometry');
+    assert.equal(JSON.parse(layoutBlind.stdout).ok, true);
+    const geometrySame = run(['--before-capture', capturePath,
+      '--after-capture', capturePath, '--compare-button-geometry', '--strict']);
+    assert.equal(geometrySame.status, 0,
+      'Identical private captures must preserve real Chromium Button positions');
+    assert.equal(JSON.parse(geometrySame.stdout).buttonGeometryParity, 'match');
+    const geometryDiff = run(['--before-capture', capturePath,
+      '--after-capture', geometryAfterPath, '--compare-button-geometry', '--strict']);
+    assert.equal(geometryDiff.status, 1,
+      'Real Chromium should detect Button relocation without changed structural counts');
+    const shiftedGeometry = JSON.parse(geometryDiff.stdout);
+    assert.equal(shiftedGeometry.buttonGeometryParity, 'drift');
+    assert.equal(shiftedGeometry.firstDifferentButtonGeometryEventIndex, 1);
+    assert.deepEqual(shiftedGeometry.changedSummaryFields, ['buttonGeometryParity']);
+    assert.equal(shiftedGeometry.differingSteps, 0);
+    assert.doesNotMatch(JSON.stringify(shiftedGeometry),
+      /private-geometry-shift|action-replay|alpha|selection|surfaceId|__private|[a-f0-9]{64}/,
+      'Button geometry reports must not disclose private inputs or reusable digests');
+    const geometrySavedRefusal = run(['--before', baselinePath,
+      '--after-capture', geometryAfterPath, '--compare-button-geometry']);
+    const geometryActionRefusal = run(['--before-capture', capturePath,
+      '--after-capture', geometryAfterPath, '--action-plan', baselinePath,
+      '--compare-button-geometry']);
+    assert.equal(geometrySavedRefusal.status, 2);
+    assert.equal(geometryActionRefusal.status, 2,
+      'Geometry observation never activates approved Button actions');
+
     const visibleMatchPath = join(dir, 'rendered-text-match.json');
     const visibleMatch = run(['--before-capture', capturePath,
       '--after-capture', capturePath, '--compare-rendered-text', '--strict',
