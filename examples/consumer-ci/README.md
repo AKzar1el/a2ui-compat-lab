@@ -67,7 +67,7 @@ coordinates, private labels or reusable digests. Geometry is quantized
 to CSS pixels at a fixed Chromium viewport; this is **not** screenshot
 or cross-browser pixel parity, and its measurement overhead is unbenchmarked.
 
-Both scenarios run in the existing `react-browser` CI job using the published
+All public demonstration scenarios run in the existing `react-browser` CI job using the published
 renderer, not a mocked DOM or unverified example command.
 
 ## Adapt the GitHub Actions recipe
