@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {readFileSync} from 'node:fs';
-import {dirname, resolve} from 'node:path';
+import {readFileSync, mkdtempSync, writeFileSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from '@playwright/test';
 import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEvidence} from '../../src/browser-evidence.mjs';
@@ -2485,6 +2487,29 @@ assert.doesNotMatch(JSON.stringify(lateFailureReport), /private-surface|private-
   'Later failure reports must not expose malformed event payloads');
 assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
   '--report-first-error', '--report-first-error']), /Usage:/);
+// End-to-end CLI: diagnostic report is written before the intentional exit 1.
+// The entire input is parsed first, but malformed SDK payloads fail during the
+// first actual Chromium event; no private marker appears in output or stderr.
+const errorCliDir = mkdtempSync(join(tmpdir(), 'a2ui-browser-error-'));
+try {
+  const inputFile = join(errorCliDir, 'private-input.jsonl');
+  const outputFile = join(errorCliDir, 'safe-output.json');
+  writeFileSync(inputFile, JSON.stringify({version: 'v0.9',
+    createSurface: null, secretMarker: 'PRIVATE_BROWSER_ERROR_CANARY'}) + '\\n');
+  const cliResult = spawnSync(process.execPath,
+    [resolve(root, 'scripts/browser-capture-replay.mjs'), '--input', inputFile,
+      '--report-first-error', '--out', outputFile],
+    {cwd: root, timeout: 60000, encoding: 'utf8'});
+  assert.equal(cliResult.status, 1, 'Observed replay failure must exit 1 after saving evidence');
+  const firstErrorCliReport = JSON.parse(readFileSync(outputFile, 'utf8'));
+  assert.equal(firstErrorCliReport.firstObservedFailureEventIndex, 0);
+  assert.equal(firstErrorCliReport.processedEventCount, 0);
+  assert.doesNotMatch(JSON.stringify(firstErrorCliReport) + cliResult.stderr,
+    /PRIVATE_BROWSER_ERROR_CANARY|private-input\\.jsonl|surfaceId|stack/,
+    'Only fixed error-event metadata may escape the private CLI');
+} finally {
+  rmSync(errorCliDir, {recursive: true, force: true});
+}
 // A developer can isolate a failing private capture prefix without copying its
 // JSONL into smaller files or activating any captured controls.
 assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl',
