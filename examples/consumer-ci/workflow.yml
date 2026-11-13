@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AKzar1el/a2ui-compat-lab
-          ref: 8337ac99ab9ab3e0c482a76d36110cc1f032ec99
+          ref: a26bd19ca2cbbec128f1c7a8d6071ff1eaa53ddb
           path: a2ui-lab
           persist-credentials: false
       - uses: actions/setup-node@v4
