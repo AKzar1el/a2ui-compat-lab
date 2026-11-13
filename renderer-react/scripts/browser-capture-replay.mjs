@@ -34,7 +34,7 @@ export function parseBrowserCaptureOptions(argv) {
     actionSteps: [], stopAfterEventIndex: null, reportFirstError: false, inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
     internalActionDigest: false, internalRenderedTextDigest: false,
     internalButtonStateDigest: false, internalButtonA11yDigest: false,
-    internalButtonFocusDigest: false};
+    internalButtonFocusDigest: false, internalButtonGeometryDigest: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -68,6 +68,8 @@ export function parseBrowserCaptureOptions(argv) {
       parsed.internalButtonA11yDigest = true;
     } else if (arg === '--internal-button-focus-digest' && !parsed.internalButtonFocusDigest) {
       parsed.internalButtonFocusDigest = true;
+    } else if (arg === '--internal-button-geometry-digest' && !parsed.internalButtonGeometryDigest) {
+      parsed.internalButtonGeometryDigest = true;
     } else if (arg === '--report-first-error' && !parsed.reportFirstError) {
       parsed.reportFirstError = true;
     } else if (arg === '--inspect-loading-placeholders' && !parsed.inspectLoadingPlaceholders) {
@@ -96,7 +98,7 @@ export function parseBrowserCaptureOptions(argv) {
         parsed.inspectLoadingPlaceholders || parsed.rejectLoadingPlaceholders ||
         parsed.internalActionDigest || parsed.internalRenderedTextDigest ||
         parsed.internalButtonStateDigest || parsed.internalButtonA11yDigest ||
-        parsed.internalButtonFocusDigest)) ||
+        parsed.internalButtonFocusDigest || parsed.internalButtonGeometryDigest)) ||
       parsed.actionSteps.some((step, i) => step.buttonIndex > MAX_BUTTON_INDEX ||
         (i > 0 && step.eventIndex < parsed.actionSteps[i - 1].eventIndex)))
     throw new Error(USAGE);
@@ -151,7 +153,8 @@ export async function runBrowserCapture(messages, {
   actionSteps = [], stopAfterEventIndex = null, reportFirstError = false,
   inspectLoadingPlaceholders = false, rejectLoadingPlaceholders = false,
   actionDigestKey = null, renderedTextDigestKey = null, buttonStateDigestKey = null,
-  buttonA11yDigestKey = null, buttonFocusDigestKey = null, surfaceErrorProbe = false,
+  buttonA11yDigestKey = null, buttonFocusDigestKey = null,
+  buttonGeometryDigestKey = null, surfaceErrorProbe = false,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
@@ -165,6 +168,8 @@ export async function runBrowserCapture(messages, {
     throw new Error('Invalid internal Button accessibility digest key');
   if (buttonFocusDigestKey !== null && !/^[a-f0-9]{64}$/.test(buttonFocusDigestKey))
     throw new Error('Invalid internal Button focus digest key');
+  if (buttonGeometryDigestKey !== null && !/^[a-f0-9]{64}$/.test(buttonGeometryDigestKey))
+    throw new Error('Invalid internal Button geometry digest key');
   if (typeof reportFirstError !== 'boolean')
     throw new Error('Invalid first-error reporting mode');
   if (typeof surfaceErrorProbe !== 'boolean')
@@ -202,11 +207,15 @@ export async function runBrowserCapture(messages, {
       stopAfterEventIndex !== null || actionAfterEventIndex !== null ||
       inspectLoadingPlaceholders || rejectLoadingPlaceholders || actionDigestKey !== null ||
       renderedTextDigestKey !== null || buttonStateDigestKey !== null ||
-      buttonA11yDigestKey !== null || buttonFocusDigestKey !== null))
+      buttonA11yDigestKey !== null || buttonFocusDigestKey !== null ||
+      buttonGeometryDigestKey !== null))
     throw new Error('Error-event diagnostics cannot activate controls or combine replay modes');
   if (buttonFocusDigestKey !== null && (actionModes !== 0 || actionSteps.length > 0 ||
       actionAfterEventIndex !== null))
     throw new Error('Focus comparison cannot activate browser controls');
+  if (buttonGeometryDigestKey !== null && (actionModes !== 0 || actionSteps.length > 0 ||
+      actionAfterEventIndex !== null))
+    throw new Error('Geometry comparison cannot activate browser controls');
   const replayedMessages = stopAfterEventIndex === null
     ? messages : messages.slice(0, stopAfterEventIndex + 1);
   if (!replayedMessages.some(message => message && typeof message === 'object' &&
@@ -310,6 +319,7 @@ export async function runBrowserCapture(messages, {
     const renderedTextDigests = [];
     const buttonStateDigests = [];
     const buttonFocusDigests = [];
+    const buttonGeometryDigests = [];
     const buttonA11yDigests = [];
     const declaredButtonA11yDigests = [];
     const declaredLabelsBySurface = new Map();
@@ -366,6 +376,24 @@ export async function runBrowserCapture(messages, {
         buttonStateDigests.push(createHmac('sha256',
           Buffer.from(buttonStateDigestKey, 'hex'))
           .update(JSON.stringify(disabledStates)).digest('hex'));
+      }
+      if (buttonGeometryDigestKey) {
+        // Compare observed Chromium Button positions at a fixed viewport.
+        // Only quantized x/y/width/height are hashed; no names, IDs or DOM text.
+        const rectangles = await page.getByRole('button').evaluateAll(buttons =>
+          buttons.map(button => {
+            const rect = button.getBoundingClientRect();
+            return [rect.x, rect.y, rect.width, rect.height].map(value => {
+              if (!Number.isFinite(value) || Math.abs(value) > 100000)
+                throw new Error('Invalid Chromium Button geometry');
+              return Math.round(value);
+            });
+          }));
+        if (rectangles.length > MAX_BUTTON_INDEX + 1)
+          throw new Error('Browser capture Button geometry comparison exceeded limit');
+        buttonGeometryDigests.push(createHmac('sha256',
+          Buffer.from(buttonGeometryDigestKey, 'hex'))
+          .update(JSON.stringify(rectangles)).digest('hex'));
       }
       if (buttonFocusDigestKey) {
         // Measure real Chromium Tab reachability, not inferred tabindex or
@@ -514,6 +542,7 @@ export async function runBrowserCapture(messages, {
       ...(renderedTextDigestKey ? {__privateRenderedTextDigests: renderedTextDigests} : {}),
       ...(buttonStateDigestKey ? {__privateButtonStateDigests: buttonStateDigests} : {}),
       ...(buttonFocusDigestKey ? {__privateButtonFocusDigests: buttonFocusDigests} : {}),
+      ...(buttonGeometryDigestKey ? {__privateButtonGeometryDigests: buttonGeometryDigests} : {}),
       ...(buttonA11yDigestKey ? {__privateButtonA11yDigests: buttonA11yDigests,
         __privateDeclaredButtonA11yDigests: declaredButtonA11yDigests} : {}),
       ...(reportFirstError ? {firstObservedFailureEventIndex: null} : {}),
@@ -563,15 +592,18 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
         ? process.env.A2UI_PRIVATE_BUTTON_A11Y_DIGEST_KEY : null;
       const buttonFocusKey = args.internalButtonFocusDigest
         ? process.env.A2UI_PRIVATE_BUTTON_FOCUS_DIGEST_KEY : null;
+      const buttonGeometryKey = args.internalButtonGeometryDigest
+        ? process.env.A2UI_PRIVATE_BUTTON_GEOMETRY_DIGEST_KEY : null;
       if ((args.internalActionDigest || args.internalRenderedTextDigest ||
           args.internalButtonStateDigest || args.internalButtonA11yDigest ||
-          args.internalButtonFocusDigest) &&
+          args.internalButtonFocusDigest || args.internalButtonGeometryDigest) &&
           (args.out ||
             (args.internalActionDigest && !/^[a-f0-9]{64}$/.test(actionKey ?? '')) ||
             (args.internalRenderedTextDigest && !/^[a-f0-9]{64}$/.test(textKey ?? '')) ||
             (args.internalButtonStateDigest && !/^[a-f0-9]{64}$/.test(buttonStateKey ?? '')) ||
             (args.internalButtonA11yDigest && !/^[a-f0-9]{64}$/.test(buttonA11yKey ?? '')) ||
-            (args.internalButtonFocusDigest && !/^[a-f0-9]{64}$/.test(buttonFocusKey ?? ''))))
+            (args.internalButtonFocusDigest && !/^[a-f0-9]{64}$/.test(buttonFocusKey ?? '')) ||
+            (args.internalButtonGeometryDigest && !/^[a-f0-9]{64}$/.test(buttonGeometryKey ?? ''))))
         throw new Error('Internal comparison digest must be pipe-only with valid ephemeral keys');
       const report = await runBrowserCapture(readCapture(args.input),
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
@@ -582,7 +614,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           rejectLoadingPlaceholders: args.rejectLoadingPlaceholders,
           actionDigestKey: actionKey, renderedTextDigestKey: textKey,
           buttonStateDigestKey: buttonStateKey, buttonA11yDigestKey: buttonA11yKey,
-          buttonFocusDigestKey: buttonFocusKey});
+          buttonFocusDigestKey: buttonFocusKey,
+          buttonGeometryDigestKey: buttonGeometryKey});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
