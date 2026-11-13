@@ -25,6 +25,75 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     writeFileSync(baselinePath, JSON.stringify(baseline));
     writeFileSync(capturePath, encodedCapture);
 
+    // A private first-error comparator must distinguish clean captures from an
+    // observed Chromium failure without executing captured Button actions.
+    const errorCompare = resolve(repo, 'src/browser-capture-error-boundary-compare.mjs');
+    const runErrorCompare = args => spawnSync(process.execPath, [errorCompare, ...args], {
+      cwd: repo, encoding: 'utf8', windowsHide: true,
+      timeout: 120000, maxBuffer: 256 * 1024,
+    });
+    const cleanErrorMatch = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', capturePath, '--strict']);
+    assert.equal(cleanErrorMatch.status, 0, 'Two healthy private Chromium captures must match');
+    const cleanBoundary = JSON.parse(cleanErrorMatch.stdout);
+    assert.equal(cleanBoundary.errorBoundaryParity, 'match');
+    assert.equal(cleanBoundary.beforeFirstObservedFailureEventIndex, null);
+    assert.equal(cleanBoundary.afterFirstObservedFailureEventIndex, null);
+    assert.equal(cleanBoundary.ok, true);
+
+    const eventsForErrors = encodedCapture.toString('utf8').trimEnd()
+      .split('\n').map(line => JSON.parse(line));
+    assert.ok(eventsForErrors.length >= 3);
+    const failureAtSecond = structuredClone(eventsForErrors);
+    failureAtSecond[1].updateComponents = null;
+    const failureAtThird = structuredClone(eventsForErrors);
+    failureAtThird[2].updateDataModel = null;
+    const secondFailurePath = join(dir, 'private-error-second.jsonl');
+    const thirdFailurePath = join(dir, 'private-error-third.jsonl');
+    writeFileSync(secondFailurePath, failureAtSecond.map(x => JSON.stringify(x)).join('\n') + '\n');
+    writeFileSync(thirdFailurePath, failureAtThird.map(x => JSON.stringify(x)).join('\n') + '\n');
+
+    const sameFailure = runErrorCompare(['--before-capture', thirdFailurePath,
+      '--after-capture', thirdFailurePath, '--strict']);
+    assert.equal(sameFailure.status, 0, 'A matching observed failure boundary is parity, not health');
+    const sameFailureResult = JSON.parse(sameFailure.stdout);
+    assert.equal(sameFailureResult.errorBoundaryParity, 'match');
+    assert.equal(sameFailureResult.beforeFirstObservedFailureEventIndex, 2);
+    assert.equal(sameFailureResult.afterFirstObservedFailureEventIndex, 2);
+
+    const newlyBroken = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', thirdFailurePath, '--strict']);
+    assert.equal(newlyBroken.status, 1, 'A newly failing Chromium event must be CI drift');
+    const newFailure = JSON.parse(newlyBroken.stdout);
+    assert.equal(newFailure.errorBoundaryParity, 'drift');
+    assert.equal(newFailure.beforeFirstObservedFailureEventIndex, null);
+    assert.equal(newFailure.afterFirstObservedFailureEventIndex, 2);
+    assert.equal(newFailure.ok, false);
+    assert.doesNotMatch(newlyBroken.stdout, /private-error|selection|alpha|surfaceId|stack|__private/,
+      'Do not echo capture values, paths or browser error text');
+
+    const shiftedFailure = runErrorCompare(['--before-capture', secondFailurePath,
+      '--after-capture', thirdFailurePath, '--strict']);
+    assert.equal(shiftedFailure.status, 1, 'Moved failing boundary must be visible in real Chromium');
+    const moved = JSON.parse(shiftedFailure.stdout);
+    assert.equal(moved.beforeEvents, moved.afterEvents);
+    assert.equal(moved.beforeFirstObservedFailureEventIndex, 1);
+    assert.equal(moved.afterFirstObservedFailureEventIndex, 2);
+
+    const incompatibleMode = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', thirdFailurePath, '--action-plan', baselinePath]);
+    assert.equal(incompatibleMode.status, 2, 'First-error compare must never authorize actions');
+    assert.equal(incompatibleMode.stdout, '');
+    const malformedInput = join(dir, 'private-invalid-error-input.jsonl');
+    writeFileSync(malformedInput, '{"privateSecret":"DO_NOT_EXPORT_FIRST_ERROR_CANARY"}\n');
+    const malformed = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', malformedInput, '--strict']);
+    assert.equal(malformed.status, 2, 'Malformed private input must fail closed');
+    assert.equal(malformed.stdout, '');
+    assert.doesNotMatch(malformed.stderr,
+      /DO_NOT_EXPORT_FIRST_ERROR_CANARY|private-invalid-error-input|surfaceId|stack/,
+      'Never disclose malformed private capture values');
+
     const match = run(['--before', baselinePath, '--after-capture', capturePath,
       '--strict', '--out', matchingDiff]);
     assert.equal(match.status, 0, 'Direct private capture must match a real Chromium baseline');

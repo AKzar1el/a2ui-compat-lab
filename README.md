@@ -515,6 +515,25 @@ earlier. This mode is mutually exclusive with planned Button interactions,
 prefix stopping, and loading-placeholder inspection. Its limited event-count
 metadata is not anonymized; review it before publishing.
 
+To regress the **observed failure boundary** between two *private* v0.9
+captures without writing intermediate replay reports, compare them directly
+in the same pinned published React/core 0.14 + Chromium harness:
+
+```sh
+node src/browser-capture-error-boundary-compare.mjs --before-capture old-private.jsonl --after-capture new-private.jsonl --strict --out out/error-boundary-diff.json
+```
+
+This comparison does not activate Buttons or accept an action plan. Each entire
+input is validated, replayed independently with `--report-first-error`, and
+reduced to fixed-schema before/after event counts and first observed failure
+indices (`null` for healthy full replay). With `--strict`, unchanged boundaries
+and counts exit 0, drift exits 1, malformed input/unsupported modes or browser
+startup/finalization errors exit 2. A **MATCH can mean both captures fail at
+the same event**, not that either is healthy or that failures share a cause.
+No source paths, model values, browser diagnostics or reusable digests are
+exported. Event counts and boundary positions may still be sensitive and are
+not anonymized; review output before sharing. Existing output is never overwritten.
+
 To inspect a streaming-UX regression that only appears **between** v0.9
 messages, opt into intermediate Chromium loading-placeholder diagnostics:
 
