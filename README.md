@@ -47,9 +47,22 @@ the comparison is exact for stable action fields (object key order ignored);
 the Go envelope's volatile `timestamp` is validated then excluded because the
 published React/core harness omits its own generated timestamp.
 This mode requires one explicit Button activation and never performs a network
-request. **The separate Go frame's `dataModel` is not compared**, and this
-does not execute the Go backend, verify the full bidirectional WebSocket
-session, or establish third-party adoption. Use only developer-owned captures,
+request. The default action-only check intentionally does not inspect the Go
+frame's `dataModel`. When the saved Go client frame includes its full data model,
+opt in to compare that model with the **real published renderer's state at the
+moment of Button activation**:
+
+```sh
+node renderer-react/scripts/browser-capture-replay.mjs --input PRIVATE-server-frames.jsonl --input-format websocket-frames --accept-v091 --click-single-button --expect-client-action-frame PRIVATE-client-action.json --compare-client-data-model
+```
+
+This adds `expectedClientDataModelMatched: true` only for a verified model
+match. A missing model, different nested value, or action mismatch fails
+closed without printing model contents, paths or reusable digests; JSON object
+key order is ignored. Unlike action-only comparison, this detects a captured
+client model that would change the backend's next-turn behavior. It still does
+**not** execute the Go backend or prove the full bidirectional WebSocket
+session, real-world usage, or third-party adoption. Use only developer-owned captures,
 do not publish them, and do not pass private action JSON on the command line.
 
 ## Try a real Chromium CI regression
