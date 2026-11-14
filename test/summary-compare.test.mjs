@@ -258,3 +258,69 @@ test('two-capture comparison detects real lifecycle drift and refuses untrusted 
     assert.match(result.stderr, /Usage:/);
   }
 }));
+
+
+test('CopilotKit operation envelopes compare directly with private JSONL without writing unwrapped captures', () => withReports(({dir}) => {
+  const messages = readFileSync(sample, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  messages[2].updateDataModel.value.title = 'PRIVATE_COPILOTKIT_SUMMARY_VALUE';
+  const wrapped = join(dir, 'PRIVATE_COPILOTKIT_SUMMARY_PATH.json');
+  writeFileSync(wrapped, JSON.stringify({a2ui_operations: messages}));
+
+  let result = run(compare, ['--before-capture', sample, '--after-capture', wrapped,
+    '--after-format', 'copilotkit-operations', '--verify-chunks', '--strict']);
+  assert.equal(result.status, 0, result.stderr);
+  let diff = JSON.parse(result.stdout);
+  assert.equal(diff.result, 'MATCH', 'A value-only change must not count as structural drift');
+  assert.equal(diff.beforeEvents, 5);
+  assert.equal(diff.afterEvents, 5);
+  assert.equal(diff.beforeChunksVerified, true);
+  assert.equal(diff.afterChunksVerified, true);
+  assert.doesNotMatch(result.stdout + result.stderr,
+    /PRIVATE_COPILOTKIT_SUMMARY|surfaceId|captureSha256|"data"/);
+  assert.deepEqual(readdirSync(dir), ['PRIVATE_COPILOTKIT_SUMMARY_PATH.json'],
+    'The adapter must not write private intermediate JSONL or summaries');
+
+  result = run(compare, ['--before-capture', wrapped, '--before-format', 'copilotkit-operations',
+    '--after-capture', sample, '--strict']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).result, 'MATCH');
+
+  messages.splice(4, 0, structuredClone(messages[3]));
+  writeFileSync(wrapped, JSON.stringify({a2ui_operations: messages}));
+  result = run(compare, ['--before-capture', sample, '--after-capture', wrapped,
+    '--after-format', 'copilotkit-operations', '--strict']);
+  assert.equal(result.status, 1, result.stderr);
+  diff = JSON.parse(result.stdout);
+  assert.equal(diff.result, 'DRIFT');
+  assert.equal(diff.afterEvents, 6);
+  assert.deepEqual(diff.differences.map(entry => entry.index), [4, 5]);
+}));
+
+test('CopilotKit comparison input format fails closed for invalid flags, versions and private inputs', () => withReports(({dir}) => {
+  const messages = readFileSync(sample, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  const privateName = 'PRIVATE_COPILOTKIT_REJECTION_SENTINEL';
+  const wrapped = join(dir, privateName + '.json');
+  const out = join(dir, 'should-not-exist.json');
+  messages[0] = {...messages[0], version: 'v1.0'};
+  writeFileSync(wrapped, JSON.stringify({a2ui_operations: messages, secret: privateName}));
+  let result = run(compare, ['--before-capture', sample, '--after-capture', wrapped,
+    '--after-format', 'copilotkit-operations', '--out', out]);
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /Cannot replay capture with pinned SDK/);
+  assert.doesNotMatch(result.stderr, /PRIVATE_COPILOTKIT_REJECTION_SENTINEL|a2ui-safe-diff-/);
+  assert.deepEqual(readdirSync(dir).sort(), [privateName + '.json'],
+    'Invalid input must not materialize the report');
+
+  for (const invalid of [
+    ['--before-capture', sample, '--after-capture', sample, '--after-format', 'v1.0'],
+    ['--before-capture', sample, '--after-capture', sample, '--before-format', 'copilotkit-operations', '--before-format', 'jsonl'],
+    ['--before-capture', sample, '--after', wrapped, '--after-format', 'copilotkit-operations'],
+    ['--before', wrapped, '--before-format', 'copilotkit-operations', '--after-capture', sample],
+  ]) {
+    result = run(compare, invalid);
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Usage:/);
+    assert.equal(result.stdout, '');
+  }
+}));

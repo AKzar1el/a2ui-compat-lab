@@ -107,6 +107,21 @@ format against the lab's real headless SDK. It does **not** execute a third-part
 application, certify CopilotKit renderer behavior, support v1.0, or establish
 customer adoption. The original input is never modified.
 
+For an opt-in **structural regression comparison** against a saved CopilotKit
+tool-result wrapper, use the existing privacy-reduced comparator directly
+without saving an unpacked JSONL capture:
+
+```sh
+node src/summary-compare.mjs --before-capture before.jsonl --after-capture saved-copilotkit-result.json --after-format copilotkit-operations --strict --out out/copilotkit-structure-diff.json
+```
+
+Use `--before-format copilotkit-operations` when the before-capture is also a
+CopilotKit wrapper. These options only apply to private `--before-capture` /
+`--after-capture` inputs, never to already-produced safe summary reports.
+Only the allowed operation sequence and counts are compared: a value-only
+change can still report MATCH. No intermediate raw JSONL file is written,
+and structural metadata in the output can still be sensitive.
+
 ### Diagnose growing-string replace overhead locally
 
 `updateDataModel` v0.9 replaces values, so repeatedly sending longer strings can
