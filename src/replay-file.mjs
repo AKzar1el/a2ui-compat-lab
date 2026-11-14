@@ -9,7 +9,7 @@ const MAX_LINE_BYTES = 256 * 1024;
 const MAX_FRAMES = 10000;
 // Keep the opt-in 1-byte transport replay bounded on real-world captures.
 const MAX_CHUNK_VERIFY_BYTES = 512 * 1024;
-const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks] [--summary] [--stream-efficiency]';
+const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks] [--summary] [--stream-efficiency] [--input-format copilotkit-operations]';
 
 // Emit only protocol-defined operation names; never copy producer-controlled keys.
 const EVENT_OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
@@ -99,13 +99,17 @@ function options(argv) {
       continue;
     }
     const next = argv[++i];
-    if ((key !== '--input' && key !== '--out') || !next || next.startsWith('--') || result[key])
+    if ((key !== '--input' && key !== '--out' && key !== '--input-format') || !next || next.startsWith('--') || result[key])
       throw new Error(USAGE);
     result[key] = next;
   }
-  if (!result['--input'] || (streamEfficiency && !summary)) throw new Error(USAGE);
+  const inputFormat = result['--input-format'] ?? 'jsonl';
+  if (!result['--input'] || !['jsonl', 'copilotkit-operations'].includes(inputFormat) ||
+      (streamEfficiency && !summary) ||
+      (inputFormat === 'copilotkit-operations' && !summary)) throw new Error(USAGE);
   return {
     input: resolve(result['--input']),
+    inputFormat,
     out: result['--out'] ? resolve(result['--out']) : null,
     verifyChunks,
     summary,
@@ -127,6 +131,34 @@ function redactCaptureError(stage, run) {
   }
 }
 
+/** Accept the public CopilotKit Python helper's explicit a2ui_operations wrapper.
+ * No transport/network calls; raw producer values are never emitted in summary mode. */
+function decodeCopilotKitOperations(raw) {
+  let container;
+  try {
+    container = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw));
+  } catch {
+    throw new SyntaxError('Capture CopilotKit wrapper is not valid UTF-8 or JSON; input omitted');
+  }
+  if (!container || typeof container !== 'object' || Array.isArray(container) ||
+      Object.keys(container).length !== 1 || !Array.isArray(container.a2ui_operations) ||
+      container.a2ui_operations.length === 0 ||
+      container.a2ui_operations.length > MAX_FRAMES)
+    throw new SyntaxError('Capture CopilotKit wrapper must contain 1 to 10,000 operations only');
+  for (const operation of container.a2ui_operations) {
+    if (!operation || typeof operation !== 'object' || Array.isArray(operation) ||
+        operation.version !== 'v0.9' || Object.keys(operation).length !== 2 ||
+        EVENT_OPERATIONS.filter(key => Object.hasOwn(operation, key)).length !== 1 ||
+        !EVENT_OPERATIONS.some(key => Object.hasOwn(operation, key) &&
+          operation[key] && typeof operation[key] === 'object' && !Array.isArray(operation[key])))
+      throw new SyntaxError('Capture CopilotKit operation is not an explicit v0.9 message');
+  }
+  const normalized = Buffer.from(container.a2ui_operations.map(operation =>
+    JSON.stringify(operation)).join('\n') + '\n', 'utf8');
+  if (normalized.length > MAX_INPUT_BYTES)
+    throw new RangeError('Normalized CopilotKit capture exceeds 4 MiB');
+  return normalized;
+}
 function replayCapture(raw, {verifyChunks = false, summary = false, streamEfficiency = false} = {}) {
   if (raw.length === 0 || raw.length > MAX_INPUT_BYTES)
     throw new RangeError('Capture must be 1 byte to 4 MiB');
@@ -218,11 +250,14 @@ function writeCaptureReport(out, report) {
 }
 
 try {
-  const {input, out, help, verifyChunks, summary, streamEfficiency} = options(process.argv.slice(2));
+  const {input, inputFormat, out, help, verifyChunks, summary, streamEfficiency} = options(process.argv.slice(2));
   if (help) {
     console.log(USAGE);
   } else {
-    const observed = replayCapture(readCaptureFile(input), {verifyChunks, summary, streamEfficiency});
+    const raw = readCaptureFile(input);
+    const capture = inputFormat === 'copilotkit-operations'
+      ? decodeCopilotKitOperations(raw) : raw;
+    const observed = replayCapture(capture, {verifyChunks, summary, streamEfficiency});
     // A shareable structural summary never includes capture values, IDs, or its
     // digest; raw evidence remains private unless the caller explicitly omits --summary.
     const view = summary ? {
