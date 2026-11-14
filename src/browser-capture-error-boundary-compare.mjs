@@ -7,7 +7,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {compareBrowserCaptureSummaries} from './browser-capture-summary-compare.mjs';
 import {evaluateConsumer, readManifest, readLockfile} from './consumer-version-preflight.mjs';
 
-const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--require-no-observed-failures] [--compare-rendered-text] [--compare-button-geometry] [--compare-button-focus] [--format json|markdown|junit] [--out NEW-REPORT | --report-dir NEW-DIRECTORY] [--consumer-manifest APP/package.json --consumer-protocol v0.9 [--consumer-lockfile APP/package-lock.json]]';
+const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--before-input-format jsonl|copilotkit-operations] [--after-input-format jsonl|copilotkit-operations] [--require-no-observed-failures] [--compare-rendered-text] [--compare-button-geometry] [--compare-button-focus] [--format json|markdown|junit] [--out NEW-REPORT | --report-dir NEW-DIRECTORY] [--consumer-manifest APP/package.json --consumer-protocol v0.9 [--consumer-lockfile APP/package-lock.json]]';
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
 const RENDERER = '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0';
@@ -33,6 +33,10 @@ export function parseErrorBoundaryOptions(argv) {
       args.compareButtonFocus = true;
     else if (arg === '--format' && !Object.hasOwn(args, 'format') &&
       ['json', 'markdown', 'junit'].includes(argv[i + 1])) args.format = argv[++i];
+    else if (['--before-input-format', '--after-input-format'].includes(arg) &&
+      !Object.hasOwn(args, arg.slice(2)) &&
+      ['jsonl', 'copilotkit-operations'].includes(argv[i + 1]))
+      args[arg.slice(2)] = argv[++i];
     else if (arg === '--consumer-protocol' && !Object.hasOwn(args, 'consumer-protocol') &&
       argv[i + 1] && !argv[i + 1].startsWith('--')) args['consumer-protocol'] = argv[++i];
     else if (['--before-capture', '--after-capture', '--out', '--report-dir',
@@ -99,12 +103,12 @@ function parseObservedBoundary(report, exitStatus, textDigestEnabled = false,
   return {events: report.events, index: null, digests, geometryDigests, focusDigests};
 }
 
-function runDiagnostic(capturePath, textDigestKey = null, geometryDigestKey = null,
-  focusDigestKey = null) {
+function runDiagnostic(capturePath, inputFormat = 'jsonl', textDigestKey = null,
+  geometryDigestKey = null, focusDigestKey = null) {
   let child;
   try {
     child = spawnSync(process.execPath,
-      [RENDERER_SCRIPT, '--input', capturePath, '--report-first-error',
+      [RENDERER_SCRIPT, '--input', capturePath, '--input-format', inputFormat, '--report-first-error',
         ...(textDigestKey ? ['--internal-rendered-text-digest'] : []),
         ...(geometryDigestKey ? ['--internal-button-geometry-digest'] : []),
         ...(focusDigestKey ? ['--internal-button-focus-digest'] : [])], {
@@ -354,8 +358,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const textKey = args.compareRenderedText ? randomBytes(32).toString('hex') : null;
       const geometryKey = args.compareButtonGeometry ? randomBytes(32).toString('hex') : null;
       const focusKey = args.compareButtonFocus ? randomBytes(32).toString('hex') : null;
-      const before = runDiagnostic(args['before-capture'], textKey, geometryKey, focusKey);
-      const after = runDiagnostic(args['after-capture'], textKey, geometryKey, focusKey);
+      const before = runDiagnostic(args['before-capture'], args['before-input-format'] ?? 'jsonl',
+        textKey, geometryKey, focusKey);
+      const after = runDiagnostic(args['after-capture'], args['after-input-format'] ?? 'jsonl',
+        textKey, geometryKey, focusKey);
       const result = compareErrorBoundaries(before, after,
         {requireNoObservedFailures: args.requireNoObservedFailures,
           compareRenderedText: args.compareRenderedText,

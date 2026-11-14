@@ -102,3 +102,22 @@ test('partial, duplicate or orphaned consumer gate flags fail invocation validat
   assert.equal(valid['consumer-protocol'], 'v0.9');
   assert.match(valid['consumer-lockfile'], /package-lock\.json$/);
 });
+
+test('CopilotKit browser pair formats are explicit per input and fail closed', () => {
+  const base = ['--before-capture', 'private-before.json',
+    '--after-capture', 'private-after.jsonl'];
+  const selected = parseErrorBoundaryOptions([...base,
+    '--before-input-format', 'copilotkit-operations',
+    '--after-input-format', 'jsonl']);
+  assert.equal(selected['before-input-format'], 'copilotkit-operations');
+  assert.equal(selected['after-input-format'], 'jsonl');
+  assert.equal(parseErrorBoundaryOptions(base)['before-input-format'], undefined,
+    'Default must remain JSONL for existing consumers');
+  for (const invalid of [
+    ['--before-input-format', 'v1.0'],
+    ['--after-input-format', 'unknown'],
+    ['--before-input-format'],
+    ['--after-input-format', 'jsonl', '--after-input-format', 'copilotkit-operations'],
+  ]) assert.throws(() => parseErrorBoundaryOptions([...base, ...invalid]),
+    /Invalid private capture comparison/);
+});

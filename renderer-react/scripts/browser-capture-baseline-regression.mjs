@@ -44,6 +44,50 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     const eventsForErrors = encodedCapture.toString('utf8').trimEnd()
       .split('\n').map(line => JSON.parse(line));
     assert.ok(eventsForErrors.length >= 3);
+    // CopilotKit's published Python helper returns saved a2ui_operations JSON,
+    // while the existing pair comparator previously accepted only JSONL.
+    // Compare mixed producer formats directly in real Chromium, without a
+    // second private raw JSONL file or activating Button actions.
+    const copilotkitPath = join(dir, 'PRIVATE_COPILOTKIT_TOOL_RESULT.json');
+    writeFileSync(copilotkitPath, JSON.stringify({a2ui_operations: eventsForErrors}));
+    const mixedMatch = runErrorCompare(['--before-capture', copilotkitPath,
+      '--before-input-format', 'copilotkit-operations',
+      '--after-capture', capturePath, '--require-no-observed-failures',
+      '--compare-rendered-text', '--strict']);
+    assert.equal(mixedMatch.status, 0, mixedMatch.stderr);
+    const mixedResult = JSON.parse(mixedMatch.stdout);
+    assert.equal(mixedResult.ok, true);
+    assert.equal(mixedResult.renderedTextParity, 'match');
+    assert.doesNotMatch(mixedMatch.stdout,
+      /PRIVATE_COPILOTKIT_TOOL_RESULT|action-replay|selection|alpha|__private|[a-f0-9]{64}/);
+
+    const changedCopilotkit = structuredClone(eventsForErrors);
+    changedCopilotkit[2].updateDataModel.value.selection = 'PRIVATE_COPILOTKIT_RENDERED_DRIFT';
+    const changedCopilotkitPath = join(dir, 'PRIVATE_COPILOTKIT_CHANGED.json');
+    writeFileSync(changedCopilotkitPath,
+      JSON.stringify({a2ui_operations: changedCopilotkit}));
+    const mixedDrift = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', changedCopilotkitPath,
+      '--after-input-format', 'copilotkit-operations',
+      '--require-no-observed-failures', '--compare-rendered-text', '--strict']);
+    assert.equal(mixedDrift.status, 1, mixedDrift.stderr);
+    const mixedChange = JSON.parse(mixedDrift.stdout);
+    assert.equal(mixedChange.renderedTextParity, 'drift');
+    assert.equal(mixedChange.firstDifferentRenderedTextEventIndex, 2);
+    assert.doesNotMatch(mixedDrift.stdout,
+      /PRIVATE_COPILOTKIT|action-replay|selection|alpha|__private|[a-f0-9]{64}/);
+
+    const invalidCopilotkitPath = join(dir, 'PRIVATE_COPILOTKIT_INVALID.json');
+    writeFileSync(invalidCopilotkitPath,
+      JSON.stringify({a2ui_operations: [{version: 'v1.0',
+        createSurface: {surfaceId: 'PRIVATE_COPILOTKIT_SECRET'}}]}));
+    const rejectedWrapper = runErrorCompare(['--before-capture', capturePath,
+      '--after-capture', invalidCopilotkitPath,
+      '--after-input-format', 'copilotkit-operations', '--strict']);
+    assert.equal(rejectedWrapper.status, 2, rejectedWrapper.stderr);
+    assert.equal(rejectedWrapper.stdout, '');
+    assert.doesNotMatch(rejectedWrapper.stderr,
+      /PRIVATE_COPILOTKIT|SECRET|a2ui_operations/);
     const failureAtSecond = structuredClone(eventsForErrors);
     failureAtSecond[1].updateComponents = null;
     const failureAtThird = structuredClone(eventsForErrors);
