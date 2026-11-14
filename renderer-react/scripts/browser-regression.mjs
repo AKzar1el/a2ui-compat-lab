@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from '@playwright/test';
 import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEvidence} from '../../src/browser-evidence.mjs';
 import {createServer} from 'vite';
-import {decodeBrowserCapture, decodeCopilotKitBrowserCapture, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
+import {decodeBrowserCapture, decodeCopilotKitBrowserCapture, decodeWebSocketBrowserCapture, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
 import {compareBrowserCaptureSummaries} from '../../src/browser-capture-summary-compare.mjs';
 import {testDirectBrowserCaptureBaseline} from './browser-capture-baseline-regression.mjs';
 import {testConsumerCiStarter} from './consumer-ci-regression.mjs';
@@ -2565,6 +2565,59 @@ assert.equal(goNotesReport.actionsVerified, 1);
 assert.equal(goNotesReport.actionsEmitted, 1);
 assert.doesNotMatch(JSON.stringify(goNotesReport), /add_note|add-btn|New note|notes-list/,
   'A real browser report must not expose third-party fixture component IDs or data');
+// The independent Go/React producer's real WebSocket test uses an offline
+// scripted LLM and emits status + {kind:'a2ui',message} server frames.
+// Frame wrapping below reconstructs that public transport contract from
+// its already-attributed few-shot fixture; it is not a captured live session.
+const goWsFrames = [
+  {kind: 'status', state: 'thinking'},
+  ...goNotesMessages.map(message => ({kind: 'a2ui', message})),
+  {kind: 'status', state: 'idle'},
+];
+const goWsBytes = Buffer.from(goWsFrames.map(frame => JSON.stringify(frame)).join('\\n') + '\\n');
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.ws.jsonl',
+  '--input-format', 'websocket-frames', '--accept-v091']).inputFormat, 'websocket-frames');
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.ws.jsonl',
+  '--input-format', 'websocket-frames', '--compat-copilotkit-basic-catalog']), /Usage:/);
+assert.throws(() => decodeWebSocketBrowserCapture(goWsBytes), /Invalid browser capture v0.9/,
+  'WebSocket import must not bypass the strict default version lane');
+assert.deepEqual(decodeWebSocketBrowserCapture(goWsBytes, true), goNotesMessages);
+assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
+  JSON.stringify({kind: 'error', code: 'private-code', message: 'SECRET'}) + '\\n'), true),
+/Invalid A2UI WebSocket server frame/);
+assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
+  JSON.stringify({kind: 'action', message: {name: 'private-action'}}) + '\\n'), true),
+/Invalid A2UI WebSocket server frame/);
+assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
+  JSON.stringify({kind: 'status', state: 'idle'}) + '\\n'), true),
+/no A2UI messages/);
+assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
+  JSON.stringify({kind: 'a2ui', message: goNotesMessages[0], token: 'SECRET'}) + '\\n'), true),
+/Invalid A2UI WebSocket server frame/);
+assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
+  JSON.stringify({kind: 'a2ui', message: goNotesMessages[0]})), true),
+/Invalid A2UI WebSocket capture size or option/);
+assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from([255, 10]), true),
+/Invalid A2UI WebSocket capture encoding or JSON/);
+const wsTempDir = mkdtempSync(join(tmpdir(), 'a2ui-real-go-ws-'));
+try {
+  const capturePath = join(wsTempDir, 'PRIVATE_GO_WS_SERVER_FRAMES.jsonl');
+  writeFileSync(capturePath, goWsBytes);
+  const wsReplay = spawnSync(process.execPath, [
+    resolve(root, 'scripts/browser-capture-replay.mjs'), '--input', capturePath,
+    '--input-format', 'websocket-frames', '--accept-v091', '--click-single-button',
+  ], {encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 256 * 1024});
+  assert.equal(wsReplay.error, undefined, 'Offline WebSocket frame import must launch');
+  assert.equal(wsReplay.status, 0, wsReplay.stderr);
+  const wsReport = JSON.parse(wsReplay.stdout);
+  assert.equal(wsReport.events, 3);
+  assert.equal(wsReport.actionsVerified, 1);
+  assert.equal(wsReport.actionsEmitted, 1);
+  assert.doesNotMatch(wsReplay.stdout + wsReplay.stderr,
+    /PRIVATE_GO_WS|add_note|add-btn|New note|notes-list|SECRET/);
+} finally {
+  rmSync(wsTempDir, {recursive: true, force: true});
+}
 // CopilotKit's saved v0.9 tool-result format must drive a real Chromium Button
 // without an intermediate raw JSONL file or private identifiers in output.
 const copilotBytes = Buffer.from(JSON.stringify({a2ui_operations: decodedExample}));
