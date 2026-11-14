@@ -610,7 +610,27 @@ node scripts/browser-capture-replay.mjs --input ./private-capture.jsonl --press-
 ```
 
 Each line must contain one **raw v0.9 A2UI message** (not a message wrapper)
-and the file must end with a newline. Limits: 512 KiB total, 64 KiB per line,
+and the file must end with a newline. The default remains **strict v0.9**.
+For an independently authored v0.9.1 producer, opt into the published
+React/core 0.14 renderer's tested compatibility path without rewriting captures:
+
+```sh
+cd renderer-react
+node scripts/browser-capture-replay.mjs --input ../fixtures/external-go-react-notes-v091.jsonl --accept-v091 --click-single-button
+```
+
+The public Apache-2.0-licensed three-message *Notes* example is adapted from
+[nigma888/a2ui-go-react's deterministic Go producer few-shot](https://github.com/nigma888/a2ui-go-react/blob/f43bb79ecfa30cb8cf88ec57d3c574f461015a4b/backend/internal/agent/prompt.go),
+not captured from a live third-party app. Its producer uses `v0.9.1`,
+the same Basic Catalog URI, and a create/components/data lifecycle.
+`--accept-v091` accepts v0.9 and v0.9.1 messages **only in JSONL mode**;
+it refuses v1.0 and cannot be combined with CopilotKit envelope mode.
+Without that flag the identical v0.9.1 input is rejected. The returned
+`protocol: "v0.9"` identifies the pinned renderer's compatibility
+lane, **not** the precise source-message version. This is bounded replay
+compatibility evidence, not full integration or certification of the Go app.
+
+Limits: Limits: 512 KiB total, 64 KiB per line,
 100 events. The opt-in click checks exactly one rendered Button at the end
 and verifies that a genuine browser pointer action emits exactly one agent
 event. Alternatively, `--press-single-button-enter` presses **Tab** from the
