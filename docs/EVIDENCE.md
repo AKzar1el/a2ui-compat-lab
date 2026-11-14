@@ -795,3 +795,8 @@ The optional `--format markdown` mode for `src/browser-capture-summary-compare.m
 - This does NOT prove actual third-party usage, browser routing, identity
   authentication, anonymization, adoption or revenue. Existing unresolved
   Zod3 HIGH exception expires 2026-12-07.
+
+
+## 2026-11-14 — Optional CopilotKit envelope in real Chromium replay (candidate)
+
+The public CopilotKit Python A2UI helper returns a JSON object with `a2ui_operations` v0.9 messages. Our headless adapter supports the format, but real React/Chromium replay previously required a second raw JSONL file. This opt-in browser `--input-format copilotkit-operations` reader validates and normalizes the wrapper in memory, sharing the strict existing browser JSONL limits. The browser regression compares structural output and a real Button action against the same synthetic fixture. This is **not execution of an actual CopilotKit application**. Final-head CI must be independently verified before claiming this shipped.

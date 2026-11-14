@@ -8,7 +8,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -29,7 +29,7 @@ function canonicalActionJSON(value) {
 
 export function parseBrowserCaptureOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const parsed = {clickSingleButton: false, pressSingleButtonEnter: false,
+  const parsed = {inputFormat: null, clickSingleButton: false, pressSingleButtonEnter: false,
     clickButtonIndex: null, pressButtonIndexEnter: null, actionAfterEventIndex: null,
     actionSteps: [], stopAfterEventIndex: null, reportFirstError: false, inspectLoadingPlaceholders: false, rejectLoadingPlaceholders: false,
     internalActionDigest: false, internalRenderedTextDigest: false,
@@ -76,6 +76,9 @@ export function parseBrowserCaptureOptions(argv) {
       parsed.inspectLoadingPlaceholders = true;
     } else if (arg === '--reject-loading-placeholders' && !parsed.rejectLoadingPlaceholders) {
       parsed.rejectLoadingPlaceholders = true;
+    } else if (arg === '--input-format' && parsed.inputFormat === null &&
+      ['jsonl', 'copilotkit-operations'].includes(argv[i + 1])) {
+      parsed.inputFormat = argv[++i];
     } else if ((arg === '--input' || arg === '--out') &&
       argv[i + 1] && !argv[i + 1].startsWith('--') && !parsed[arg.slice(2)]) {
       parsed[arg.slice(2)] = resolve(argv[++i]);
@@ -83,6 +86,7 @@ export function parseBrowserCaptureOptions(argv) {
       throw new Error(USAGE);
     }
   }
+  parsed.inputFormat ??= 'jsonl';
   const actionModes = Number(parsed.clickSingleButton) + Number(parsed.pressSingleButtonEnter) +
     Number(parsed.clickButtonIndex !== null) + Number(parsed.pressButtonIndexEnter !== null);
   if (!parsed.input || actionModes > 1 ||
@@ -134,12 +138,42 @@ export function decodeBrowserCapture(raw) {
   return events;
 }
 
-function readCapture(input) {
+/** The public CopilotKit Python helper's saved v0.9 tool-result envelope.
+ * In-memory normalization shares the strict existing JSONL browser validator. */
+export function decodeCopilotKitBrowserCapture(raw) {
+  if (!Buffer.isBuffer(raw) || raw.length < 2 || raw.length > MAX_INPUT_BYTES)
+    throw new Error('Invalid CopilotKit browser capture size');
+  let envelope;
+  try {
+    envelope = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw));
+  } catch {
+    throw new Error('Invalid CopilotKit browser capture encoding or JSON');
+  }
+  const messages = envelope?.a2ui_operations;
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope) ||
+      Object.keys(envelope).length !== 1 || !Array.isArray(messages) ||
+      messages.length < 1 || messages.length > MAX_EVENTS)
+    throw new Error('Invalid CopilotKit browser capture envelope');
+  for (const message of messages) {
+    if (!message || typeof message !== 'object' || Array.isArray(message) ||
+        message.version !== 'v0.9' || Object.keys(message).length !== 2 ||
+        OPERATIONS.filter(operation => Object.hasOwn(message, operation)).length !== 1 ||
+        !OPERATIONS.some(operation => Object.hasOwn(message, operation) &&
+          message[operation] && typeof message[operation] === 'object' &&
+          !Array.isArray(message[operation])))
+      throw new Error('Invalid CopilotKit browser capture operation');
+  }
+  return decodeBrowserCapture(Buffer.from(messages.map(message => JSON.stringify(message)).join('\n') + '\n'));
+}
+
+function readCapture(input, inputFormat = 'jsonl') {
   try {
     const meta = statSync(input);
     if (!meta.isFile() || meta.size < 2 || meta.size > MAX_INPUT_BYTES)
       throw new Error('Invalid browser capture file');
-    return decodeBrowserCapture(readFileSync(input));
+    const raw = readFileSync(input);
+    return inputFormat === 'copilotkit-operations' ?
+      decodeCopilotKitBrowserCapture(raw) : decodeBrowserCapture(raw);
   } catch {
     throw new Error('Invalid browser capture input; path and contents omitted');
   }
@@ -603,7 +637,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
             (args.internalButtonFocusDigest && !/^[a-f0-9]{64}$/.test(buttonFocusKey ?? '')) ||
             (args.internalButtonGeometryDigest && !/^[a-f0-9]{64}$/.test(buttonGeometryKey ?? ''))))
         throw new Error('Internal comparison digest must be pipe-only with valid ephemeral keys');
-      const report = await runBrowserCapture(readCapture(args.input),
+      const report = await runBrowserCapture(readCapture(args.input, args.inputFormat),
         {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
           actionAfterEventIndex: args.actionAfterEventIndex, actionSteps: args.actionSteps,

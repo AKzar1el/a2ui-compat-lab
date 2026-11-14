@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from '@playwright/test';
 import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEvidence} from '../../src/browser-evidence.mjs';
 import {createServer} from 'vite';
-import {decodeBrowserCapture, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
+import {decodeBrowserCapture, decodeCopilotKitBrowserCapture, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
 import {compareBrowserCaptureSummaries} from '../../src/browser-capture-summary-compare.mjs';
 import {testDirectBrowserCaptureBaseline} from './browser-capture-baseline-regression.mjs';
 import {testConsumerCiStarter} from './consumer-ci-regression.mjs';
@@ -2540,6 +2540,45 @@ assert.throws(() => decodeBrowserCapture(Buffer.from('{"version":"v0.9"}')), /In
 const browserCaptureReport = await runBrowserCapture(decodedExample, {clickSingleButton: true});
 assert.equal(browserCaptureReport.kind, 'a2ui-react-capture-browser-replay');
 assert.equal(browserCaptureReport.events, 3);
+// CopilotKit's saved v0.9 tool-result format must drive a real Chromium Button
+// without an intermediate raw JSONL file or private identifiers in output.
+const copilotBytes = Buffer.from(JSON.stringify({a2ui_operations: decodedExample}));
+assert.deepEqual(decodeCopilotKitBrowserCapture(copilotBytes), decodedExample);
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.json',
+  '--input-format', 'copilotkit-operations']).inputFormat, 'copilotkit-operations');
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl']).inputFormat, 'jsonl');
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'capture',
+  '--input-format', 'copilotkit-operations', '--input-format', 'jsonl']), /Usage:/);
+assert.throws(() => decodeCopilotKitBrowserCapture(Buffer.from(JSON.stringify({
+  a2ui_operations: decodedExample, privateToken: 'must-not-escape',
+}))), /Invalid CopilotKit/);
+assert.throws(() => decodeCopilotKitBrowserCapture(Buffer.from(JSON.stringify({
+  a2ui_operations: [{...decodedExample[0], version: 'v1.0'}],
+}))), /Invalid CopilotKit/);
+const copilotTempDir = mkdtempSync(join(tmpdir(), 'a2ui-copilot-browser-'));
+try {
+  const copilotPath = join(copilotTempDir, 'private-copilotkit-result.json');
+  writeFileSync(copilotPath, copilotBytes);
+  const copilotBrowser = spawnSync(process.execPath, [
+    resolve(root, 'scripts/browser-capture-replay.mjs'),
+    '--input', copilotPath, '--input-format', 'copilotkit-operations',
+    '--click-single-button',
+  ], {cwd: root, encoding: 'utf8', windowsHide: true, timeout: 120000,
+    maxBuffer: 256 * 1024});
+  assert.equal(copilotBrowser.status, 0,
+    'Valid CopilotKit v0.9 capture must run in real offline Chromium');
+  const copilotReport = JSON.parse(copilotBrowser.stdout);
+  assert.equal(copilotReport.events, browserCaptureReport.events);
+  assert.equal(copilotReport.actionsEmitted, browserCaptureReport.actionsEmitted);
+  assert.deepEqual(copilotReport.steps.map(step => step.operation),
+    browserCaptureReport.steps.map(step => step.operation));
+  assert.doesNotMatch(copilotBrowser.stdout + copilotBrowser.stderr,
+    /action-replay|alpha|Confirm|selection|surfaceId|must-not-escape/,
+    'Browser result must omit private model values and identifiers');
+} finally {
+  rmSync(copilotTempDir, {recursive: true, force: true});
+}
+
 assert.deepEqual(browserCaptureReport.steps.map(step => step.operation),
   ['createSurface', 'updateComponents', 'updateDataModel']);
 assert.equal(browserCaptureReport.steps.at(-1).surfaceCount, 1);

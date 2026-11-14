@@ -107,6 +107,23 @@ format against the lab's real headless SDK. It does **not** execute a third-part
 application, certify CopilotKit renderer behavior, support v1.0, or establish
 customer adoption. The original input is never modified.
 
+For a **real pinned React/Chromium renderer** replay of the same saved CopilotKit
+v0.9 tool result (instead of headless structural checks), opt into the browser CLI:
+
+```sh
+cd renderer-react
+node scripts/browser-capture-replay.mjs --input ../saved-copilotkit-result.json --input-format copilotkit-operations --click-single-button --out ../out/copilot-browser-report.json
+```
+
+This runs the published React 0.14.0 / web_core 0.14.0 renderer on loopback with
+external HTTP/WebSocket requests blocked, exercising one visible Button action.
+The wrapper is validated as exactly one `a2ui_operations` array containing
+1–100 v0.9 messages, with a 512 KiB total and 64 KiB normalized per-event limit.
+No unpacked JSONL file is written; evidence omits private UI values and IDs,
+but structural counts can still be sensitive. This does not run CopilotKit
+itself, certify third-party applications, or support A2UI v1.0.
+Install the renderer's pinned dependencies and Playwright Chromium first.
+
 For an opt-in **structural regression comparison** against a saved CopilotKit
 tool-result wrapper, use the existing privacy-reduced comparator directly
 without saving an unpacked JSONL capture:
