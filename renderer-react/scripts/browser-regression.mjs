@@ -2566,9 +2566,9 @@ assert.equal(goNotesReport.actionsEmitted, 1);
 assert.doesNotMatch(JSON.stringify(goNotesReport), /add_note|add-btn|New note|notes-list/,
   'A real browser report must not expose third-party fixture component IDs or data');
 // The independent Go producer's outbound action envelope is separate from
-// its server frames. Verify it matches the actual published React action, not
-// merely the number of clicked Buttons. The supplied dataModel is deliberately
-// outside this action-only assertion and never copied into the report.
+// its server frames. Verify both the emitted published React action and,
+// when explicitly requested, the outbound full client dataModel without
+// copying either private payload into reports.
 const goClientActionFrame = {
   kind: 'action',
   message: {version: 'v0.9.1', action: {
@@ -2584,6 +2584,13 @@ const goExpectedAction = decodeExpectedClientActionFrame(goClientActionBytes, tr
 assert.equal(goExpectedAction.name, 'add_note');
 assert.equal(Object.hasOwn(goExpectedAction, 'timestamp'), false,
   'Go producer wall-clock timestamp must not be mistaken for action drift');
+const expectedGoFrameWithModel = decodeExpectedClientActionFrame(goClientActionBytes, true, true);
+assert.deepEqual(expectedGoFrameWithModel.action, goExpectedAction);
+assert.deepEqual(expectedGoFrameWithModel.dataModel, {draft: '', notes: []});
+assert.throws(() => decodeExpectedClientActionFrame(Buffer.from(JSON.stringify({
+  kind: 'action', message: goClientActionFrame.message,
+})), true, true), /Invalid expected Go client action frame/,
+'Model comparison must require an explicit outbound dataModel field');
 assert.throws(() => decodeExpectedClientActionFrame(Buffer.from(JSON.stringify({
   ...goClientActionFrame, message: {
     version: 'v0.9.1', action: {...goClientActionFrame.message.action, timestamp: 'PRIVATE_BAD_TIME'},
@@ -2609,6 +2616,14 @@ assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.ws',
 assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.ws',
   '--input-format', 'websocket-frames', '--click-single-button',
   '--expect-client-action-frame', 'a.json', '--expect-client-action-frame', 'b.json']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.ws',
+  '--input-format', 'websocket-frames', '--click-single-button',
+  '--compare-client-data-model']), /Usage:/,
+'Model parity cannot silently run without an expected action frame');
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.ws',
+  '--input-format', 'websocket-frames', '--click-single-button',
+  '--expect-client-action-frame', 'a.json', '--compare-client-data-model',
+  '--compare-client-data-model']), /Usage:/);
 const goMatchedReport = await runBrowserCapture(goNotesMessages, {
   acceptV091: true, clickSingleButton: true, expectedAction: goExpectedAction,
 });
@@ -2621,6 +2636,11 @@ await assert.rejects(runBrowserCapture(goNotesMessages, {
   acceptV091: true, clickSingleButton: true,
   expectedAction: {...goExpectedAction, context: {text: 'PRIVATE_DRIFT'}},
 }), {message: 'Chromium action did not match the expected client frame'});
+await assert.rejects(runBrowserCapture(goNotesMessages, {
+  acceptV091: true, clickSingleButton: true, expectedAction: goExpectedAction,
+  expectedDataModel: {notes: ['PRIVATE_CLIENT_MODEL_DRIFT'], draft: ''},
+}), {message: 'Chromium data model did not match the expected client frame'},
+'Identical actions must not mask an incorrect full client dataModel');
 
 // The independent Go/React producer's real WebSocket test uses an offline
 // scripted LLM and emits status + {kind:'a2ui',message} server frames.
@@ -2677,12 +2697,13 @@ try {
   const wsActionReplay = spawnSync(process.execPath, [
     resolve(root, 'scripts/browser-capture-replay.mjs'), '--input', capturePath,
     '--input-format', 'websocket-frames', '--accept-v091', '--click-single-button',
-    '--expect-client-action-frame', privateGoActionPath,
+    '--expect-client-action-frame', privateGoActionPath, '--compare-client-data-model',
   ], {encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 256 * 1024});
   assert.equal(wsActionReplay.error, undefined);
   assert.equal(wsActionReplay.status, 0, wsActionReplay.stderr);
   const wsActionReport = JSON.parse(wsActionReplay.stdout);
   assert.equal(wsActionReport.expectedClientActionMatched, true);
+  assert.equal(wsActionReport.expectedClientDataModelMatched, true);
   assert.doesNotMatch(wsActionReplay.stdout + wsActionReplay.stderr,
     /PRIVATE_GO|add_note|add-btn|draft|PRIVATE_DRIFT|sourceComponentId/,
     'A real Chromium action match must never disclose private Go action fields');
