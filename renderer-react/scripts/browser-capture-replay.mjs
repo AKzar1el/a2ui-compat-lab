@@ -264,7 +264,7 @@ export function decodeExpectedClientActionFrame(raw, acceptV091 = false) {
         !['name', 'surfaceId', 'sourceComponentId', 'context', 'timestamp'].includes(key)) ||
       (Object.hasOwn(action, 'timestamp') &&
         (typeof action.timestamp !== 'string' ||
-          !/^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d/.test(action.timestamp) ||
+          !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/.test(action.timestamp) ||
           !Number.isFinite(Date.parse(action.timestamp)))))
     throw new Error('Invalid expected Go client action frame');
   // The Go producer serializes a wall-clock timestamp. Our real React/core
