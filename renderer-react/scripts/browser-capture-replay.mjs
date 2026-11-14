@@ -238,8 +238,8 @@ export function decodeWebSocketBrowserCapture(raw, acceptV091 = false) {
 }
 
 /** An outbound Go client action is private, bounded comparison evidence only.
- * The frame's dataModel is not checked: this verifies the emitted action,
- * not the producer's complete client state or a live backend turn. */
+ * Compare only stable action fields by default. The optional full dataModel
+ * parity remains in memory and does not execute a live backend turn. */
 export function decodeExpectedClientActionFrame(raw, acceptV091 = false, includeDataModel = false) {
   if (typeof acceptV091 !== 'boolean' || typeof includeDataModel !== 'boolean' || !Buffer.isBuffer(raw) ||
       raw.length < 2 || raw.length > MAX_LINE_BYTES)
