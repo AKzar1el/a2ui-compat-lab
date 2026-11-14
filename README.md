@@ -43,7 +43,9 @@ node renderer-react/scripts/browser-capture-replay.mjs --input PRIVATE-server-fr
 A mismatch exits nonzero; a match adds `expectedClientActionMatched: true` to
 the privacy-reduced count report. Input files are bounded and read locally,
 private action values, component IDs and file paths are never printed, and
-the comparison is exact for the action object (object key order ignored).
+the comparison is exact for stable action fields (object key order ignored);
+the Go envelope's volatile `timestamp` is validated then excluded because the
+published React/core harness omits its own generated timestamp.
 This mode requires one explicit Button activation and never performs a network
 request. **The separate Go frame's `dataModel` is not compared**, and this
 does not execute the Go backend, verify the full bidirectional WebSocket
