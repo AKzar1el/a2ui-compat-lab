@@ -2552,7 +2552,7 @@ assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.json',
   '--input-format', 'copilotkit-operations', '--accept-v091']), /Usage:/);
 assert.throws(() => decodeBrowserCapture(Buffer.from(JSON.stringify({
   version: 'v1.0', createSurface: {surfaceId: 'private', catalogId: 'private'},
-}) + '\\n'), true), /Invalid browser capture v0.9/);
+}) + '\n'), true), /Invalid browser capture v0.9/);
 const goNotesMessages = decodeBrowserCapture(goNotesBytes, true);
 assert.equal(goNotesMessages.length, 3);
 assert.ok(goNotesMessages.every(message => message.version === 'v0.9.1'));
