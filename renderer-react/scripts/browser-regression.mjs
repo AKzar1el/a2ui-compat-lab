@@ -2574,7 +2574,7 @@ const goWsFrames = [
   ...goNotesMessages.map(message => ({kind: 'a2ui', message})),
   {kind: 'status', state: 'idle'},
 ];
-const goWsBytes = Buffer.from(goWsFrames.map(frame => JSON.stringify(frame)).join('\\n') + '\\n');
+const goWsBytes = Buffer.from(goWsFrames.map(frame => JSON.stringify(frame)).join('\n') + '\n');
 assert.equal(parseBrowserCaptureOptions(['--input', 'private.ws.jsonl',
   '--input-format', 'websocket-frames', '--accept-v091']).inputFormat, 'websocket-frames');
 assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.ws.jsonl',
@@ -2583,16 +2583,16 @@ assert.throws(() => decodeWebSocketBrowserCapture(goWsBytes), /Invalid browser c
   'WebSocket import must not bypass the strict default version lane');
 assert.deepEqual(decodeWebSocketBrowserCapture(goWsBytes, true), goNotesMessages);
 assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
-  JSON.stringify({kind: 'error', code: 'private-code', message: 'SECRET'}) + '\\n'), true),
+  JSON.stringify({kind: 'error', code: 'private-code', message: 'SECRET'}) + '\n'), true),
 /Invalid A2UI WebSocket server frame/);
 assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
-  JSON.stringify({kind: 'action', message: {name: 'private-action'}}) + '\\n'), true),
+  JSON.stringify({kind: 'action', message: {name: 'private-action'}}) + '\n'), true),
 /Invalid A2UI WebSocket server frame/);
 assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
-  JSON.stringify({kind: 'status', state: 'idle'}) + '\\n'), true),
+  JSON.stringify({kind: 'status', state: 'idle'}) + '\n'), true),
 /no A2UI messages/);
 assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
-  JSON.stringify({kind: 'a2ui', message: goNotesMessages[0], token: 'SECRET'}) + '\\n'), true),
+  JSON.stringify({kind: 'a2ui', message: goNotesMessages[0], token: 'SECRET'}) + '\n'), true),
 /Invalid A2UI WebSocket server frame/);
 assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
   JSON.stringify({kind: 'a2ui', message: goNotesMessages[0]})), true),
