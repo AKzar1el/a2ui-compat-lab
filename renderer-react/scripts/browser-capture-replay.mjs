@@ -8,7 +8,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations] [--compat-copilotkit-basic-catalog] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations] [--accept-v091] [--compat-copilotkit-basic-catalog] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -38,7 +38,7 @@ export function parseBrowserCaptureOptions(argv) {
     internalActionDigest: false, internalRenderedTextDigest: false,
     internalButtonStateDigest: false, internalButtonA11yDigest: false,
     internalButtonFocusDigest: false, internalButtonGeometryDigest: false,
-    compatCopilotkitBasicCatalog: false};
+    compatCopilotkitBasicCatalog: false, acceptV091: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -82,6 +82,8 @@ export function parseBrowserCaptureOptions(argv) {
       parsed.rejectLoadingPlaceholders = true;
     } else if (arg === '--compat-copilotkit-basic-catalog' && !parsed.compatCopilotkitBasicCatalog) {
       parsed.compatCopilotkitBasicCatalog = true;
+    } else if (arg === '--accept-v091' && !parsed.acceptV091) {
+      parsed.acceptV091 = true;
     } else if (arg === '--input-format' && parsed.inputFormat === null &&
       ['jsonl', 'copilotkit-operations'].includes(argv[i + 1])) {
       parsed.inputFormat = argv[++i];
@@ -97,6 +99,7 @@ export function parseBrowserCaptureOptions(argv) {
     Number(parsed.clickButtonIndex !== null) + Number(parsed.pressButtonIndexEnter !== null);
   if (!parsed.input || actionModes > 1 ||
        (parsed.compatCopilotkitBasicCatalog && parsed.inputFormat !== 'copilotkit-operations') ||
+       (parsed.acceptV091 && parsed.inputFormat !== 'jsonl') ||
       (parsed.actionAfterEventIndex !== null && actionModes !== 1) ||
       (parsed.clickButtonIndex !== null && parsed.clickButtonIndex > MAX_BUTTON_INDEX) ||
       (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX) ||
@@ -116,7 +119,13 @@ export function parseBrowserCaptureOptions(argv) {
 }
 
 /** Strictly bounded local JSONL; no network, arbitrary commands or producer keys in output. */
-export function decodeBrowserCapture(raw) {
+// Explicit compatibility lane: published core 0.14 processes v0.9.1 messages,
+// but the lab defaults to exact v0.9 capture validation.
+const supportedCaptureVersion = (version, acceptV091 = false) =>
+  version === 'v0.9' || (acceptV091 && version === 'v0.9.1');
+
+export function decodeBrowserCapture(raw, acceptV091 = false) {
+  if (typeof acceptV091 !== 'boolean') throw new Error('Invalid browser capture version option');
   if (!Buffer.isBuffer(raw) || raw.length < 2 || raw.length > MAX_INPUT_BYTES ||
       raw.at(-1) !== 10)
     throw new Error('Invalid browser capture size or JSONL newline');
@@ -138,7 +147,7 @@ export function decodeBrowserCapture(raw) {
   }
   for (const message of events) {
     if (!message || typeof message !== 'object' || Array.isArray(message) ||
-        message.version !== 'v0.9' ||
+        !supportedCaptureVersion(message.version, acceptV091) ||
         OPERATIONS.filter(operation => Object.hasOwn(message, operation)).length !== 1)
       throw new Error('Invalid browser capture v0.9 message');
   }
@@ -178,14 +187,14 @@ export function decodeCopilotKitBrowserCapture(raw, compatBasicCatalog = false) 
   return decodeBrowserCapture(Buffer.from(replayMessages.map(message => JSON.stringify(message)).join('\n') + '\n'));
 }
 
-function readCapture(input, inputFormat = 'jsonl', compatBasicCatalog = false) {
+function readCapture(input, inputFormat = 'jsonl', compatBasicCatalog = false, acceptV091 = false) {
   try {
     const meta = statSync(input);
     if (!meta.isFile() || meta.size < 2 || meta.size > MAX_INPUT_BYTES)
       throw new Error('Invalid browser capture file');
     const raw = readFileSync(input);
     return inputFormat === 'copilotkit-operations' ?
-      decodeCopilotKitBrowserCapture(raw, compatBasicCatalog) : decodeBrowserCapture(raw);
+      decodeCopilotKitBrowserCapture(raw, compatBasicCatalog) : decodeBrowserCapture(raw, acceptV091);
   } catch {
     throw new Error('Invalid browser capture input; path and contents omitted');
   }
@@ -200,9 +209,11 @@ export async function runBrowserCapture(messages, {
   actionDigestKey = null, renderedTextDigestKey = null, buttonStateDigestKey = null,
   buttonA11yDigestKey = null, buttonFocusDigestKey = null,
   buttonGeometryDigestKey = null, surfaceErrorProbe = false,
+  acceptV091 = false,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
+  if (typeof acceptV091 !== 'boolean') throw new Error('Invalid browser capture version option');
   if (actionDigestKey !== null && !/^[a-f0-9]{64}$/.test(actionDigestKey))
     throw new Error('Invalid internal action digest key');
   if (renderedTextDigestKey !== null && !/^[a-f0-9]{64}$/.test(renderedTextDigestKey))
@@ -263,7 +274,7 @@ export async function runBrowserCapture(messages, {
   const replayedMessages = stopAfterEventIndex === null
     ? messages : messages.slice(0, stopAfterEventIndex + 1);
   if (!replayedMessages.some(message => message && typeof message === 'object' &&
-      message.version === 'v0.9' && Object.hasOwn(message, 'createSurface')))
+      supportedCaptureVersion(message.version, acceptV091) && Object.hasOwn(message, 'createSurface')))
     throw new Error('Browser capture requires a createSurface event');
   let server;
   let browser;
@@ -371,7 +382,7 @@ export async function runBrowserCapture(messages, {
       currentEventIndex = index;
       const message = replayedMessages[index];
       const operation = OPERATIONS.find(key => Object.hasOwn(message, key));
-      if (message.version !== 'v0.9' || !operation)
+      if (!supportedCaptureVersion(message.version, acceptV091) || !operation)
         throw new Error('Invalid browser capture event');
       try {
         await page.evaluate(value => window.__a2uiLab.applyMessage(value), message);
@@ -650,8 +661,9 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
             (args.internalButtonGeometryDigest && !/^[a-f0-9]{64}$/.test(buttonGeometryKey ?? ''))))
         throw new Error('Internal comparison digest must be pipe-only with valid ephemeral keys');
       const report = await runBrowserCapture(readCapture(args.input, args.inputFormat,
-        args.compatCopilotkitBasicCatalog),
-        {clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
+        args.compatCopilotkitBasicCatalog, args.acceptV091),
+        {acceptV091: args.acceptV091,
+           clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
           actionAfterEventIndex: args.actionAfterEventIndex, actionSteps: args.actionSteps,
           stopAfterEventIndex: args.stopAfterEventIndex, reportFirstError: args.reportFirstError,
