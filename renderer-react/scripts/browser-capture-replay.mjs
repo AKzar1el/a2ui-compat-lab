@@ -8,7 +8,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations|websocket-frames] [--accept-v091] [--compat-copilotkit-basic-catalog] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations|websocket-frames] [--accept-v091] [--compat-copilotkit-basic-catalog] [--expect-client-action-frame PRIVATE.json] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -38,7 +38,8 @@ export function parseBrowserCaptureOptions(argv) {
     internalActionDigest: false, internalRenderedTextDigest: false,
     internalButtonStateDigest: false, internalButtonA11yDigest: false,
     internalButtonFocusDigest: false, internalButtonGeometryDigest: false,
-    compatCopilotkitBasicCatalog: false, acceptV091: false};
+    compatCopilotkitBasicCatalog: false, acceptV091: false,
+    expectClientActionFrame: null};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -87,6 +88,9 @@ export function parseBrowserCaptureOptions(argv) {
     } else if (arg === '--input-format' && parsed.inputFormat === null &&
       ['jsonl', 'copilotkit-operations', 'websocket-frames'].includes(argv[i + 1])) {
       parsed.inputFormat = argv[++i];
+    } else if (arg === '--expect-client-action-frame' && parsed.expectClientActionFrame === null &&
+      argv[i + 1] && !argv[i + 1].startsWith('--')) {
+      parsed.expectClientActionFrame = resolve(argv[++i]);
     } else if ((arg === '--input' || arg === '--out') &&
       argv[i + 1] && !argv[i + 1].startsWith('--') && !parsed[arg.slice(2)]) {
       parsed[arg.slice(2)] = resolve(argv[++i]);
@@ -103,6 +107,10 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.actionAfterEventIndex !== null && actionModes !== 1) ||
       (parsed.clickButtonIndex !== null && parsed.clickButtonIndex > MAX_BUTTON_INDEX) ||
       (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX) ||
+      (parsed.expectClientActionFrame !== null &&
+        (parsed.inputFormat !== 'websocket-frames' || actionModes !== 1 ||
+          parsed.actionSteps.length > 0 || parsed.reportFirstError ||
+          parsed.stopAfterEventIndex !== null)) ||
       parsed.actionSteps.length > MAX_ACTION_STEPS ||
       (parsed.actionSteps.length > 0 && (actionModes !== 0 || parsed.actionAfterEventIndex !== null)) ||
       (parsed.stopAfterEventIndex !== null &&
@@ -226,6 +234,48 @@ export function decodeWebSocketBrowserCapture(raw, acceptV091 = false) {
     JSON.stringify(message)).join('\n') + '\n'), acceptV091);
 }
 
+/** An outbound Go client action is private, bounded comparison evidence only.
+ * The frame's dataModel is not checked: this verifies the emitted action,
+ * not the producer's complete client state or a live backend turn. */
+export function decodeExpectedClientActionFrame(raw, acceptV091 = false) {
+  if (typeof acceptV091 !== 'boolean' || !Buffer.isBuffer(raw) ||
+      raw.length < 2 || raw.length > MAX_LINE_BYTES)
+    throw new Error('Invalid expected client action frame size');
+  let frame;
+  try {
+    frame = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw));
+  } catch {
+    throw new Error('Invalid expected client action frame encoding or JSON');
+  }
+  const message = frame?.message;
+  const action = message?.action;
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame) ||
+      frame.kind !== 'action' ||
+      Object.keys(frame).some(key => !['kind', 'message', 'dataModel'].includes(key)) ||
+      !message || typeof message !== 'object' || Array.isArray(message) ||
+      Object.keys(message).sort().join(',') !== 'action,version' ||
+      !supportedCaptureVersion(message.version, acceptV091) ||
+      !action || typeof action !== 'object' || Array.isArray(action) ||
+      typeof action.name !== 'string' || !action.name ||
+      typeof action.surfaceId !== 'string' || !action.surfaceId ||
+      typeof action.sourceComponentId !== 'string' || !action.sourceComponentId ||
+      !action.context || typeof action.context !== 'object' || Array.isArray(action.context))
+    throw new Error('Invalid expected Go client action frame');
+  return action;
+}
+
+function readExpectedClientActionFrame(path, acceptV091) {
+  try {
+    const meta = statSync(path);
+    if (!meta.isFile() || meta.size < 2 || meta.size > MAX_LINE_BYTES)
+      throw new Error('Invalid expected action file');
+    return decodeExpectedClientActionFrame(readFileSync(path), acceptV091);
+  } catch {
+    // Paths and user-provided action values must never enter diagnostics.
+    throw new Error('Invalid expected client action frame; path and contents omitted');
+  }
+}
+
 function readCapture(input, inputFormat = 'jsonl', compatBasicCatalog = false, acceptV091 = false) {
   try {
     const meta = statSync(input);
@@ -250,7 +300,7 @@ export async function runBrowserCapture(messages, {
   actionDigestKey = null, renderedTextDigestKey = null, buttonStateDigestKey = null,
   buttonA11yDigestKey = null, buttonFocusDigestKey = null,
   buttonGeometryDigestKey = null, surfaceErrorProbe = false,
-  acceptV091 = false,
+  acceptV091 = false, expectedAction = null,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
@@ -273,6 +323,11 @@ export async function runBrowserCapture(messages, {
     throw new Error('Invalid internal surface error probe');
   const actionModes = Number(clickSingleButton) + Number(pressSingleButtonEnter) +
     Number(clickButtonIndex !== null) + Number(pressButtonIndexEnter !== null);
+  if (expectedAction !== null &&
+      (!expectedAction || typeof expectedAction !== 'object' || Array.isArray(expectedAction) ||
+        actionModes !== 1 || actionSteps.length !== 0 || reportFirstError ||
+        stopAfterEventIndex !== null))
+    throw new Error('Expected client action requires one Chromium activation');
   if (!Array.isArray(actionSteps) || actionSteps.length > MAX_ACTION_STEPS ||
       actionSteps.some((step, index) => !step || typeof step !== 'object' ||
         Array.isArray(step) || Object.keys(step).sort().join(',') !== 'buttonIndex,eventIndex,mode' ||
@@ -609,6 +664,9 @@ export async function runBrowserCapture(messages, {
       throw new Error('Expected exactly one browser action');
     if (actionSteps.length > 0 && final.actions.length !== actionsVerified)
       throw new Error('Expected exactly one browser action per planned step');
+    if (expectedAction !== null && (final.actions.length !== 1 ||
+        canonicalActionJSON(final.actions[0]) !== canonicalActionJSON(expectedAction)))
+      throw new Error('Chromium action did not match the expected client frame');
     return {
       schemaVersion: 1,
       kind: 'a2ui-react-capture-browser-replay',
@@ -626,6 +684,7 @@ export async function runBrowserCapture(messages, {
       actionsVerified,
       keyboardFocusVerified,
       actionsEmitted: final.actions.length,
+      ...(expectedAction !== null ? {expectedClientActionMatched: true} : {}),
       // Never persist or publish this digest; the parent drops it before report validation.
       ...(actionDigestKey ? {
         __privateActionDigest: createHmac('sha256', Buffer.from(actionDigestKey, 'hex'))
@@ -713,7 +772,9 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           actionDigestKey: actionKey, renderedTextDigestKey: textKey,
           buttonStateDigestKey: buttonStateKey, buttonA11yDigestKey: buttonA11yKey,
           buttonFocusDigestKey: buttonFocusKey,
-          buttonGeometryDigestKey: buttonGeometryKey});
+          buttonGeometryDigestKey: buttonGeometryKey,
+          expectedAction: args.expectClientActionFrame ?
+            readExpectedClientActionFrame(args.expectClientActionFrame, args.acceptV091) : null});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
