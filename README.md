@@ -87,6 +87,25 @@ evidence. Counts and event patterns can still be sensitive: inspect before
 sharing. This summary is not a complete SDK trace, browser test, cryptographic
 attestation or proof of anonymity. See [capture comparison guidance](docs/CAPTURE_REPORT_COMPARISON.md).
 
+### Replay a CopilotKit A2UI tool-result wrapper offline
+
+The public [CopilotKit Python A2UI helper](https://github.com/CopilotKit/CopilotKit/blob/7b88608455528bd2dd62752a01cc25b8c917d35c/sdk-python/copilotkit/a2ui.py) returns a JSON object with an `a2ui_operations` array, not JSONL.
+With an explicitly saved, developer-owned tool result, replay the v0.9 operations
+through the same pinned published SDK **without unpacking raw model values to a second file**:
+
+```sh
+node src/replay-file.mjs --input saved-copilotkit-result.json --input-format copilotkit-operations --summary --verify-chunks --out out/copilotkit-summary.json
+```
+
+This opt-in format requires `--summary`, accepts only the exact top-level
+`a2ui_operations` array of v0.9 operation objects, and rejects unknown/mixed
+protocols, oversized inputs and invalid JSON. Chunk verification applies to
+the in-memory normalized JSONL sequence, not to CopilotKit's outer transport
+framing. Only fixed operation labels and aggregate structure are exported;
+counts and chronology can still be sensitive. This tests a documented producer
+format against the lab's real headless SDK. It does **not** execute a third-party
+application, certify CopilotKit renderer behavior, support v1.0, or establish
+customer adoption. The original input is never modified.
 ### Diagnose growing-string replace overhead locally
 
 `updateDataModel` v0.9 replaces values, so repeatedly sending longer strings can

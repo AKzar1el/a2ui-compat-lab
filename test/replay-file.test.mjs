@@ -229,6 +229,64 @@ test('opt-in safe capture summary is useful for sharing without replay values or
   assert.equal(readFileSync(output, 'utf8'), saved);
 }));
 
+test('CopilotKit a2ui_operations wrapper replays the same published SDK lifecycle as JSONL', () => inTemp(dir => {
+  const input = join(dir, 'PRIVATE-COPILOTKIT-INPUT.json');
+  const payload = {a2ui_operations: structuredClone(fixture)};
+  payload.a2ui_operations[2].updateDataModel.value.title = 'PRIVATE_COPILOTKIT_VALUE';
+  writeFileSync(input, JSON.stringify(payload));
+  const wrapped = invoke(['--input', input, '--input-format', 'copilotkit-operations', '--summary', '--verify-chunks']);
+  assert.equal(wrapped.status, 0, wrapped.stderr);
+  const plainInput = join(dir, 'plain.jsonl');
+  writeFileSync(plainInput, payload.a2ui_operations.map(message => JSON.stringify(message)).join('\n') + '\n');
+  const plain = invoke(['--input', plainInput, '--summary', '--verify-chunks']);
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.deepEqual(JSON.parse(wrapped.stdout), JSON.parse(plain.stdout));
+  assert.equal(JSON.parse(wrapped.stdout).events, 5);
+  assert.equal(JSON.parse(wrapped.stdout).chunksVerified, true);
+  assert.doesNotMatch(wrapped.stdout + wrapped.stderr, /PRIVATE_COPILOTKIT|surfaceId|captureSha256|"data"/);
+}));
+
+test('CopilotKit wrapper fails closed for malformed, mixed-generation or secret-bearing input', () => inTemp(dir => {
+  const input = join(dir, 'PRIVATE-COPILOTKIT-PATH.json');
+  const output = join(dir, 'must-not-exist.json');
+  const base = structuredClone(fixture);
+  const bad = [
+    '{"a2ui_operations": [PRIVATE_COPILOTKIT_SECRET]}',
+    JSON.stringify({a2ui_operations: base, secret: 'PRIVATE_COPILOTKIT_SECRET'}),
+    JSON.stringify({a2ui_operations: []}),
+    JSON.stringify({a2ui_operations: Array(10001).fill(base[0])}),
+    JSON.stringify({a2ui_operations: [{...base[0], version: 'v1.0'}]}),
+    JSON.stringify({a2ui_operations: [{...base[0], updateDataModel: {surfaceId: 'PRIVATE_COPILOTKIT_SECRET'}}]}),
+  ];
+  for (const contents of bad) {
+    writeFileSync(input, contents);
+    const run = invoke(['--input', input, '--input-format', 'copilotkit-operations',
+      '--summary', '--out', output]);
+    assert.equal(run.status, 1, run.stderr);
+    assert.equal(run.stdout, '');
+    assert.equal(existsSync(output), false);
+    assert.doesNotMatch(run.stderr, /PRIVATE_COPILOTKIT|a2ui-capture-/);
+  }
+  writeFileSync(input, Buffer.from([0xff, 0x0a]));
+  const invalidUtf8 = invoke(['--input', input, '--input-format', 'copilotkit-operations', '--summary']);
+  assert.equal(invalidUtf8.status, 1);
+  assert.doesNotMatch(invalidUtf8.stderr, /PRIVATE_COPILOTKIT/);
+}));
+
+test('CopilotKit producer format is explicitly opt-in and value-free', () => inTemp(dir => {
+  const input = join(dir, 'wrapped.json');
+  writeFileSync(input, JSON.stringify({a2ui_operations: fixture}));
+  for (const args of [
+    ['--input', input, '--input-format', 'copilotkit-operations'],
+    ['--input', input, '--input-format', 'unknown', '--summary'],
+    ['--input', input, '--input-format', 'copilotkit-operations', '--input-format', 'copilotkit-operations', '--summary'],
+  ]) {
+    const run = invoke(args);
+    assert.equal(run.status, 1);
+    assert.equal(run.stdout, '');
+    assert.match(run.stderr, /Usage:/);
+  }
+}));
 test('unknown, duplicate or absent flags exit with usage and no output', () => {
   for (const args of [[], ['--input'], ['--unknown', 'x'], ['--input', 'a', '--input', 'b'], ['--input', 'a', '--verify-chunks', '--verify-chunks']]) {
     const result = invoke(args);
