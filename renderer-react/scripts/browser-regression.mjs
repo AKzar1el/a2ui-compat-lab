@@ -2540,6 +2540,31 @@ assert.throws(() => decodeBrowserCapture(Buffer.from('{"version":"v0.9"}')), /In
 const browserCaptureReport = await runBrowserCapture(decodedExample, {clickSingleButton: true});
 assert.equal(browserCaptureReport.kind, 'a2ui-react-capture-browser-replay');
 assert.equal(browserCaptureReport.events, 3);
+// An independent Go/React producer publishes v0.9.1 messages. The actual
+// pinned core SDK accepts these, but the lab must require explicit opt-in.
+const goNotesBytes = readFileSync(resolve(root, '../fixtures/external-go-react-notes-v091.jsonl'));
+assert.throws(() => decodeBrowserCapture(goNotesBytes), /Invalid browser capture v0.9/,
+  'Default v0.9 capture contract must not silently expand');
+assert.equal(parseBrowserCaptureOptions(['--input', 'private.jsonl', '--accept-v091']).acceptV091, true);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.jsonl',
+  '--accept-v091', '--accept-v091']), /Usage:/);
+assert.throws(() => parseBrowserCaptureOptions(['--input', 'private.json',
+  '--input-format', 'copilotkit-operations', '--accept-v091']), /Usage:/);
+assert.throws(() => decodeBrowserCapture(Buffer.from(JSON.stringify({
+  version: 'v1.0', createSurface: {surfaceId: 'private', catalogId: 'private'},
+}) + '\\n'), true), /Invalid browser capture v0.9/);
+const goNotesMessages = decodeBrowserCapture(goNotesBytes, true);
+assert.equal(goNotesMessages.length, 3);
+assert.ok(goNotesMessages.every(message => message.version === 'v0.9.1'));
+await assert.rejects(runBrowserCapture(goNotesMessages), /createSurface event/,
+  'The exact-version default must reject v0.9.1 even from programmatic callers');
+const goNotesReport = await runBrowserCapture(goNotesMessages,
+  {acceptV091: true, clickSingleButton: true});
+assert.equal(goNotesReport.events, 3);
+assert.equal(goNotesReport.actionsVerified, 1);
+assert.equal(goNotesReport.actionsEmitted, 1);
+assert.doesNotMatch(JSON.stringify(goNotesReport), /add_note|add-btn|New note|notes-list/,
+  'A real browser report must not expose third-party fixture component IDs or data');
 // CopilotKit's saved v0.9 tool-result format must drive a real Chromium Button
 // without an intermediate raw JSONL file or private identifiers in output.
 const copilotBytes = Buffer.from(JSON.stringify({a2ui_operations: decodedExample}));
