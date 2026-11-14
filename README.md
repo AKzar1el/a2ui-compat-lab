@@ -174,6 +174,26 @@ or failed output. It never copies values, IDs, implementation metadata or digest
 different captures with identical shapes can match. For same-input SDK behavioral
 drift, use the private full-report comparator documented separately.
 
+
+To detect **surface routing** drift that structural counts alone miss, opt in
+when comparing two trusted, developer-owned captures directly:
+
+```sh
+node src/summary-compare.mjs --before-capture before.jsonl --after-capture after.jsonl --compare-surface-targets --strict
+```
+
+This checks whether each operation still targets the same surface using a
+new random HMAC key for **each invocation**. Raw IDs and HMAC digests are
+never included in the comparison report, persisted as intermediate files, or
+passed on the command line. Only changed event indices and the fixed
+`surfaceTarget` label appear. Matching requires consistent IDs inside
+the same paired run; renaming equivalent IDs between captures can intentionally
+report drift. This flag only works with two direct captures, including the
+opt-in `copilotkit-operations` format, **not** saved v1 safe summaries
+(which intentionally exclude routing identity). A HMAC match is not proof of
+browser rendering, semantic equivalence or anonymization; event chronology
+can still be sensitive. Existing default structural comparison is unchanged.
+
 ### Compare real React/Chromium capture baselines in CI
 
 The private-capture browser replay above produces a **value-free structural JSON report**.

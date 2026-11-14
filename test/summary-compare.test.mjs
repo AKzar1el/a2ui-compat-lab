@@ -324,3 +324,75 @@ test('CopilotKit comparison input format fails closed for invalid flags, version
     assert.equal(result.stdout, '');
   }
 }));
+
+
+test('ephemeral target parity detects valid multi-surface routing drift missed by structural summaries', () => withReports(({dir}) => {
+  const create = surfaceId => ({version: 'v0.9', createSurface: {
+    surfaceId, catalogId: '__BASIC_CATALOG__',
+  }});
+  const remove = surfaceId => ({version: 'v0.9', deleteSurface: {surfaceId}});
+  const beforeCapture = join(dir, 'PRIVATE_ROUTING_BEFORE.jsonl');
+  const afterCapture = join(dir, 'PRIVATE_ROUTING_AFTER.jsonl');
+  writeFileSync(beforeCapture, [create('PRIVATE_ALPHA'), create('PRIVATE_BETA'), remove('PRIVATE_BETA')]
+    .map(JSON.stringify).join('\n') + '\n');
+  writeFileSync(afterCapture, [create('PRIVATE_ALPHA'), create('PRIVATE_BETA'), remove('PRIVATE_ALPHA')]
+    .map(JSON.stringify).join('\n') + '\n');
+
+  const args = ['--before-capture', beforeCapture, '--after-capture', afterCapture, '--strict'];
+  const legacy = run(compare, args);
+  assert.equal(legacy.status, 0, legacy.stderr);
+  assert.equal(JSON.parse(legacy.stdout).result, 'MATCH',
+    'Legacy per-target summaries intentionally omit surface identity');
+
+  const keyed = run(compare, [...args, '--compare-surface-targets', '--verify-chunks']);
+  assert.equal(keyed.status, 1, keyed.stderr);
+  const report = JSON.parse(keyed.stdout);
+  assert.equal(report.result, 'DRIFT');
+  assert.equal(report.surfaceTargetsCompared, true);
+  assert.equal(report.changedSteps, 1);
+  assert.deepEqual(report.differences, [{index: 2, fields: ['surfaceTarget']}]);
+  assert.doesNotMatch(keyed.stdout + keyed.stderr,
+    /PRIVATE_ALPHA|PRIVATE_BETA|PRIVATE_ROUTING_|surfaceId|captureSha256|[a-f0-9]{64}/);
+  assert.deepEqual(readdirSync(dir).sort(),
+    ['PRIVATE_ROUTING_BEFORE.jsonl', 'PRIVATE_ROUTING_AFTER.jsonl'].sort(),
+    'Private digests and raw intermediate reports must never be saved');
+}));
+
+test('private target parity matches identical capture and CopilotKit envelope routing', () => withReports(({dir}) => {
+  const messages = readFileSync(sample, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  const wrapped = join(dir, 'PRIVATE_COPILOTKIT_TARGET.json');
+  writeFileSync(wrapped, JSON.stringify({a2ui_operations: messages}));
+  const result = run(compare, ['--before-capture', sample,
+    '--after-capture', wrapped, '--after-format', 'copilotkit-operations',
+    '--compare-surface-targets', '--strict']);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.result, 'MATCH');
+  assert.equal(report.surfaceTargetsCompared, true);
+  assert.doesNotMatch(result.stdout + result.stderr,
+    /PRIVATE_COPILOTKIT_TARGET|surfaceId|captureSha256|[a-f0-9]{64}/);
+  assert.deepEqual(readdirSync(dir), ['PRIVATE_COPILOTKIT_TARGET.json']);
+}));
+
+test('private routing comparison rejects saved-summary use, duplicate flags and unkeyed child output', () => withReports(({beforePath, dir}) => {
+  const baseline = run(replay, ['--input', sample, '--summary']);
+  assert.equal(baseline.status, 0, baseline.stderr);
+  writeFileSync(beforePath, baseline.stdout);
+  for (const args of [
+    ['--before', beforePath, '--after-capture', sample, '--compare-surface-targets'],
+    ['--before-capture', sample, '--after', beforePath, '--compare-surface-targets'],
+    ['--before', beforePath, '--after', beforePath, '--compare-surface-targets'],
+    ['--before-capture', sample, '--after-capture', sample,
+      '--compare-surface-targets', '--compare-surface-targets'],
+  ]) {
+    const result = run(compare, args);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Usage:/);
+  }
+  const internal = run(replay, ['--input', sample, '--summary', '--internal-surface-target-digests']);
+  assert.equal(internal.status, 1);
+  assert.equal(internal.stdout, '');
+  assert.doesNotMatch(internal.stderr, /PRIVATE_|surfaceId|captureSha256/);
+  assert.deepEqual(readdirSync(dir), ['before.json']);
+}));

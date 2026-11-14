@@ -770,3 +770,28 @@ recorded only after CI and guarded integration have actually finished.
 ## CI-readable real-browser structural comparison (2026-11-12; awaiting final-head CI)
 
 The optional `--format markdown` mode for `src/browser-capture-summary-compare.mjs` renders only the comparator's fixed structural report keys, event indices/counts and match/drift status. It is suited to human review in GitHub Actions step summaries without exposing private capture bytes, paths, surface IDs or action values. The default JSON output and strict/no-overwrite semantics are retained. Deterministic CLI tests cover match/drift, Markdown field labels, private path omission, invalid formats, duplicate formats and exclusive artifact creation. This is not anonymization, cross-renderer validation, direct third-party feedback or measured adoption; Source commit `a39a04b6e122e69273c9ee5899982562e99970c8` passed PR-triggered GitHub Actions #43216791420 in all three jobs (published SDK/Python parity, real Chromium React, dependency audit with the pre-existing unresolved expiry-bound Zod3 HIGH exception). This demonstrates deterministic tests of an opt-in format, not external adoption; the worker receipt inclusive final head still requires separate passing CI, and source push run #43216719882 was pending at this checkpoint.
+
+## Private ephemeral surface routing parity (2026-11-14; draft PR #133)
+
+- The pinned published v0.9 MessageProcessor accepts both valid three-message
+  captures create(alpha), create(beta), delete(beta) and
+  create(alpha), create(beta), delete(alpha). Structural per-target summaries
+  report MATCH even though the last event targets a different surface.
+  Opt-in --compare-surface-targets reports DRIFT at event 2 without emitting IDs.
+  This identifies a local comparator coverage gap, NOT an upstream SDK defect.
+- A fresh 32-byte random HMAC key per paired run is passed via environment to
+  bounded local SDK child processes. Raw target digests are compared in memory
+  and removed before public summary validation; no private intermediate output.
+  Default summary v1 remains unchanged. Saved summaries cannot use routing parity;
+  direct JSONL and CopilotKit v0.9 envelopes are supported.
+- An initial active-surface population proposal was rejected when published
+  SDK returned 'Surface alpha already exists' on duplicate createSurface.
+  That negative experiment was removed from final source diff. Final regression
+  tests cover two valid transcripts, privacy, strict drift and malformed flags.
+- PR https://github.com/AKzar1el/a2ui-compat-lab/pull/133 is draft until
+  append-only receipt, final-head CI and guarded handoff are verified.
+  Source PR CI: https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/43555446665 .
+  The original Windows checkout was not modified; tests use remote GitHub CI.
+- This does NOT prove actual third-party usage, browser routing, identity
+  authentication, anonymization, adoption or revenue. Existing unresolved
+  Zod3 HIGH exception expires 2026-12-07.

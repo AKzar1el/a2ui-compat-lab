@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {createHash} from 'node:crypto';
+import {createHash, createHmac} from 'node:crypto';
 import {mkdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {parseJsonLines, parseJsonLinesBytes, replayV09} from './replay.mjs';
@@ -81,6 +81,7 @@ function options(argv) {
   let verifyChunks = false;
   let summary = false;
   let streamEfficiency = false;
+  let internalSurfaceTargetDigests = false;
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (key === '--summary') {
@@ -98,6 +99,12 @@ function options(argv) {
       verifyChunks = true;
       continue;
     }
+    // Internal child-only evidence: never persisted by this CLI or exposed by its public summary.
+    if (key === '--internal-surface-target-digests') {
+      if (internalSurfaceTargetDigests) throw new Error(USAGE);
+      internalSurfaceTargetDigests = true;
+      continue;
+    }
     const next = argv[++i];
     if ((key !== '--input' && key !== '--out' && key !== '--input-format') || !next || next.startsWith('--') || result[key])
       throw new Error(USAGE);
@@ -106,6 +113,8 @@ function options(argv) {
   const inputFormat = result['--input-format'] ?? 'jsonl';
   if (!result['--input'] || !['jsonl', 'copilotkit-operations'].includes(inputFormat) ||
       (streamEfficiency && !summary) ||
+      (internalSurfaceTargetDigests && (!summary || result['--out'] ||
+        !/^[a-f0-9]{64}$/.test(process.env.A2UI_PRIVATE_SURFACE_TARGET_KEY ?? ''))) ||
       (inputFormat === 'copilotkit-operations' && !summary)) throw new Error(USAGE);
   return {
     input: resolve(result['--input']),
@@ -114,6 +123,7 @@ function options(argv) {
     verifyChunks,
     summary,
     streamEfficiency,
+    internalSurfaceTargetDigests,
   };
 }
 
@@ -250,7 +260,8 @@ function writeCaptureReport(out, report) {
 }
 
 try {
-  const {input, inputFormat, out, help, verifyChunks, summary, streamEfficiency} = options(process.argv.slice(2));
+  const {input, inputFormat, out, help, verifyChunks, summary, streamEfficiency,
+    internalSurfaceTargetDigests} = options(process.argv.slice(2));
   if (help) {
     console.log(USAGE);
   } else {
@@ -275,6 +286,14 @@ try {
         actionCount: snapshot.actionCount,
         actionsEmitted: snapshot.actionCount - (index === 0 ? 0 : observed.replay.snapshots[index - 1].actionCount),
       })),
+      ...(internalSurfaceTargetDigests ? {__privateSurfaceTargetDigests:
+        observed.replay.snapshots.map(snapshot => {
+          if (typeof snapshot.surfaceId !== 'string' || !snapshot.surfaceId ||
+              Buffer.byteLength(snapshot.surfaceId, 'utf8') > 8192)
+            throw new Error('Unsupported private surface routing target; input omitted');
+          return createHmac('sha256', Buffer.from(process.env.A2UI_PRIVATE_SURFACE_TARGET_KEY, 'hex'))
+            .update(snapshot.surfaceId, 'utf8').digest('hex');
+        })} : {}),
     } : observed;
     const report = JSON.stringify(view, null, 2) + '\n';
     if (out) {

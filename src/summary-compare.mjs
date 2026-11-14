@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import {execFileSync} from 'node:child_process';
+import {randomBytes} from 'node:crypto';
 import {mkdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const USAGE = 'Usage: node src/summary-compare.mjs (--before baseline-summary.json | --before-capture before.jsonl) (--after summary.json | --after-capture after.jsonl) [--before-format jsonl|copilotkit-operations] [--after-format jsonl|copilotkit-operations] [--verify-chunks] [--strict] [--out result.json]';
+const USAGE = 'Usage: node src/summary-compare.mjs (--before baseline-summary.json | --before-capture before.jsonl) (--after summary.json | --after-capture after.jsonl) [--before-format jsonl|copilotkit-operations] [--after-format jsonl|copilotkit-operations] [--verify-chunks] [--compare-surface-targets] [--strict] [--out result.json]';
 const MAX_REPORT_BYTES = 4 * 1024 * 1024;
 const MAX_STEPS = 10000;
 const MAX_REVIEW_INDICES = 100;
@@ -52,13 +53,15 @@ function validateSummary(report) {
 
 function parseArgs(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const options = {strict: false, verifyChunks: false};
+  const options = {strict: false, verifyChunks: false, compareSurfaceTargets: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !options.strict) {
       options.strict = true;
     } else if (arg === '--verify-chunks' && !options.verifyChunks) {
       options.verifyChunks = true;
+    } else if (arg === '--compare-surface-targets' && !options.compareSurfaceTargets) {
+      options.compareSurfaceTargets = true;
     } else if (['--before-format', '--after-format'].includes(arg) &&
         ['jsonl', 'copilotkit-operations'].includes(argv[i + 1])) {
       const key = arg === '--before-format' ? 'beforeFormat' : 'afterFormat';
@@ -77,6 +80,7 @@ function parseArgs(argv) {
   if (Boolean(options.before) === Boolean(options.beforeCapture) ||
       Boolean(options.after) === Boolean(options.afterCapture) ||
       (options.verifyChunks && !options.beforeCapture && !options.afterCapture) ||
+      (options.compareSurfaceTargets && (!options.beforeCapture || !options.afterCapture)) ||
       (options.beforeFormat && !options.beforeCapture) ||
       (options.afterFormat && !options.afterCapture))
     throw new Error(USAGE);
@@ -107,7 +111,7 @@ function readSummary(path) {
 // Use the existing pinned-SDK capture CLI in a bounded, shell-free child process.
 // It emits only the allowlisted safe summary; raw capture reports are never
 // written to disk or returned in parent diagnostics.
-function summaryFromCapture(path, verifyChunks, inputFormat = 'jsonl') {
+function summaryFromCapture(path, verifyChunks, inputFormat = 'jsonl', privateKey = null) {
   let output;
   try {
     output = execFileSync(process.execPath, [
@@ -115,19 +119,30 @@ function summaryFromCapture(path, verifyChunks, inputFormat = 'jsonl') {
       '--input', path, '--summary',
       ...(inputFormat === 'copilotkit-operations' ? ['--input-format', inputFormat] : []),
       ...(verifyChunks ? ['--verify-chunks'] : []),
+      ...(privateKey ? ['--internal-surface-target-digests'] : []),
     ], {encoding: 'utf8', timeout: 30000, maxBuffer: MAX_REPORT_BYTES,
-      stdio: ['ignore', 'pipe', 'pipe']});
+      stdio: ['ignore', 'pipe', 'pipe'],
+      ...(privateKey ? {env: {...process.env, A2UI_PRIVATE_SURFACE_TARGET_KEY: privateKey}} : {})});
   } catch {
     throw new Error('Cannot replay capture with pinned SDK; input contents and path omitted');
   }
   try {
-    return validateSummary(JSON.parse(output));
+    const raw = JSON.parse(output);
+    if (!privateKey) return {summary: validateSummary(raw), privateDigests: null};
+    const {__privateSurfaceTargetDigests, ...publicSummary} = raw;
+    const summary = validateSummary(publicSummary);
+    if (!Array.isArray(__privateSurfaceTargetDigests) ||
+        __privateSurfaceTargetDigests.length !== summary.events ||
+        !__privateSurfaceTargetDigests.every(value =>
+          typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)))
+      throw new Error('Invalid private routing evidence');
+    return {summary, privateDigests: __privateSurfaceTargetDigests};
   } catch {
     throw new Error('Invalid generated safe summary; input contents omitted');
   }
 }
 
-function compareSummaries(before, after) {
+function compareSummaries(before, after, surfaceTargetDigests = null) {
   const differences = [];
   let changedSteps = 0;
   for (let index = 0; index < Math.max(before.events, after.events); index++) {
@@ -136,6 +151,9 @@ function compareSummaries(before, after) {
     const fields = !previous ? ['stepAdded'] :
       !current ? ['stepRemoved'] :
         STEP_FIELDS.filter(field => previous[field] !== current[field]);
+    if (previous && current && surfaceTargetDigests &&
+        surfaceTargetDigests[0][index] !== surfaceTargetDigests[1][index])
+      fields.push('surfaceTarget');
     if (!fields.length) continue;
     changedSteps++;
     if (differences.length < MAX_REVIEW_INDICES) differences.push({index, fields});
@@ -151,10 +169,13 @@ function compareSummaries(before, after) {
     beforeChunksVerified: before.chunksVerified,
     afterChunksVerified: after.chunksVerified,
     verificationCoverageChanged,
+    ...(surfaceTargetDigests ? {surfaceTargetsCompared: true} : {}),
     changedSteps,
     differences,
     omittedDifferences: changedSteps - differences.length,
-    note: 'Structural workflow comparison only; values, IDs and capture identity are not compared',
+    note: surfaceTargetDigests ?
+      'Structural and keyed surface routing comparison; values and IDs are never emitted' :
+      'Structural workflow comparison only; values, IDs and capture identity are not compared',
   };
 }
 
@@ -180,11 +201,14 @@ try {
   if (args.help) {
     console.log(USAGE);
   } else {
-    const before = args.beforeCapture ? summaryFromCapture(args.beforeCapture, args.verifyChunks, args.beforeFormat) :
-      readSummary(args.before);
-    const after = args.afterCapture ? summaryFromCapture(args.afterCapture, args.verifyChunks, args.afterFormat) :
-      readSummary(args.after);
-    const report = compareSummaries(before, after);
+    // This key exists for one comparison only; target digests never appear in output or files.
+    const privateKey = args.compareSurfaceTargets ? randomBytes(32).toString('hex') : null;
+    const before = args.beforeCapture ? summaryFromCapture(args.beforeCapture, args.verifyChunks,
+      args.beforeFormat, privateKey) : {summary: readSummary(args.before), privateDigests: null};
+    const after = args.afterCapture ? summaryFromCapture(args.afterCapture, args.verifyChunks,
+      args.afterFormat, privateKey) : {summary: readSummary(args.after), privateDigests: null};
+    const report = compareSummaries(before.summary, after.summary, privateKey ?
+      [before.privateDigests, after.privateDigests] : null);
     const output = JSON.stringify(report, null, 2) + '\n';
     if (args.out) saveReport(args.out, output);
     else process.stdout.write(output);
