@@ -4,7 +4,7 @@ import {mkdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const USAGE = 'Usage: node src/summary-compare.mjs (--before baseline-summary.json | --before-capture before.jsonl) (--after summary.json | --after-capture after.jsonl) [--before-format jsonl|copilotkit-operations] [--after-format jsonl|copilotkit-operations] [--verify-chunks] [--strict] [--out result.json]';
+const USAGE = 'Usage: node src/summary-compare.mjs (--before baseline-summary.json | --before-capture before.jsonl) (--after summary.json | --after-capture after.jsonl) [--before-format jsonl|copilotkit-operations] [--after-format jsonl|copilotkit-operations] [--verify-chunks] [--active-surface-counts] [--strict] [--out result.json]';
 const MAX_REPORT_BYTES = 4 * 1024 * 1024;
 const MAX_STEPS = 10000;
 const MAX_REVIEW_INDICES = 100;
@@ -12,6 +12,7 @@ const OPERATIONS = new Set(['createSurface', 'updateComponents', 'updateDataMode
 const STEP_FIELDS = ['operation', 'surfacePresent', 'componentCount', 'actionCount', 'actionsEmitted'];
 const SUMMARY_KEYS = ['schemaVersion', 'kind', 'protocol', 'events', 'chunksVerified', 'steps'];
 const STEP_KEYS = ['index', ...STEP_FIELDS];
+const ACTIVE_COUNT_FIELD = 'activeSurfaceCount';
 
 function recordHasExactly(value, expected) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) &&
@@ -26,7 +27,8 @@ function nonnegativeInteger(value) {
 // Validate a deliberately narrow schema; never propagate arbitrary input
 // properties into the comparison or its diagnostics.
 function validateSummary(report) {
-  if (!recordHasExactly(report, SUMMARY_KEYS) || report.schemaVersion !== 1 ||
+  const counted = report?.schemaVersion === 2;
+  if (!recordHasExactly(report, SUMMARY_KEYS) || ![1, 2].includes(report.schemaVersion) ||
       report.kind !== 'a2ui-capture-safe-summary' || report.protocol !== 'v0.9' ||
       typeof report.chunksVerified !== 'boolean' ||
       !Number.isSafeInteger(report.events) || report.events < 1 ||
@@ -36,7 +38,9 @@ function validateSummary(report) {
   let previousActionCount = 0;
   for (let index = 0; index < report.steps.length; index++) {
     const step = report.steps[index];
-    if (!recordHasExactly(step, STEP_KEYS) || step.index !== index ||
+    if (!recordHasExactly(step, counted ? [...STEP_KEYS, ACTIVE_COUNT_FIELD] : STEP_KEYS) ||
+        (counted && (!nonnegativeInteger(step.activeSurfaceCount) ||
+          step.activeSurfaceCount > MAX_STEPS)) || step.index !== index ||
         !OPERATIONS.has(step.operation) ||
         typeof step.surfacePresent !== 'boolean' ||
         !nonnegativeInteger(step.componentCount) ||
@@ -52,13 +56,15 @@ function validateSummary(report) {
 
 function parseArgs(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const options = {strict: false, verifyChunks: false};
+  const options = {strict: false, verifyChunks: false, activeSurfaceCounts: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !options.strict) {
       options.strict = true;
     } else if (arg === '--verify-chunks' && !options.verifyChunks) {
       options.verifyChunks = true;
+    } else if (arg === '--active-surface-counts' && !options.activeSurfaceCounts) {
+      options.activeSurfaceCounts = true;
     } else if (['--before-format', '--after-format'].includes(arg) &&
         ['jsonl', 'copilotkit-operations'].includes(argv[i + 1])) {
       const key = arg === '--before-format' ? 'beforeFormat' : 'afterFormat';
@@ -77,6 +83,7 @@ function parseArgs(argv) {
   if (Boolean(options.before) === Boolean(options.beforeCapture) ||
       Boolean(options.after) === Boolean(options.afterCapture) ||
       (options.verifyChunks && !options.beforeCapture && !options.afterCapture) ||
+      (options.activeSurfaceCounts && !options.beforeCapture && !options.afterCapture) ||
       (options.beforeFormat && !options.beforeCapture) ||
       (options.afterFormat && !options.afterCapture))
     throw new Error(USAGE);
@@ -107,7 +114,7 @@ function readSummary(path) {
 // Use the existing pinned-SDK capture CLI in a bounded, shell-free child process.
 // It emits only the allowlisted safe summary; raw capture reports are never
 // written to disk or returned in parent diagnostics.
-function summaryFromCapture(path, verifyChunks, inputFormat = 'jsonl') {
+function summaryFromCapture(path, verifyChunks, inputFormat = 'jsonl', activeSurfaceCounts = false) {
   let output;
   try {
     output = execFileSync(process.execPath, [
@@ -115,6 +122,7 @@ function summaryFromCapture(path, verifyChunks, inputFormat = 'jsonl') {
       '--input', path, '--summary',
       ...(inputFormat === 'copilotkit-operations' ? ['--input-format', inputFormat] : []),
       ...(verifyChunks ? ['--verify-chunks'] : []),
+      ...(activeSurfaceCounts ? ['--active-surface-counts'] : []),
     ], {encoding: 'utf8', timeout: 30000, maxBuffer: MAX_REPORT_BYTES,
       stdio: ['ignore', 'pipe', 'pipe']});
   } catch {
@@ -128,6 +136,11 @@ function summaryFromCapture(path, verifyChunks, inputFormat = 'jsonl') {
 }
 
 function compareSummaries(before, after) {
+  // A v1 summary does not observe other live surfaces. Do not silently call it
+  // equivalent to an opt-in v2 capture with population-level evidence.
+  if (before.schemaVersion !== after.schemaVersion)
+    throw new Error('Cannot compare safe summaries with different coverage; input contents omitted');
+  const fieldsToCompare = before.schemaVersion === 2 ? [...STEP_FIELDS, ACTIVE_COUNT_FIELD] : STEP_FIELDS;
   const differences = [];
   let changedSteps = 0;
   for (let index = 0; index < Math.max(before.events, after.events); index++) {
@@ -135,7 +148,7 @@ function compareSummaries(before, after) {
     const current = after.steps[index];
     const fields = !previous ? ['stepAdded'] :
       !current ? ['stepRemoved'] :
-        STEP_FIELDS.filter(field => previous[field] !== current[field]);
+        fieldsToCompare.filter(field => previous[field] !== current[field]);
     if (!fields.length) continue;
     changedSteps++;
     if (differences.length < MAX_REVIEW_INDICES) differences.push({index, fields});
@@ -151,10 +164,13 @@ function compareSummaries(before, after) {
     beforeChunksVerified: before.chunksVerified,
     afterChunksVerified: after.chunksVerified,
     verificationCoverageChanged,
+    ...(before.schemaVersion === 2 ? {activeSurfaceCountsCompared: true} : {}),
     changedSteps,
     differences,
     omittedDifferences: changedSteps - differences.length,
-    note: 'Structural workflow comparison only; values, IDs and capture identity are not compared',
+    note: before.schemaVersion === 2 ?
+      'Structural workflow and observed live surface counts; values, IDs and capture identity are not compared' :
+      'Structural workflow comparison only; values, IDs and capture identity are not compared',
   };
 }
 
@@ -180,9 +196,11 @@ try {
   if (args.help) {
     console.log(USAGE);
   } else {
-    const before = args.beforeCapture ? summaryFromCapture(args.beforeCapture, args.verifyChunks, args.beforeFormat) :
+    const before = args.beforeCapture ? summaryFromCapture(args.beforeCapture, args.verifyChunks,
+      args.beforeFormat, args.activeSurfaceCounts) :
       readSummary(args.before);
-    const after = args.afterCapture ? summaryFromCapture(args.afterCapture, args.verifyChunks, args.afterFormat) :
+    const after = args.afterCapture ? summaryFromCapture(args.afterCapture, args.verifyChunks,
+      args.afterFormat, args.activeSurfaceCounts) :
       readSummary(args.after);
     const report = compareSummaries(before, after);
     const output = JSON.stringify(report, null, 2) + '\n';
