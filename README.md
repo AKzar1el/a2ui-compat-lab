@@ -621,7 +621,9 @@ node scripts/browser-capture-replay.mjs --input ../fixtures/external-go-react-no
 
 The public Apache-2.0-licensed three-message *Notes* example is adapted from
 [nigma888/a2ui-go-react's deterministic Go producer few-shot](https://github.com/nigma888/a2ui-go-react/blob/f43bb79ecfa30cb8cf88ec57d3c574f461015a4b/backend/internal/agent/prompt.go),
-not captured from a live third-party app. Its producer uses `v0.9.1`,
+not captured from a live third-party app. The original Apache-2.0 license
+is retained at [fixtures/third-party/a2ui-go-react-LICENSE](fixtures/third-party/a2ui-go-react-LICENSE).
+Its producer uses `v0.9.1`,
 the same Basic Catalog URI, and a create/components/data lifecycle.
 `--accept-v091` accepts v0.9 and v0.9.1 messages **only in JSONL mode**;
 it refuses v1.0 and cannot be combined with CopilotKit envelope mode.
