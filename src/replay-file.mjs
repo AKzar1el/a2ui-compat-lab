@@ -9,7 +9,7 @@ const MAX_LINE_BYTES = 256 * 1024;
 const MAX_FRAMES = 10000;
 // Keep the opt-in 1-byte transport replay bounded on real-world captures.
 const MAX_CHUNK_VERIFY_BYTES = 512 * 1024;
-const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks] [--summary] [--stream-efficiency] [--input-format copilotkit-operations] [--active-surface-counts]';
+const USAGE = 'Usage: node src/replay-file.mjs --input capture.jsonl [--out report.json] [--verify-chunks] [--summary] [--stream-efficiency] [--input-format copilotkit-operations]';
 
 // Emit only protocol-defined operation names; never copy producer-controlled keys.
 const EVENT_OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
@@ -81,7 +81,6 @@ function options(argv) {
   let verifyChunks = false;
   let summary = false;
   let streamEfficiency = false;
-  let activeSurfaceCounts = false;
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (key === '--summary') {
@@ -99,11 +98,6 @@ function options(argv) {
       verifyChunks = true;
       continue;
     }
-    if (key === '--active-surface-counts') {
-      if (activeSurfaceCounts) throw new Error(USAGE);
-      activeSurfaceCounts = true;
-      continue;
-    }
     const next = argv[++i];
     if ((key !== '--input' && key !== '--out' && key !== '--input-format') || !next || next.startsWith('--') || result[key])
       throw new Error(USAGE);
@@ -112,7 +106,6 @@ function options(argv) {
   const inputFormat = result['--input-format'] ?? 'jsonl';
   if (!result['--input'] || !['jsonl', 'copilotkit-operations'].includes(inputFormat) ||
       (streamEfficiency && !summary) ||
-      (activeSurfaceCounts && !summary) ||
       (inputFormat === 'copilotkit-operations' && !summary)) throw new Error(USAGE);
   return {
     input: resolve(result['--input']),
@@ -121,7 +114,6 @@ function options(argv) {
     verifyChunks,
     summary,
     streamEfficiency,
-    activeSurfaceCounts,
   };
 }
 
@@ -167,8 +159,7 @@ function decodeCopilotKitOperations(raw) {
     throw new RangeError('Normalized CopilotKit capture exceeds 4 MiB');
   return normalized;
 }
-function replayCapture(raw, {verifyChunks = false, summary = false, streamEfficiency = false,
-  activeSurfaceCounts = false} = {}) {
+function replayCapture(raw, {verifyChunks = false, summary = false, streamEfficiency = false} = {}) {
   if (raw.length === 0 || raw.length > MAX_INPUT_BYTES)
     throw new RangeError('Capture must be 1 byte to 4 MiB');
   if (verifyChunks && raw.length > MAX_CHUNK_VERIFY_BYTES)
@@ -192,8 +183,7 @@ function replayCapture(raw, {verifyChunks = false, summary = false, streamEffici
   const messages = redactCaptureError('JSONL parsing', () =>
     parseJsonLines([text], {maxLineBytes: MAX_LINE_BYTES}));
   if (!messages.length) throw new SyntaxError('Capture has no A2UI messages');
-  const replay = redactCaptureError('SDK replay', () => replayV09(messages,
-    {trackActiveSurfaces: activeSurfaceCounts}));
+  const replay = redactCaptureError('SDK replay', () => replayV09(messages));
   const report = {
     schemaVersion: 1,
     protocol: 'v0.9',
@@ -215,7 +205,7 @@ function replayCapture(raw, {verifyChunks = false, summary = false, streamEffici
       matches: redactCaptureError('byte-chunk verification', () =>
         JSON.stringify(replayV09(parseJsonLinesBytes(byteChunks(raw, chunkSizeBytes), {
           maxLineBytes: MAX_LINE_BYTES, maxMessages: MAX_FRAMES,
-        }), {trackActiveSurfaces: activeSurfaceCounts})) === baseline),
+        }))) === baseline),
     }));
     if (!trials.every(trial => trial.matches))
       throw new Error('A2UI SDK state diverged across transport byte-chunk boundaries');
@@ -260,20 +250,18 @@ function writeCaptureReport(out, report) {
 }
 
 try {
-  const {input, inputFormat, out, help, verifyChunks, summary, streamEfficiency,
-    activeSurfaceCounts} = options(process.argv.slice(2));
+  const {input, inputFormat, out, help, verifyChunks, summary, streamEfficiency} = options(process.argv.slice(2));
   if (help) {
     console.log(USAGE);
   } else {
     const raw = readCaptureFile(input);
     const capture = inputFormat === 'copilotkit-operations'
       ? decodeCopilotKitOperations(raw) : raw;
-    const observed = replayCapture(capture, {verifyChunks, summary, streamEfficiency,
-      activeSurfaceCounts});
+    const observed = replayCapture(capture, {verifyChunks, summary, streamEfficiency});
     // A shareable structural summary never includes capture values, IDs, or its
     // digest; raw evidence remains private unless the caller explicitly omits --summary.
     const view = summary ? {
-      schemaVersion: activeSurfaceCounts ? 2 : 1,
+      schemaVersion: 1,
       kind: 'a2ui-capture-safe-summary',
       protocol: observed.protocol,
       events: observed.events,
@@ -286,7 +274,6 @@ try {
         componentCount: snapshot.components.length,
         actionCount: snapshot.actionCount,
         actionsEmitted: snapshot.actionCount - (index === 0 ? 0 : observed.replay.snapshots[index - 1].actionCount),
-        ...(activeSurfaceCounts ? {activeSurfaceCount: snapshot.activeSurfaceCount} : {}),
       })),
     } : observed;
     const report = JSON.stringify(view, null, 2) + '\n';
