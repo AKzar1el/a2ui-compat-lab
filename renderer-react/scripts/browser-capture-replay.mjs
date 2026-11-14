@@ -8,7 +8,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations|websocket-frames] [--accept-v091] [--compat-copilotkit-basic-catalog] [--expect-client-action-frame PRIVATE.json] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations|websocket-frames] [--accept-v091] [--compat-copilotkit-basic-catalog] [--expect-client-action-frame PRIVATE.json] [--compare-client-data-model] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -39,7 +39,7 @@ export function parseBrowserCaptureOptions(argv) {
     internalButtonStateDigest: false, internalButtonA11yDigest: false,
     internalButtonFocusDigest: false, internalButtonGeometryDigest: false,
     compatCopilotkitBasicCatalog: false, acceptV091: false,
-    expectClientActionFrame: null};
+    expectClientActionFrame: null, compareClientDataModel: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--click-single-button' && !parsed.clickSingleButton) {
@@ -88,6 +88,8 @@ export function parseBrowserCaptureOptions(argv) {
     } else if (arg === '--input-format' && parsed.inputFormat === null &&
       ['jsonl', 'copilotkit-operations', 'websocket-frames'].includes(argv[i + 1])) {
       parsed.inputFormat = argv[++i];
+    } else if (arg === '--compare-client-data-model' && !parsed.compareClientDataModel) {
+      parsed.compareClientDataModel = true;
     } else if (arg === '--expect-client-action-frame' && parsed.expectClientActionFrame === null &&
       argv[i + 1] && !argv[i + 1].startsWith('--')) {
       parsed.expectClientActionFrame = resolve(argv[++i]);
@@ -107,6 +109,7 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.actionAfterEventIndex !== null && actionModes !== 1) ||
       (parsed.clickButtonIndex !== null && parsed.clickButtonIndex > MAX_BUTTON_INDEX) ||
       (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX) ||
+      (parsed.compareClientDataModel && parsed.expectClientActionFrame === null) ||
       (parsed.expectClientActionFrame !== null &&
         (parsed.inputFormat !== 'websocket-frames' || actionModes !== 1 ||
           parsed.actionSteps.length > 0 || parsed.reportFirstError ||
@@ -237,8 +240,8 @@ export function decodeWebSocketBrowserCapture(raw, acceptV091 = false) {
 /** An outbound Go client action is private, bounded comparison evidence only.
  * The frame's dataModel is not checked: this verifies the emitted action,
  * not the producer's complete client state or a live backend turn. */
-export function decodeExpectedClientActionFrame(raw, acceptV091 = false) {
-  if (typeof acceptV091 !== 'boolean' || !Buffer.isBuffer(raw) ||
+export function decodeExpectedClientActionFrame(raw, acceptV091 = false, includeDataModel = false) {
+  if (typeof acceptV091 !== 'boolean' || typeof includeDataModel !== 'boolean' || !Buffer.isBuffer(raw) ||
       raw.length < 2 || raw.length > MAX_LINE_BYTES)
     throw new Error('Invalid expected client action frame size');
   let frame;
@@ -251,6 +254,7 @@ export function decodeExpectedClientActionFrame(raw, acceptV091 = false) {
   const action = message?.action;
   if (!frame || typeof frame !== 'object' || Array.isArray(frame) ||
       frame.kind !== 'action' ||
+      (includeDataModel && !Object.hasOwn(frame, 'dataModel')) ||
       Object.keys(frame).some(key => !['kind', 'message', 'dataModel'].includes(key)) ||
       !message || typeof message !== 'object' || Array.isArray(message) ||
       Object.keys(message).sort().join(',') !== 'action,version' ||
@@ -271,15 +275,15 @@ export function decodeExpectedClientActionFrame(raw, acceptV091 = false) {
   // harness intentionally removes its own nondeterministic SDK timestamp.
   // Compare every stable semantic action field, never synthetic clock equality.
   const {timestamp: _timestamp, ...stableAction} = action;
-  return stableAction;
+  return includeDataModel ? {action: stableAction, dataModel: frame.dataModel} : stableAction;
 }
 
-function readExpectedClientActionFrame(path, acceptV091) {
+function readExpectedClientActionFrame(path, acceptV091, includeDataModel = false) {
   try {
     const meta = statSync(path);
     if (!meta.isFile() || meta.size < 2 || meta.size > MAX_LINE_BYTES)
       throw new Error('Invalid expected action file');
-    return decodeExpectedClientActionFrame(readFileSync(path), acceptV091);
+    return decodeExpectedClientActionFrame(readFileSync(path), acceptV091, includeDataModel);
   } catch {
     // Paths and user-provided action values must never enter diagnostics.
     throw new Error('Invalid expected client action frame; path and contents omitted');
@@ -310,7 +314,7 @@ export async function runBrowserCapture(messages, {
   actionDigestKey = null, renderedTextDigestKey = null, buttonStateDigestKey = null,
   buttonA11yDigestKey = null, buttonFocusDigestKey = null,
   buttonGeometryDigestKey = null, surfaceErrorProbe = false,
-  acceptV091 = false, expectedAction = null,
+  acceptV091 = false, expectedAction = null, expectedDataModel = undefined,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
@@ -333,6 +337,8 @@ export async function runBrowserCapture(messages, {
     throw new Error('Invalid internal surface error probe');
   const actionModes = Number(clickSingleButton) + Number(pressSingleButtonEnter) +
     Number(clickButtonIndex !== null) + Number(pressButtonIndexEnter !== null);
+  if (expectedDataModel !== undefined && expectedAction === null)
+    throw new Error('Expected client data model requires an expected action');
   if (expectedAction !== null &&
       (!expectedAction || typeof expectedAction !== 'object' || Array.isArray(expectedAction) ||
         actionModes !== 1 || actionSteps.length !== 0 || reportFirstError ||
@@ -435,11 +441,17 @@ export async function runBrowserCapture(messages, {
     let keyboardFocusVerified = false;
     let actionBeforeCount = null;
     let actionsVerified = 0;
+    let observedClientDataModel;
     const activateButton = async (
       targetIndex = selectedIndex,
       keyboardKey = (pressSingleButtonEnter || pressButtonIndexEnter !== null) ? 'Enter' : null,
       scripted = false,
     ) => {
+      // The Go client includes the complete model observed at dispatch time.
+      // Capture only inside this process before the real Chromium activation.
+      if (expectedDataModel !== undefined)
+        observedClientDataModel = await page.evaluate(surfaceId =>
+          window.__a2uiLab.trace(surfaceId).data, expectedAction.surfaceId);
       const before = (await page.evaluate(() => window.__a2uiLab.trace())).actions.length;
       const buttons = page.getByRole('button');
       const count = await buttons.count();
@@ -677,6 +689,9 @@ export async function runBrowserCapture(messages, {
     if (expectedAction !== null && (final.actions.length !== 1 ||
         canonicalActionJSON(final.actions[0]) !== canonicalActionJSON(expectedAction)))
       throw new Error('Chromium action did not match the expected client frame');
+    if (expectedDataModel !== undefined &&
+        canonicalActionJSON(observedClientDataModel) !== canonicalActionJSON(expectedDataModel))
+      throw new Error('Chromium data model did not match the expected client frame');
     return {
       schemaVersion: 1,
       kind: 'a2ui-react-capture-browser-replay',
@@ -695,6 +710,7 @@ export async function runBrowserCapture(messages, {
       keyboardFocusVerified,
       actionsEmitted: final.actions.length,
       ...(expectedAction !== null ? {expectedClientActionMatched: true} : {}),
+      ...(expectedDataModel !== undefined ? {expectedClientDataModelMatched: true} : {}),
       // Never persist or publish this digest; the parent drops it before report validation.
       ...(actionDigestKey ? {
         __privateActionDigest: createHmac('sha256', Buffer.from(actionDigestKey, 'hex'))
@@ -770,6 +786,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
             (args.internalButtonFocusDigest && !/^[a-f0-9]{64}$/.test(buttonFocusKey ?? '')) ||
             (args.internalButtonGeometryDigest && !/^[a-f0-9]{64}$/.test(buttonGeometryKey ?? ''))))
         throw new Error('Internal comparison digest must be pipe-only with valid ephemeral keys');
+      const expectedFrame = args.expectClientActionFrame ? readExpectedClientActionFrame(
+        args.expectClientActionFrame, args.acceptV091, args.compareClientDataModel) : null;
       const report = await runBrowserCapture(readCapture(args.input, args.inputFormat,
         args.compatCopilotkitBasicCatalog, args.acceptV091),
         {acceptV091: args.acceptV091,
@@ -783,8 +801,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           buttonStateDigestKey: buttonStateKey, buttonA11yDigestKey: buttonA11yKey,
           buttonFocusDigestKey: buttonFocusKey,
           buttonGeometryDigestKey: buttonGeometryKey,
-          expectedAction: args.expectClientActionFrame ?
-            readExpectedClientActionFrame(args.expectClientActionFrame, args.acceptV091) : null});
+          expectedAction: args.compareClientDataModel ? expectedFrame.action : expectedFrame,
+          expectedDataModel: args.compareClientDataModel ? expectedFrame.dataModel : undefined});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
