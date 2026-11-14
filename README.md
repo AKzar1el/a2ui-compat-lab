@@ -87,6 +87,31 @@ evidence. Counts and event patterns can still be sensitive: inspect before
 sharing. This summary is not a complete SDK trace, browser test, cryptographic
 attestation or proof of anonymity. See [capture comparison guidance](docs/CAPTURE_REPORT_COMPARISON.md).
 
+
+### Opt in to population-level multi-surface drift checks
+
+Two captures can have identical per-message operation types and target-surface
+counts, but leave a different **number of live surfaces** (for example when a
+surface is recreated or replaced). The default version-1 structural summary
+intentionally does not count previously seen surfaces; a MATCH cannot rule out
+that difference. Compare the published SDK's observed live surface population
+with this opt-in, **version-2** privacy-reduced summary:
+
+```sh
+node src/summary-compare.mjs --before-capture before.jsonl --after-capture after.jsonl --active-surface-counts --verify-chunks --strict
+```
+
+Or save version-2 baselines with `node src/replay-file.mjs --input before.jsonl --summary --active-surface-counts --out before-summary-v2.json`
+and compare two v2 summaries with `node src/summary-compare.mjs --before before-summary-v2.json --after after-summary-v2.json --strict`.
+The comparator refuses mixed v1/v2 coverage rather than silently reporting
+a false MATCH. The v2 field is a count of live *observed* surfaces after each
+message, not a list of IDs or model values. It still cannot detect exchanges of
+surface identity when the population count remains unchanged, and it is not
+browser rendering or proof of anonymity. Chronology and counts can be sensitive;
+review before sharing. The flag also works with `--before-format` /
+`--after-format copilotkit-operations` direct captures. Existing v1
+reports and defaults are unchanged.
+
 ### Replay a CopilotKit A2UI tool-result wrapper offline
 
 The public [CopilotKit Python A2UI helper](https://github.com/CopilotKit/CopilotKit/blob/7b88608455528bd2dd62752a01cc25b8c917d35c/sdk-python/copilotkit/a2ui.py) returns a JSON object with an `a2ui_operations` array, not JSONL.
