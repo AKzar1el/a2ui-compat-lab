@@ -2573,7 +2573,7 @@ const goClientActionFrame = {
   kind: 'action',
   message: {version: 'v0.9.1', action: {
     name: 'add_note', surfaceId: 'main', sourceComponentId: 'add-btn',
-    context: {text: ''},
+    timestamp: '2026-11-14T16:00:00.000Z', context: {text: ''},
   }},
   dataModel: {draft: '', notes: []},
 };
@@ -2582,6 +2582,13 @@ assert.throws(() => decodeExpectedClientActionFrame(goClientActionBytes),
   /Invalid expected Go client action frame/, 'v0.9.1 outbound action requires opt-in');
 const goExpectedAction = decodeExpectedClientActionFrame(goClientActionBytes, true);
 assert.equal(goExpectedAction.name, 'add_note');
+assert.equal(Object.hasOwn(goExpectedAction, 'timestamp'), false,
+  'Go producer wall-clock timestamp must not be mistaken for action drift');
+assert.throws(() => decodeExpectedClientActionFrame(Buffer.from(JSON.stringify({
+  ...goClientActionFrame, message: {
+    version: 'v0.9.1', action: {...goClientActionFrame.message.action, timestamp: 'PRIVATE_BAD_TIME'},
+  },
+})), true), /Invalid expected Go client action frame/);
 assert.throws(() => decodeExpectedClientActionFrame(Buffer.from(JSON.stringify({
   ...goClientActionFrame, token: 'PRIVATE_MARKER',
 })), true), /Invalid expected Go client action frame/);
