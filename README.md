@@ -106,6 +106,7 @@ counts and chronology can still be sensitive. This tests a documented producer
 format against the lab's real headless SDK. It does **not** execute a third-party
 application, certify CopilotKit renderer behavior, support v1.0, or establish
 customer adoption. The original input is never modified.
+
 ### Diagnose growing-string replace overhead locally
 
 `updateDataModel` v0.9 replaces values, so repeatedly sending longer strings can
