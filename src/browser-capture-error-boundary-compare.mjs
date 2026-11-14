@@ -7,7 +7,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {compareBrowserCaptureSummaries} from './browser-capture-summary-compare.mjs';
 import {evaluateConsumer, readManifest, readLockfile} from './consumer-version-preflight.mjs';
 
-const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--before-input-format jsonl|copilotkit-operations] [--after-input-format jsonl|copilotkit-operations] [--require-no-observed-failures] [--compare-rendered-text] [--compare-button-geometry] [--compare-button-focus] [--format json|markdown|junit] [--out NEW-REPORT | --report-dir NEW-DIRECTORY] [--consumer-manifest APP/package.json --consumer-protocol v0.9 [--consumer-lockfile APP/package-lock.json]]';
+const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--before-input-format jsonl|copilotkit-operations] [--after-input-format jsonl|copilotkit-operations] [--compat-copilotkit-basic-catalog] [--require-no-observed-failures] [--compare-rendered-text] [--compare-button-geometry] [--compare-button-focus] [--format json|markdown|junit] [--out NEW-REPORT | --report-dir NEW-DIRECTORY] [--consumer-manifest APP/package.json --consumer-protocol v0.9 [--consumer-lockfile APP/package-lock.json]]';
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
 const RENDERER = '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0';
@@ -19,7 +19,7 @@ const isRecord = value => value !== null && typeof value === 'object' && !Array.
 
 export function parseErrorBoundaryOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help: true};
-  const args = {strict: false, requireNoObservedFailures: false, compareRenderedText: false, compareButtonGeometry: false, compareButtonFocus: false};
+  const args = {strict: false, requireNoObservedFailures: false, compareRenderedText: false, compareButtonGeometry: false, compareButtonFocus: false, compatCopilotkitBasicCatalog: false};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--strict' && !args.strict) args.strict = true;
@@ -31,6 +31,8 @@ export function parseErrorBoundaryOptions(argv) {
       args.compareButtonGeometry = true;
     else if (arg === '--compare-button-focus' && !args.compareButtonFocus)
       args.compareButtonFocus = true;
+    else if (arg === '--compat-copilotkit-basic-catalog' && !args.compatCopilotkitBasicCatalog)
+      args.compatCopilotkitBasicCatalog = true;
     else if (arg === '--format' && !Object.hasOwn(args, 'format') &&
       ['json', 'markdown', 'junit'].includes(argv[i + 1])) args.format = argv[++i];
     else if (['--before-input-format', '--after-input-format'].includes(arg) &&
@@ -47,7 +49,9 @@ export function parseErrorBoundaryOptions(argv) {
   }
   if (!args['before-capture'] || !args['after-capture'] ||
       (args['report-dir'] && (args.out || Object.hasOwn(args, 'format'))) ||
-      ((args.compareRenderedText || args.compareButtonGeometry || args.compareButtonFocus) && !args.requireNoObservedFailures)) throw invalid();
+      ((args.compareRenderedText || args.compareButtonGeometry || args.compareButtonFocus) && !args.requireNoObservedFailures) ||
+      (args.compatCopilotkitBasicCatalog && !['before-input-format', 'after-input-format']
+        .some(key => args[key] === 'copilotkit-operations'))) throw invalid();
   const hasConsumerOptions = ['consumer-manifest', 'consumer-protocol', 'consumer-lockfile']
     .some(key => Object.hasOwn(args, key));
   if (hasConsumerOptions && (!args['consumer-manifest'] || !args['consumer-protocol']))
@@ -104,11 +108,13 @@ function parseObservedBoundary(report, exitStatus, textDigestEnabled = false,
 }
 
 function runDiagnostic(capturePath, inputFormat = 'jsonl', textDigestKey = null,
-  geometryDigestKey = null, focusDigestKey = null) {
+  geometryDigestKey = null, focusDigestKey = null, compatBasicCatalog = false) {
   let child;
   try {
     child = spawnSync(process.execPath,
       [RENDERER_SCRIPT, '--input', capturePath, '--input-format', inputFormat, '--report-first-error',
+        ...(compatBasicCatalog && inputFormat === 'copilotkit-operations' ?
+          ['--compat-copilotkit-basic-catalog'] : []),
         ...(textDigestKey ? ['--internal-rendered-text-digest'] : []),
         ...(geometryDigestKey ? ['--internal-button-geometry-digest'] : []),
         ...(focusDigestKey ? ['--internal-button-focus-digest'] : [])], {
@@ -359,9 +365,9 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const geometryKey = args.compareButtonGeometry ? randomBytes(32).toString('hex') : null;
       const focusKey = args.compareButtonFocus ? randomBytes(32).toString('hex') : null;
       const before = runDiagnostic(args['before-capture'], args['before-input-format'] ?? 'jsonl',
-        textKey, geometryKey, focusKey);
+        textKey, geometryKey, focusKey, args.compatCopilotkitBasicCatalog);
       const after = runDiagnostic(args['after-capture'], args['after-input-format'] ?? 'jsonl',
-        textKey, geometryKey, focusKey);
+        textKey, geometryKey, focusKey, args.compatCopilotkitBasicCatalog);
       const result = compareErrorBoundaries(before, after,
         {requireNoObservedFailures: args.requireNoObservedFailures,
           compareRenderedText: args.compareRenderedText,

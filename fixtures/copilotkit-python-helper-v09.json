@@ -1,0 +1,65 @@
+{
+  "a2ui_operations": [
+    {
+      "version": "v0.9",
+      "createSurface": {
+        "surfaceId": "producer-proof",
+        "catalogId": "https://a2ui.org/specification/v0_9/basic_catalog.json"
+      }
+    },
+    {
+      "version": "v0.9",
+      "updateComponents": {
+        "surfaceId": "producer-proof",
+        "components": [
+          {
+            "id": "root",
+            "component": "Column",
+            "children": [
+              "title",
+              "submit"
+            ]
+          },
+          {
+            "id": "title",
+            "component": "Text",
+            "text": {
+              "path": "/title"
+            }
+          },
+          {
+            "id": "submit",
+            "component": "Button",
+            "child": "label",
+            "variant": "primary",
+            "action": {
+              "event": {
+                "name": "confirm",
+                "context": {
+                  "title": {
+                    "path": "/title"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "id": "label",
+            "component": "Text",
+            "text": "Confirm"
+          }
+        ]
+      }
+    },
+    {
+      "version": "v0.9",
+      "updateDataModel": {
+        "surfaceId": "producer-proof",
+        "path": "/",
+        "value": {
+          "title": "CopilotKit helper output"
+        }
+      }
+    }
+  ]
+}

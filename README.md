@@ -139,6 +139,33 @@ Only the allowed operation sequence and counts are compared: a value-only
 change can still report MATCH. No intermediate raw JSONL file is written,
 and structural metadata in the output can still be sensitive.
 
+**Verified CopilotKit catalog-ID compatibility gap (opt-in):** At pinned upstream
+CopilotKit Python helper commit `7b88608455528bd2dd62752a01cc25b8c917d35c`,
+`a2ui.create_surface()` defaults to
+`https://a2ui.org/specification/v0_9/basic_catalog.json`; the installed
+published `@a2ui/web_core@0.14.0` Basic Catalog instead has ID
+`https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json`.
+A saved tool result using the producer default fails at the first real Chromium
+surface creation. For **developer-owned** CopilotKit v0.9 captures, you can
+explicitly opt into rewriting **only this exact catalog ID in memory**:
+
+```sh
+cd renderer-react
+node scripts/browser-capture-replay.mjs --input ../saved-copilotkit-result.json --input-format copilotkit-operations --compat-copilotkit-basic-catalog --click-single-button
+```
+
+The private-capture pair comparator accepts the same opt-in flag; it applies
+only to sides identified as `copilotkit-operations`. Without the flag, the
+published SDK's original failure is preserved. Unknown/custom catalog IDs,
+v1.0 and JSONL captures are never silently remapped. No source capture
+is changed or second raw file written. A pinned upstream-helper-generated
+**public synthetic** fixture in `fixtures/copilotkit-python-helper-v09.json`
+tests the default failure, opt-in actual Chromium Button action and
+mixed-format Chromium parity in CI. This establishes producer-helper-to-renderer
+interoperability only, not a running third-party CopilotKit application or
+broader catalog support. Application owners can alternatively pass the exact
+published catalog ID to CopilotKit's `create_surface(catalog_id=...)` directly.
+
 ### Compare private CopilotKit and JSONL captures in real Chromium
 
 A developer can now compare a saved, explicitly owned CopilotKit v0.9 tool
