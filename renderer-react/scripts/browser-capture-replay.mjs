@@ -259,9 +259,19 @@ export function decodeExpectedClientActionFrame(raw, acceptV091 = false) {
       typeof action.name !== 'string' || !action.name ||
       typeof action.surfaceId !== 'string' || !action.surfaceId ||
       typeof action.sourceComponentId !== 'string' || !action.sourceComponentId ||
-      !action.context || typeof action.context !== 'object' || Array.isArray(action.context))
+      !action.context || typeof action.context !== 'object' || Array.isArray(action.context) ||
+      Object.keys(action).some(key =>
+        !['name', 'surfaceId', 'sourceComponentId', 'context', 'timestamp'].includes(key)) ||
+      (Object.hasOwn(action, 'timestamp') &&
+        (typeof action.timestamp !== 'string' ||
+          !/^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d/.test(action.timestamp) ||
+          !Number.isFinite(Date.parse(action.timestamp)))))
     throw new Error('Invalid expected Go client action frame');
-  return action;
+  // The Go producer serializes a wall-clock timestamp. Our real React/core
+  // harness intentionally removes its own nondeterministic SDK timestamp.
+  // Compare every stable semantic action field, never synthetic clock equality.
+  const {timestamp: _timestamp, ...stableAction} = action;
+  return stableAction;
 }
 
 function readExpectedClientActionFrame(path, acceptV091) {
