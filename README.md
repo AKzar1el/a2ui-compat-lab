@@ -139,6 +139,27 @@ Only the allowed operation sequence and counts are compared: a value-only
 change can still report MATCH. No intermediate raw JSONL file is written,
 and structural metadata in the output can still be sensitive.
 
+### Compare private CopilotKit and JSONL captures in real Chromium
+
+A developer can now compare a saved, explicitly owned CopilotKit v0.9 tool
+result with a v0.9 JSONL capture **directly in the pinned React/Chromium
+renderer**, without unpacking private model values into another raw file:
+
+```sh
+node src/browser-capture-error-boundary-compare.mjs --before-capture old.jsonl --after-capture saved-copilotkit-result.json --after-input-format copilotkit-operations --require-no-observed-failures --compare-rendered-text --strict --out out/copilotkit-browser-parity.json
+```
+
+For a saved CopilotKit input on the left, specify
+`--before-input-format copilotkit-operations`; each side independently defaults
+to `jsonl`. Only `jsonl` and `copilotkit-operations` are accepted. This reuses
+the existing bounded v0.9 capture validation, one-use HMAC Text comparisons,
+observed-failure policy, path-free diagnostics and exclusive report writing.
+A Text-only change can fail CI even when structural event counts match.
+The report excludes model values, surface IDs, filenames and transient digests,
+but timing/count metadata can still be sensitive. No Button action is activated.
+This tests saved producer envelopes, **not** a running CopilotKit app, A2UI v1.0,
+other published React SDK lanes, customer adoption or security certification.
+
 ### Diagnose growing-string replace overhead locally
 
 `updateDataModel` v0.9 replaces values, so repeatedly sending longer strings can
