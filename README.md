@@ -630,7 +630,7 @@ Without that flag the identical v0.9.1 input is rejected. The returned
 lane, **not** the precise source-message version. This is bounded replay
 compatibility evidence, not full integration or certification of the Go app.
 
-Limits: Limits: 512 KiB total, 64 KiB per line,
+Limits: 512 KiB total, 64 KiB per line,
 100 events. The opt-in click checks exactly one rendered Button at the end
 and verifies that a genuine browser pointer action emits exactly one agent
 event. Alternatively, `--press-single-button-enter` presses **Tab** from the
