@@ -4,6 +4,30 @@
 
 [![A2UI Compatibility CI](https://github.com/AKzar1el/a2ui-compat-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/AKzar1el/a2ui-compat-lab/actions/workflows/ci.yml)
 
+## Replay saved Go A2UI WebSocket server frames (opt-in)
+
+The independent [Go/React A2UI producer](https://github.com/nigma888/a2ui-go-react)
+wraps its v0.9.1 messages in WebSocket frames such as
+`{"kind":"a2ui","message":{...}}`, with `thinking` / `idle` status
+frames. Its [upstream WebSocket transport test](https://github.com/nigma888/a2ui-go-react/blob/main/backend/internal/transport/ws/handler_test.go)
+uses a scripted local LLM, so these envelope semantics can be checked without
+Gemini credentials. For developer-owned, **server-to-client** frames saved
+as one JSON frame per line (newline-terminated), replay them directly:
+
+```sh
+node renderer-react/scripts/browser-capture-replay.mjs --input PRIVATE-server-frames.jsonl --input-format websocket-frames --accept-v091 --click-single-button
+```
+
+This is a local input import, **not** a WebSocket client or a full external-app
+test. The importer accepts only `a2ui` message frames and known `status`
+frames, rejects errors and outbound/client frames, requires the explicit
+v0.9.1 opt-in, and reuses the strict JSONL event count, size, version and
+operation validator. The Chromium harness denies off-origin requests and
+sockets; its report omits component IDs, values and action payloads.
+Never publish original captures or treat synthetic frame-wrapping tests as
+independent production usage. The previous JSONL and CopilotKit input modes
+remain unchanged.
+
 ## Try a real Chromium CI regression
 
 The [consumer CI starter](examples/consumer-ci/README.md) includes a public v0.9

@@ -8,7 +8,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations] [--accept-v091] [--compat-copilotkit-basic-catalog] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations|websocket-frames] [--accept-v091] [--compat-copilotkit-basic-catalog] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -85,7 +85,7 @@ export function parseBrowserCaptureOptions(argv) {
     } else if (arg === '--accept-v091' && !parsed.acceptV091) {
       parsed.acceptV091 = true;
     } else if (arg === '--input-format' && parsed.inputFormat === null &&
-      ['jsonl', 'copilotkit-operations'].includes(argv[i + 1])) {
+      ['jsonl', 'copilotkit-operations', 'websocket-frames'].includes(argv[i + 1])) {
       parsed.inputFormat = argv[++i];
     } else if ((arg === '--input' || arg === '--out') &&
       argv[i + 1] && !argv[i + 1].startsWith('--') && !parsed[arg.slice(2)]) {
@@ -99,7 +99,7 @@ export function parseBrowserCaptureOptions(argv) {
     Number(parsed.clickButtonIndex !== null) + Number(parsed.pressButtonIndexEnter !== null);
   if (!parsed.input || actionModes > 1 ||
        (parsed.compatCopilotkitBasicCatalog && parsed.inputFormat !== 'copilotkit-operations') ||
-       (parsed.acceptV091 && parsed.inputFormat !== 'jsonl') ||
+       (parsed.acceptV091 && !['jsonl', 'websocket-frames'].includes(parsed.inputFormat)) ||
       (parsed.actionAfterEventIndex !== null && actionModes !== 1) ||
       (parsed.clickButtonIndex !== null && parsed.clickButtonIndex > MAX_BUTTON_INDEX) ||
       (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX) ||
@@ -187,6 +187,45 @@ export function decodeCopilotKitBrowserCapture(raw, compatBasicCatalog = false) 
   return decodeBrowserCapture(Buffer.from(replayMessages.map(message => JSON.stringify(message)).join('\n') + '\n'));
 }
 
+/** Server-to-client frames from the independent Go/React WebSocket producer.
+ * This is an explicit transport import, not a network connection or a claim
+ * that the producer's complete live application was executed here. */
+export function decodeWebSocketBrowserCapture(raw, acceptV091 = false) {
+  if (typeof acceptV091 !== 'boolean' || !Buffer.isBuffer(raw) ||
+      raw.length < 2 || raw.length > MAX_INPUT_BYTES || raw.at(-1) !== 10)
+    throw new Error('Invalid A2UI WebSocket capture size or option');
+  const messages = [];
+  const decoder = new TextDecoder('utf-8', {fatal: true});
+  let frameStart = 0;
+  let frames = 0;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] !== 10) continue;
+    if (i - frameStart > MAX_LINE_BYTES || ++frames > MAX_EVENTS * 2 + 2)
+      throw new Error('Invalid A2UI WebSocket capture frame limit');
+    let frame;
+    try {
+      frame = JSON.parse(decoder.decode(raw.subarray(frameStart, i)));
+    } catch {
+      throw new Error('Invalid A2UI WebSocket capture encoding or JSON');
+    }
+    frameStart = i + 1;
+    if (!frame || typeof frame !== 'object' || Array.isArray(frame) ||
+        Object.keys(frame).length !== 2)
+      throw new Error('Invalid A2UI WebSocket server frame');
+    if (frame.kind === 'status' && ['thinking', 'idle'].includes(frame.state)) continue;
+    if (frame.kind !== 'a2ui' || !frame.message ||
+        typeof frame.message !== 'object' || Array.isArray(frame.message) ||
+        messages.length >= MAX_EVENTS)
+      throw new Error('Invalid A2UI WebSocket server frame');
+    messages.push(frame.message);
+  }
+  if (!messages.length) throw new Error('Invalid A2UI WebSocket capture: no A2UI messages');
+  // Reuse the exact existing JSONL and protocol validation. No private
+  // values or server-provided error messages enter diagnostics.
+  return decodeBrowserCapture(Buffer.from(messages.map(message =>
+    JSON.stringify(message)).join('\n') + '\n'), acceptV091);
+}
+
 function readCapture(input, inputFormat = 'jsonl', compatBasicCatalog = false, acceptV091 = false) {
   try {
     const meta = statSync(input);
@@ -194,7 +233,9 @@ function readCapture(input, inputFormat = 'jsonl', compatBasicCatalog = false, a
       throw new Error('Invalid browser capture file');
     const raw = readFileSync(input);
     return inputFormat === 'copilotkit-operations' ?
-      decodeCopilotKitBrowserCapture(raw, compatBasicCatalog) : decodeBrowserCapture(raw, acceptV091);
+      decodeCopilotKitBrowserCapture(raw, compatBasicCatalog) :
+      inputFormat === 'websocket-frames' ?
+        decodeWebSocketBrowserCapture(raw, acceptV091) : decodeBrowserCapture(raw, acceptV091);
   } catch {
     throw new Error('Invalid browser capture input; path and contents omitted');
   }
