@@ -107,7 +107,7 @@ export function testDirectBrowserCaptureBaseline(encodedCapture, baseline, twoAc
     assert.doesNotMatch(optInRealReplay.stdout, /CopilotKit helper output|producer-proof|catalogId/);
 
     const equivalentJsonlPath = join(dir, 'public-producer-control.jsonl');
-    writeFileSync(equivalentJsonlPath, normalized.map(x => JSON.stringify(x)).join('\\n') + '\\n');
+    writeFileSync(equivalentJsonlPath, normalized.map(x => JSON.stringify(x)).join('\n') + '\n');
     const realProducerCompare = runErrorCompare(['--before-capture', realProducerPath,
       '--before-input-format', 'copilotkit-operations', '--after-capture', equivalentJsonlPath,
       '--compat-copilotkit-basic-catalog', '--require-no-observed-failures',
