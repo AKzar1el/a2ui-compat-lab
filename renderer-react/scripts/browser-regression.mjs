@@ -2575,7 +2575,8 @@ const goClientActionFrame = {
     name: 'add_note', surfaceId: 'main', sourceComponentId: 'add-btn',
     timestamp: '2026-11-14T16:00:00.000Z', context: {text: ''},
   }},
-  dataModel: {draft: '', notes: []},
+  // Deliberately reverse the producer's JSON key insertion order.
+  dataModel: {notes: [], draft: ''},
 };
 const goClientActionBytes = Buffer.from(JSON.stringify(goClientActionFrame));
 assert.throws(() => decodeExpectedClientActionFrame(goClientActionBytes),
