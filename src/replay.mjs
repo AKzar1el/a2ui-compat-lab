@@ -73,12 +73,10 @@ export function parseJsonLinesBytes(chunks, {maxLineBytes = 262144, maxMessages 
 }
 
 /** Exercise the real v0.9 A2UI MessageProcessor; intentionally NOT a browser renderer. */
-export function replayV09(messages, {trackActiveSurfaces = false} = {}) {
+export function replayV09(messages) {
   const actions = [];
   const processor = new MessageProcessor([basicCatalog], action => { actions.push(action); });
   const snapshots = [];
-  // Only opt-in callers incur per-event checks of all previously observed surfaces.
-  const observedSurfaceIds = trackActiveSurfaces ? new Set() : null;
   try {
     for (const [index, source] of messages.entries()) {
       const message = structuredClone(source);
@@ -89,15 +87,12 @@ export function replayV09(messages, {trackActiveSurfaces = false} = {}) {
         message.updateComponents?.surfaceId ?? message.updateDataModel?.surfaceId ??
         message.deleteSurface?.surfaceId ?? 'replay';
       const surface = processor.getSurface(surfaceId);
-      if (observedSurfaceIds) observedSurfaceIds.add(surfaceId);
       snapshots.push({
         index, surfaceId,
         exists: Boolean(surface),
         components: surface ? [...surface.componentsModel.keys] : [],
         data: surface ? (structuredClone(surface.dataModel.get('/')) ?? null) : null,
         actionCount: actions.length,
-        ...(observedSurfaceIds ? {activeSurfaceCount: [...observedSurfaceIds]
-          .filter(id => Boolean(processor.getSurface(id))).length} : {}),
       });
     }
     return {protocol: 'v0.9', snapshots, actionCount: actions.length};
