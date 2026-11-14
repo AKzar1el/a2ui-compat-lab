@@ -28,6 +28,30 @@ Never publish original captures or treat synthetic frame-wrapping tests as
 independent production usage. The previous JSONL and CopilotKit input modes
 remain unchanged.
 
+### Verify one outbound Go client action against actual Chromium output
+
+When you own both a saved server-frame log and a **separate**, saved
+client-to-server Go WebSocket action envelope of the form
+`{"kind":"action","message":{"version":"v0.9.1","action":{...}},"dataModel":{...}}`,
+you can compare the expected action name, source and context with the actual
+published React/Chromium Button event, not just check that some event fired:
+
+```sh
+node renderer-react/scripts/browser-capture-replay.mjs --input PRIVATE-server-frames.jsonl --input-format websocket-frames --accept-v091 --click-single-button --expect-client-action-frame PRIVATE-client-action.json
+```
+
+A mismatch exits nonzero; a match adds `expectedClientActionMatched: true` to
+the privacy-reduced count report. Input files are bounded and read locally,
+private action values, component IDs and file paths are never printed, and
+the comparison is exact for stable action fields (object key order ignored);
+the Go envelope's volatile `timestamp` is validated then excluded because the
+published React/core harness omits its own generated timestamp.
+This mode requires one explicit Button activation and never performs a network
+request. **The separate Go frame's `dataModel` is not compared**, and this
+does not execute the Go backend, verify the full bidirectional WebSocket
+session, or establish third-party adoption. Use only developer-owned captures,
+do not publish them, and do not pass private action JSON on the command line.
+
 ## Try a real Chromium CI regression
 
 The [consumer CI starter](examples/consumer-ci/README.md) includes a public v0.9
