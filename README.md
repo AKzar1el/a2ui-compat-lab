@@ -65,35 +65,48 @@ client model that would change the backend's next-turn behavior. It still does
 session, real-world usage, or third-party adoption. Use only developer-owned captures,
 do not publish them, and do not pass private action JSON on the command line.
 
-### Replay one interleaved Go action-response transcript (opt-in)
+### Replay interleaved Go action-response transcripts (opt-in)
 
-For a **developer-owned**, newline-delimited WebSocket transcript that contains
+For a **developer-owned**, newline-delimited WebSocket transcript containing
 server-to-client `{"kind":"a2ui","message":...}` frames, optional
-`{"kind":"status","state":"thinking"|"idle"}` frames and **exactly one**
-client-to-server `{"kind":"action","message":...,"dataModel":...}` frame
-between server A2UI messages, replay in original order without splitting
-the client action into another file or manually finding its event index:
+`{"kind":"status","state":"thinking"|"idle"}` frames, and outbound
+`{"kind":"action","message":...,"dataModel":...}` frames, replay in order
+through the real published React/Chromium renderer without splitting action
+frames into separate files.
+
+For one action between server messages:
 
 ```sh
 node renderer-react/scripts/browser-capture-replay.mjs --input PRIVATE-bidirectional-transcript.jsonl --input-format websocket-transcript --accept-v091 --click-single-button --compare-client-data-model
 ```
 
-The runner activates a real Chromium Button at the client frame boundary,
-compares stable action fields (and its actual data model only with
-`--compare-client-data-model`), then processes subsequent server frames.
-Exactly one outbound action and at least one server A2UI message on each
-side are required. Strict UTF-8, newline termination, 512 KiB total, 64 KiB
-per frame and 100 A2UI event limits apply. Duplicate, malformed, unknown
-or out-of-order frames fail closed. Server-only `websocket-frames` and the
-separate client-action file mode remain unchanged.
+For **two to eight action/response turns**, supply one explicit activation per
+outbound frame at its captured server-event boundary:
 
-The fixed-schema report excludes client action/model values, component IDs
-and file paths. Counts and event timing can still be sensitive: inspect
-reports before sharing. Included tests reconstruct illustrative Go-format
-frames from a public fixture and exercise the pinned published React renderer
-in real Chromium. They do **not** execute the independent Go backend, prove
-a live bidirectional session, validate a production capture, or establish
-customer adoption or revenue. No API key is needed.
+```sh
+node renderer-react/scripts/browser-capture-replay.mjs --input PRIVATE-multiturn.jsonl --input-format websocket-transcript --accept-v091 --compare-client-data-model --action-step 2:0:click --action-step 3:0:click
+```
+
+Each `EVENT:BUTTON:click|enter|space` step selects a Chromium Button by
+zero-based index immediately after the numbered A2UI server event. The steps
+must match the number and ordered event boundaries of outbound frames.
+An outbound action requires an earlier server A2UI message and a subsequent
+server response before the next action. Stable action fields and optional
+full client data models are compared in memory **on every activation**; any
+mismatch fails the run. No Go server or live WebSocket is executed.
+
+Strict UTF-8, newline termination, 512 KiB total, 64 KiB per frame, 100
+server A2UI events and eight client actions are hard limits. Missing,
+malformed, duplicate, unsupported or out-of-order frames fail closed.
+Existing single-action and server-only `websocket-frames` modes remain unchanged.
+
+The fixed-schema report omits private client action/model values, component
+IDs and paths. Counts and event timing can still be sensitive: inspect
+reports before sharing. The tests reconstruct illustrative Go-format
+fixtures and execute actual pinned React 0.14/Chromium interactions. They
+do **not** execute the independent Go backend, validate a production
+capture, prove a full live bidirectional session, or demonstrate external
+adoption or revenue. No API key is needed.
 
 ## Try a real Chromium CI regression
 
