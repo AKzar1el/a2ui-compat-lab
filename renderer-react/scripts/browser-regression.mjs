@@ -2700,6 +2700,7 @@ assert.equal(transcript.actionAfterEventIndex, 2);
 assert.deepEqual(transcript.messages, [...goNotesMessages, goFollowUp]);
 assert.deepEqual(transcript.expectedAction, goExpectedAction);
 assert.deepEqual(transcript.expectedDataModel, {notes: [], draft: ''});
+assert.deepEqual(transcript.actionFrames.map(frame => frame.actionAfterEventIndex), [2]);
 assert.throws(() => decodeWebSocketBrowserTranscript(transcriptBytes),
   /Invalid A2UI WebSocket transcript size or options/,
   'Explicit v0.9.1 opt-in must be required');
@@ -2723,6 +2724,40 @@ for (const flags of [
   ...flags]), /Usage:/);
 const serializeTranscript = frames => Buffer.from(frames.map(frame =>
   JSON.stringify(frame)).join('\n') + '\n');
+// A second turn must compare the actual second Chromium action and model,
+// not just the first successful event from an interleaved Go-format stream.
+const secondGoAction = {
+  ...goClientActionFrame,
+  message: {...goClientActionFrame.message, action: {
+    ...goClientActionFrame.message.action,
+    timestamp: '2026-11-14T16:00:01.000Z',
+  }},
+  dataModel: {notes: [{id: 'fixture-note', text: 'PRIVATE_GO_REPLY'}], draft: ''},
+};
+const secondGoFollowup = {version: 'v0.9.1', updateDataModel: {
+  surfaceId: 'main', path: '/', value: {
+    draft: '', notes: [
+      {id: 'fixture-note', text: 'PRIVATE_GO_REPLY'},
+      {id: 'fixture-note-2', text: 'PRIVATE_GO_REPLY_2'},
+    ],
+  },
+}};
+const twoTurnFrames = [
+  ...transcriptFrames.slice(0, -1), secondGoAction,
+  {kind: 'status', state: 'thinking'},
+  {kind: 'a2ui', message: secondGoFollowup},
+  {kind: 'status', state: 'idle'},
+];
+const twoTurnBytes = serializeTranscript(twoTurnFrames);
+const twoTurnDecoded = decodeWebSocketBrowserTranscript(twoTurnBytes, true, true);
+assert.deepEqual(twoTurnDecoded.actionFrames.map(frame => frame.actionAfterEventIndex), [2, 3]);
+assert.equal(twoTurnDecoded.messages.length, 5);
+assert.equal(twoTurnDecoded.expectedAction, null);
+assert.throws(() => decodeWebSocketBrowserTranscript(serializeTranscript(
+  [...transcriptFrames.slice(0, -2), secondGoAction,
+    {kind: 'a2ui', message: secondGoFollowup}]), true, true),
+  /Invalid A2UI WebSocket transcript action ordering/,
+  'Adjacent client actions with no server response must fail closed');
 const invalidTranscript = [
   goWsFrames,
   [goClientActionFrame, ...transcriptFrames],
@@ -2803,6 +2838,42 @@ try {
     'The follow-up Go-format dataModel update must visibly render another real Button');
   assert.doesNotMatch(transcriptReplay.stdout + transcriptReplay.stderr,
     /PRIVATE_GO|add_note|add-btn|draft|fixture-note|sourceComponentId/);
+  const twoTurnPath = join(wsTempDir, 'PRIVATE_GO_TWO_TURN.jsonl');
+  writeFileSync(twoTurnPath, twoTurnBytes);
+  const runTwoTurn = (path, steps) => spawnSync(process.execPath, [
+    resolve(root, 'scripts/browser-capture-replay.mjs'), '--input', path,
+    '--input-format', 'websocket-transcript', '--accept-v091',
+    '--compare-client-data-model', ...steps,
+  ], {encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 256 * 1024});
+  const twoTurnSteps = ['--action-step', '2:0:click', '--action-step', '3:0:click'];
+  const twoTurnReplay = runTwoTurn(twoTurnPath, twoTurnSteps);
+  assert.equal(twoTurnReplay.error, undefined);
+  assert.equal(twoTurnReplay.status, 0, twoTurnReplay.stderr);
+  const twoTurnReport = JSON.parse(twoTurnReplay.stdout);
+  assert.equal(twoTurnReport.events, 5);
+  assert.equal(twoTurnReport.actionsVerified, 2);
+  assert.equal(twoTurnReport.actionsEmitted, 2);
+  assert.equal(twoTurnReport.steps[3].actionCount, 1);
+  assert.equal(twoTurnReport.steps[4].actionCount, 2);
+  assert.equal(twoTurnReport.expectedClientActionMatched, true);
+  assert.equal(twoTurnReport.expectedClientDataModelMatched, true);
+  assert.doesNotMatch(twoTurnReplay.stdout + twoTurnReplay.stderr,
+    /PRIVATE_GO|add_note|add-btn|draft|fixture-note|sourceComponentId/);
+  assert.equal(runTwoTurn(twoTurnPath, ['--action-step', '2:0:click']).status, 2,
+    'Missing one captured action step must fail before rendering');
+  assert.equal(runTwoTurn(twoTurnPath, ['--action-step', '2:0:click',
+    '--action-step', '4:0:click']).status, 2,
+    'Mismatched action boundary must fail before rendering');
+  const driftTwoTurnPath = join(wsTempDir, 'PRIVATE_SECOND_ACTION_DRIFT.jsonl');
+  writeFileSync(driftTwoTurnPath, serializeTranscript(twoTurnFrames.map(frame =>
+    frame === secondGoAction ? {...frame, message: {...frame.message, action: {
+      ...frame.message.action, context: {text: 'PRIVATE_SECOND_DRIFT'},
+    }}} : frame)));
+  const driftTwoTurn = runTwoTurn(driftTwoTurnPath, twoTurnSteps);
+  assert.equal(driftTwoTurn.status, 2,
+    'The second browser action must be checked, not merely counted');
+  assert.doesNotMatch(driftTwoTurn.stdout + driftTwoTurn.stderr,
+    /PRIVATE_GO|PRIVATE_SECOND_DRIFT|add_note|add-btn|draft|sourceComponentId/);
   const badTranscriptPath = join(wsTempDir, 'PRIVATE_BAD_TRANSCRIPT.jsonl');
   writeFileSync(badTranscriptPath, serializeTranscript(transcriptFrames.map(frame =>
     frame === goClientActionFrame ? {
