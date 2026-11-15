@@ -8,7 +8,7 @@ import {chromium} from '@playwright/test';
 import {createServer} from 'vite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations|websocket-frames] [--accept-v091] [--compat-copilotkit-basic-catalog] [--expect-client-action-frame PRIVATE.json] [--compare-client-data-model] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
+const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations|websocket-frames|websocket-transcript] [--accept-v091] [--compat-copilotkit-basic-catalog] [--expect-client-action-frame PRIVATE.json] [--compare-client-data-model] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_EVENTS = 100;
@@ -86,7 +86,7 @@ export function parseBrowserCaptureOptions(argv) {
     } else if (arg === '--accept-v091' && !parsed.acceptV091) {
       parsed.acceptV091 = true;
     } else if (arg === '--input-format' && parsed.inputFormat === null &&
-      ['jsonl', 'copilotkit-operations', 'websocket-frames'].includes(argv[i + 1])) {
+      ['jsonl', 'copilotkit-operations', 'websocket-frames', 'websocket-transcript'].includes(argv[i + 1])) {
       parsed.inputFormat = argv[++i];
     } else if (arg === '--compare-client-data-model' && !parsed.compareClientDataModel) {
       parsed.compareClientDataModel = true;
@@ -109,7 +109,13 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.actionAfterEventIndex !== null && actionModes !== 1) ||
       (parsed.clickButtonIndex !== null && parsed.clickButtonIndex > MAX_BUTTON_INDEX) ||
       (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX) ||
-      (parsed.compareClientDataModel && parsed.expectClientActionFrame === null) ||
+      (parsed.compareClientDataModel && parsed.expectClientActionFrame === null &&
+        parsed.inputFormat !== 'websocket-transcript') ||
+      (parsed.inputFormat === 'websocket-transcript' &&
+        (!parsed.acceptV091 || actionModes !== 1 ||
+          parsed.expectClientActionFrame !== null || parsed.actionAfterEventIndex !== null ||
+          parsed.actionSteps.length !== 0 || parsed.reportFirstError ||
+          parsed.stopAfterEventIndex !== null)) ||
       (parsed.expectClientActionFrame !== null &&
         (parsed.inputFormat !== 'websocket-frames' || actionModes !== 1 ||
           parsed.actionSteps.length > 0 || parsed.reportFirstError ||
@@ -237,6 +243,61 @@ export function decodeWebSocketBrowserCapture(raw, acceptV091 = false) {
     JSON.stringify(message)).join('\n') + '\n'), acceptV091);
 }
 
+/** An opt-in developer-owned, newline-delimited Go WebSocket transcript.
+ * Exactly one outbound action must occur between two server A2UI messages.
+ * It is replay evidence, never a live socket or a claim of Go app execution. */
+export function decodeWebSocketBrowserTranscript(raw, acceptV091 = false, includeDataModel = false) {
+  if (acceptV091 !== true || typeof includeDataModel !== 'boolean' ||
+      !Buffer.isBuffer(raw) || raw.length < 2 ||
+      raw.length > MAX_INPUT_BYTES || raw.at(-1) !== 10)
+    throw new Error('Invalid A2UI WebSocket transcript size or options');
+  const decoder = new TextDecoder('utf-8', {fatal: true});
+  const serverFrames = [];
+  let frameStart = 0;
+  let frameCount = 0;
+  let serverMessages = 0;
+  let postActionMessages = 0;
+  let actionAfterEventIndex = null;
+  let expectedFrame = null;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] !== 10) continue;
+    if (i - frameStart > MAX_LINE_BYTES || ++frameCount > MAX_EVENTS * 2 + 3)
+      throw new Error('Invalid A2UI WebSocket transcript frame limit');
+    const line = raw.subarray(frameStart, i);
+    const serverLine = raw.subarray(frameStart, i + 1);
+    frameStart = i + 1;
+    let frame;
+    try {
+      frame = JSON.parse(decoder.decode(line));
+    } catch {
+      throw new Error('Invalid A2UI WebSocket transcript encoding or JSON');
+    }
+    if (frame?.kind === 'action') {
+      if (expectedFrame !== null || serverMessages === 0)
+        throw new Error('Invalid A2UI WebSocket transcript action ordering');
+      // Reuse the strict outbound action validator, including optional full-model parity.
+      expectedFrame = decodeExpectedClientActionFrame(line, true, includeDataModel);
+      actionAfterEventIndex = serverMessages - 1;
+      continue;
+    }
+    if (frame?.kind === 'a2ui') {
+      serverMessages++;
+      if (expectedFrame !== null) postActionMessages++;
+    }
+    serverFrames.push(serverLine);
+  }
+  if (expectedFrame === null || postActionMessages === 0)
+    throw new Error('Invalid A2UI WebSocket transcript: missing action or follow-up');
+  // Server-frame validation also rejects unknown status/error/client frame types;
+  // no private action values or model fields are written to the report.
+  const messages = decodeWebSocketBrowserCapture(Buffer.concat(serverFrames), true);
+  return {
+    messages, actionAfterEventIndex,
+    expectedAction: includeDataModel ? expectedFrame.action : expectedFrame,
+    expectedDataModel: includeDataModel ? expectedFrame.dataModel : undefined,
+  };
+}
+
 /** An outbound Go client action is private, bounded comparison evidence only.
  * Compare only stable action fields by default. The optional full dataModel
  * parity remains in memory and does not execute a live backend turn. */
@@ -290,7 +351,8 @@ function readExpectedClientActionFrame(path, acceptV091, includeDataModel = fals
   }
 }
 
-function readCapture(input, inputFormat = 'jsonl', compatBasicCatalog = false, acceptV091 = false) {
+function readCapture(input, inputFormat = 'jsonl', compatBasicCatalog = false,
+  acceptV091 = false, compareDataModel = false) {
   try {
     const meta = statSync(input);
     if (!meta.isFile() || meta.size < 2 || meta.size > MAX_INPUT_BYTES)
@@ -299,7 +361,10 @@ function readCapture(input, inputFormat = 'jsonl', compatBasicCatalog = false, a
     return inputFormat === 'copilotkit-operations' ?
       decodeCopilotKitBrowserCapture(raw, compatBasicCatalog) :
       inputFormat === 'websocket-frames' ?
-        decodeWebSocketBrowserCapture(raw, acceptV091) : decodeBrowserCapture(raw, acceptV091);
+        decodeWebSocketBrowserCapture(raw, acceptV091) :
+      inputFormat === 'websocket-transcript' ?
+        decodeWebSocketBrowserTranscript(raw, acceptV091, compareDataModel) :
+        decodeBrowserCapture(raw, acceptV091);
   } catch {
     throw new Error('Invalid browser capture input; path and contents omitted');
   }
@@ -786,14 +851,18 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
             (args.internalButtonFocusDigest && !/^[a-f0-9]{64}$/.test(buttonFocusKey ?? '')) ||
             (args.internalButtonGeometryDigest && !/^[a-f0-9]{64}$/.test(buttonGeometryKey ?? ''))))
         throw new Error('Internal comparison digest must be pipe-only with valid ephemeral keys');
-      const expectedFrame = args.expectClientActionFrame ? readExpectedClientActionFrame(
-        args.expectClientActionFrame, args.acceptV091, args.compareClientDataModel) : null;
-      const report = await runBrowserCapture(readCapture(args.input, args.inputFormat,
-        args.compatCopilotkitBasicCatalog, args.acceptV091),
+      const capture = readCapture(args.input, args.inputFormat,
+        args.compatCopilotkitBasicCatalog, args.acceptV091, args.compareClientDataModel);
+      const transcriptMode = args.inputFormat === 'websocket-transcript';
+      const expectedFrame = transcriptMode ? capture : args.expectClientActionFrame ?
+        readExpectedClientActionFrame(args.expectClientActionFrame,
+          args.acceptV091, args.compareClientDataModel) : null;
+      const report = await runBrowserCapture(transcriptMode ? capture.messages : capture,
         {acceptV091: args.acceptV091,
            clickSingleButton: args.clickSingleButton, pressSingleButtonEnter: args.pressSingleButtonEnter,
           clickButtonIndex: args.clickButtonIndex, pressButtonIndexEnter: args.pressButtonIndexEnter,
-          actionAfterEventIndex: args.actionAfterEventIndex, actionSteps: args.actionSteps,
+          actionAfterEventIndex: transcriptMode ? capture.actionAfterEventIndex :
+            args.actionAfterEventIndex, actionSteps: args.actionSteps,
           stopAfterEventIndex: args.stopAfterEventIndex, reportFirstError: args.reportFirstError,
           inspectLoadingPlaceholders: args.inspectLoadingPlaceholders,
           rejectLoadingPlaceholders: args.rejectLoadingPlaceholders,
@@ -801,8 +870,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           buttonStateDigestKey: buttonStateKey, buttonA11yDigestKey: buttonA11yKey,
           buttonFocusDigestKey: buttonFocusKey,
           buttonGeometryDigestKey: buttonGeometryKey,
-          expectedAction: args.compareClientDataModel ? expectedFrame.action : expectedFrame,
-          expectedDataModel: args.compareClientDataModel ? expectedFrame.dataModel : undefined});
+          expectedAction: transcriptMode ? expectedFrame.expectedAction :
+            args.compareClientDataModel ? expectedFrame.action : expectedFrame,
+          expectedDataModel: args.compareClientDataModel ?
+            (transcriptMode ? expectedFrame.expectedDataModel : expectedFrame.dataModel) : undefined});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
