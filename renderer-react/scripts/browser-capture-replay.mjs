@@ -105,7 +105,7 @@ export function parseBrowserCaptureOptions(argv) {
     Number(parsed.clickButtonIndex !== null) + Number(parsed.pressButtonIndexEnter !== null);
   if (!parsed.input || actionModes > 1 ||
        (parsed.compatCopilotkitBasicCatalog && parsed.inputFormat !== 'copilotkit-operations') ||
-       (parsed.acceptV091 && !['jsonl', 'websocket-frames'].includes(parsed.inputFormat)) ||
+       (parsed.acceptV091 && !['jsonl', 'websocket-frames', 'websocket-transcript'].includes(parsed.inputFormat)) ||
       (parsed.actionAfterEventIndex !== null && actionModes !== 1) ||
       (parsed.clickButtonIndex !== null && parsed.clickButtonIndex > MAX_BUTTON_INDEX) ||
       (parsed.pressButtonIndexEnter !== null && parsed.pressButtonIndexEnter > MAX_BUTTON_INDEX) ||
