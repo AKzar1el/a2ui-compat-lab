@@ -112,9 +112,9 @@ export function parseBrowserCaptureOptions(argv) {
       (parsed.compareClientDataModel && parsed.expectClientActionFrame === null &&
         parsed.inputFormat !== 'websocket-transcript') ||
       (parsed.inputFormat === 'websocket-transcript' &&
-        (!parsed.acceptV091 || actionModes !== 1 ||
+        (!parsed.acceptV091 || (actionModes !== 1 && parsed.actionSteps.length === 0) ||
           parsed.expectClientActionFrame !== null || parsed.actionAfterEventIndex !== null ||
-          parsed.actionSteps.length !== 0 || parsed.reportFirstError ||
+          parsed.reportFirstError ||
           parsed.stopAfterEventIndex !== null)) ||
       (parsed.expectClientActionFrame !== null &&
         (parsed.inputFormat !== 'websocket-frames' || actionModes !== 1 ||
@@ -243,9 +243,9 @@ export function decodeWebSocketBrowserCapture(raw, acceptV091 = false) {
     JSON.stringify(message)).join('\n') + '\n'), acceptV091);
 }
 
-/** An opt-in developer-owned, newline-delimited Go WebSocket transcript.
- * Exactly one outbound action must occur between two server A2UI messages.
- * It is replay evidence, never a live socket or a claim of Go app execution. */
+/** Developer-owned Go WebSocket transcript, with up to eight action turns.
+ * Each outbound action follows server A2UI messages and receives a server
+ * follow-up before the next action. This does not execute the Go producer. */
 export function decodeWebSocketBrowserTranscript(raw, acceptV091 = false, includeDataModel = false) {
   if (acceptV091 !== true || typeof includeDataModel !== 'boolean' ||
       !Buffer.isBuffer(raw) || raw.length < 2 ||
@@ -253,15 +253,14 @@ export function decodeWebSocketBrowserTranscript(raw, acceptV091 = false, includ
     throw new Error('Invalid A2UI WebSocket transcript size or options');
   const decoder = new TextDecoder('utf-8', {fatal: true});
   const serverFrames = [];
+  const actionFrames = [];
   let frameStart = 0;
   let frameCount = 0;
   let serverMessages = 0;
   let postActionMessages = 0;
-  let actionAfterEventIndex = null;
-  let expectedFrame = null;
   for (let i = 0; i < raw.length; i++) {
     if (raw[i] !== 10) continue;
-    if (i - frameStart > MAX_LINE_BYTES || ++frameCount > MAX_EVENTS * 2 + 3)
+    if (i - frameStart > MAX_LINE_BYTES || ++frameCount > MAX_EVENTS * 2 + MAX_ACTION_STEPS + 2)
       throw new Error('Invalid A2UI WebSocket transcript frame limit');
     const line = raw.subarray(frameStart, i);
     const serverLine = raw.subarray(frameStart, i + 1);
@@ -273,28 +272,35 @@ export function decodeWebSocketBrowserTranscript(raw, acceptV091 = false, includ
       throw new Error('Invalid A2UI WebSocket transcript encoding or JSON');
     }
     if (frame?.kind === 'action') {
-      if (expectedFrame !== null || serverMessages === 0)
+      if (serverMessages === 0 || actionFrames.length >= MAX_ACTION_STEPS ||
+          (actionFrames.length > 0 && postActionMessages === 0))
         throw new Error('Invalid A2UI WebSocket transcript action ordering');
-      // Reuse the strict outbound action validator, including optional full-model parity.
-      expectedFrame = decodeExpectedClientActionFrame(line, true, includeDataModel);
-      actionAfterEventIndex = serverMessages - 1;
+      const expected = decodeExpectedClientActionFrame(line, true, includeDataModel);
+      actionFrames.push({
+        actionAfterEventIndex: serverMessages - 1,
+        expectedAction: includeDataModel ? expected.action : expected,
+        expectedDataModel: includeDataModel ? expected.dataModel : undefined,
+      });
+      postActionMessages = 0;
       continue;
     }
     if (frame?.kind === 'a2ui') {
       serverMessages++;
-      if (expectedFrame !== null) postActionMessages++;
+      if (actionFrames.length > 0) postActionMessages++;
     }
     serverFrames.push(serverLine);
   }
-  if (expectedFrame === null || postActionMessages === 0)
+  if (!actionFrames.length || postActionMessages === 0)
     throw new Error('Invalid A2UI WebSocket transcript: missing action or follow-up');
-  // Server-frame validation also rejects unknown status/error/client frame types;
-  // no private action values or model fields are written to the report.
+  // Reuse strict server/protocol validation; no private model or action
+  // contents leave the comparison process.
   const messages = decodeWebSocketBrowserCapture(Buffer.concat(serverFrames), true);
+  const single = actionFrames.length === 1 ? actionFrames[0] : null;
   return {
-    messages, actionAfterEventIndex,
-    expectedAction: includeDataModel ? expectedFrame.action : expectedFrame,
-    expectedDataModel: includeDataModel ? expectedFrame.dataModel : undefined,
+    messages, actionFrames,
+    actionAfterEventIndex: single?.actionAfterEventIndex ?? null,
+    expectedAction: single?.expectedAction ?? null,
+    expectedDataModel: single?.expectedDataModel,
   };
 }
 
@@ -380,6 +386,7 @@ export async function runBrowserCapture(messages, {
   buttonA11yDigestKey = null, buttonFocusDigestKey = null,
   buttonGeometryDigestKey = null, surfaceErrorProbe = false,
   acceptV091 = false, expectedAction = null, expectedDataModel = undefined,
+  expectedActionSequence = null, expectedDataModelSequence = null,
 } = {}) {
   if (!Array.isArray(messages) || !messages.length || messages.length > MAX_EVENTS)
     throw new Error('Invalid browser capture events');
@@ -409,6 +416,20 @@ export async function runBrowserCapture(messages, {
         actionModes !== 1 || actionSteps.length !== 0 || reportFirstError ||
         stopAfterEventIndex !== null))
     throw new Error('Expected client action requires one Chromium activation');
+  if (expectedActionSequence !== null &&
+      (!Array.isArray(expectedActionSequence) || expectedActionSequence.length < 2 ||
+        expectedActionSequence.length > MAX_ACTION_STEPS || actionModes !== 0 ||
+        expectedAction !== null || expectedDataModel !== undefined ||
+        reportFirstError || stopAfterEventIndex !== null ||
+        actionSteps.length !== expectedActionSequence.length ||
+        expectedActionSequence.some(action =>
+          !action || typeof action !== 'object' || Array.isArray(action)) ||
+        (expectedDataModelSequence !== null &&
+          (!Array.isArray(expectedDataModelSequence) ||
+            expectedDataModelSequence.length !== expectedActionSequence.length))))
+    throw new Error('Invalid multi-turn client action plan');
+  if (expectedDataModelSequence !== null && expectedActionSequence === null)
+    throw new Error('Multi-turn data model requires expected actions');
   if (!Array.isArray(actionSteps) || actionSteps.length > MAX_ACTION_STEPS ||
       actionSteps.some((step, index) => !step || typeof step !== 'object' ||
         Array.isArray(step) || Object.keys(step).sort().join(',') !== 'buttonIndex,eventIndex,mode' ||
@@ -514,9 +535,10 @@ export async function runBrowserCapture(messages, {
     ) => {
       // The Go client includes the complete model observed at dispatch time.
       // Capture only inside this process before the real Chromium activation.
-      if (expectedDataModel !== undefined)
+      const expectedForStep = expectedActionSequence?.[actionsVerified] ?? expectedAction;
+      if (expectedDataModel !== undefined || expectedDataModelSequence !== null)
         observedClientDataModel = await page.evaluate(surfaceId =>
-          window.__a2uiLab.trace(surfaceId).data, expectedAction.surfaceId);
+          window.__a2uiLab.trace(surfaceId).data, expectedForStep.surfaceId);
       const before = (await page.evaluate(() => window.__a2uiLab.trace())).actions.length;
       const buttons = page.getByRole('button');
       const count = await buttons.count();
@@ -547,6 +569,15 @@ export async function runBrowserCapture(messages, {
           before + 1, {timeout: 5000});
       } catch {
         throw new Error('Browser capture action did not emit exactly one event');
+      }
+      if (expectedActionSequence !== null) {
+        const emitted = (await page.evaluate(() => window.__a2uiLab.trace())).actions[before];
+        if (canonicalActionJSON(emitted) !== canonicalActionJSON(expectedForStep))
+          throw new Error('Chromium action did not match the expected client frame');
+        if (expectedDataModelSequence !== null &&
+            canonicalActionJSON(observedClientDataModel) !==
+              canonicalActionJSON(expectedDataModelSequence[actionsVerified]))
+          throw new Error('Chromium data model did not match the expected client frame');
       }
       actionBeforeCount = before;
       actionsVerified++;
@@ -757,6 +788,8 @@ export async function runBrowserCapture(messages, {
     if (expectedDataModel !== undefined &&
         canonicalActionJSON(observedClientDataModel) !== canonicalActionJSON(expectedDataModel))
       throw new Error('Chromium data model did not match the expected client frame');
+    if (expectedActionSequence !== null && final.actions.length !== expectedActionSequence.length)
+      throw new Error('Chromium action count did not match the expected client frames');
     return {
       schemaVersion: 1,
       kind: 'a2ui-react-capture-browser-replay',
@@ -774,8 +807,10 @@ export async function runBrowserCapture(messages, {
       actionsVerified,
       keyboardFocusVerified,
       actionsEmitted: final.actions.length,
-      ...(expectedAction !== null ? {expectedClientActionMatched: true} : {}),
-      ...(expectedDataModel !== undefined ? {expectedClientDataModelMatched: true} : {}),
+      ...(expectedAction !== null || expectedActionSequence !== null ?
+        {expectedClientActionMatched: true} : {}),
+      ...(expectedDataModel !== undefined || expectedDataModelSequence !== null ?
+        {expectedClientDataModelMatched: true} : {}),
       // Never persist or publish this digest; the parent drops it before report validation.
       ...(actionDigestKey ? {
         __privateActionDigest: createHmac('sha256', Buffer.from(actionDigestKey, 'hex'))
@@ -854,6 +889,12 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const capture = readCapture(args.input, args.inputFormat,
         args.compatCopilotkitBasicCatalog, args.acceptV091, args.compareClientDataModel);
       const transcriptMode = args.inputFormat === 'websocket-transcript';
+      const multiTurn = transcriptMode && capture.actionFrames.length > 1;
+      if (transcriptMode && (multiTurn !== (args.actionSteps.length > 0) ||
+          (multiTurn && (args.actionSteps.length !== capture.actionFrames.length ||
+            args.actionSteps.some((step, index) =>
+              step.eventIndex !== capture.actionFrames[index].actionAfterEventIndex)))))
+        throw new Error('Transcript actions require exactly matching explicit action steps');
       const expectedFrame = transcriptMode ? capture : args.expectClientActionFrame ?
         readExpectedClientActionFrame(args.expectClientActionFrame,
           args.acceptV091, args.compareClientDataModel) : null;
@@ -873,7 +914,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           expectedAction: transcriptMode ? expectedFrame.expectedAction :
             args.compareClientDataModel ? expectedFrame.action : expectedFrame,
           expectedDataModel: args.compareClientDataModel ?
-            (transcriptMode ? expectedFrame.expectedDataModel : expectedFrame.dataModel) : undefined});
+            (transcriptMode ? expectedFrame.expectedDataModel : expectedFrame.dataModel) : undefined,
+          expectedActionSequence: multiTurn ? capture.actionFrames.map(frame => frame.expectedAction) : null,
+          expectedDataModelSequence: multiTurn && args.compareClientDataModel ?
+            capture.actionFrames.map(frame => frame.expectedDataModel) : null});
       const json = JSON.stringify(report, null, 2) + '\n';
       if (args.out) saveReport(args.out, json);
       else process.stdout.write(json);
