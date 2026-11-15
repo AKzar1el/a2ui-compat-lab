@@ -65,6 +65,36 @@ client model that would change the backend's next-turn behavior. It still does
 session, real-world usage, or third-party adoption. Use only developer-owned captures,
 do not publish them, and do not pass private action JSON on the command line.
 
+### Replay one interleaved Go action-response transcript (opt-in)
+
+For a **developer-owned**, newline-delimited WebSocket transcript that contains
+server-to-client `{"kind":"a2ui","message":...}` frames, optional
+`{"kind":"status","state":"thinking"|"idle"}` frames and **exactly one**
+client-to-server `{"kind":"action","message":...,"dataModel":...}` frame
+between server A2UI messages, replay in original order without splitting
+the client action into another file or manually finding its event index:
+
+```sh
+node renderer-react/scripts/browser-capture-replay.mjs --input PRIVATE-bidirectional-transcript.jsonl --input-format websocket-transcript --accept-v091 --click-single-button --compare-client-data-model
+```
+
+The runner activates a real Chromium Button at the client frame boundary,
+compares stable action fields (and its actual data model only with
+`--compare-client-data-model`), then processes subsequent server frames.
+Exactly one outbound action and at least one server A2UI message on each
+side are required. Strict UTF-8, newline termination, 512 KiB total, 64 KiB
+per frame and 100 A2UI event limits apply. Duplicate, malformed, unknown
+or out-of-order frames fail closed. Server-only `websocket-frames` and the
+separate client-action file mode remain unchanged.
+
+The fixed-schema report excludes client action/model values, component IDs
+and file paths. Counts and event timing can still be sensitive: inspect
+reports before sharing. Included tests reconstruct illustrative Go-format
+frames from a public fixture and exercise the pinned published React renderer
+in real Chromium. They do **not** execute the independent Go backend, prove
+a live bidirectional session, validate a production capture, or establish
+customer adoption or revenue. No API key is needed.
+
 ## Try a real Chromium CI regression
 
 The [consumer CI starter](examples/consumer-ci/README.md) includes a public v0.9
