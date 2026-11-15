@@ -33,6 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: main # never execute or import code from the originating PR
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
