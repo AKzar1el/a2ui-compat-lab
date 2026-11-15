@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from '@playwright/test';
 import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEvidence} from '../../src/browser-evidence.mjs';
 import {createServer} from 'vite';
-import {decodeBrowserCapture, decodeCopilotKitBrowserCapture, decodeWebSocketBrowserCapture, decodeExpectedClientActionFrame, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
+import {decodeBrowserCapture, decodeCopilotKitBrowserCapture, decodeWebSocketBrowserCapture, decodeWebSocketBrowserTranscript, decodeExpectedClientActionFrame, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
 import {compareBrowserCaptureSummaries} from '../../src/browser-capture-summary-compare.mjs';
 import {testDirectBrowserCaptureBaseline} from './browser-capture-baseline-regression.mjs';
 import {testConsumerCiStarter} from './consumer-ci-regression.mjs';
@@ -2677,6 +2677,80 @@ assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from(
 /Invalid A2UI WebSocket capture size or option/);
 assert.throws(() => decodeWebSocketBrowserCapture(Buffer.from([255, 10]), true),
 /Invalid A2UI WebSocket capture encoding or JSON/);
+// An interleaved, developer-owned transcript has one real client action
+// between two server A2UI message batches. The follow-up is reconstructed
+// fixture evidence, NOT a capture from a running Go server.
+const goFollowUp = {version: 'v0.9.1', updateDataModel: {
+  surfaceId: 'main', path: '/', value: {
+    draft: '', notes: [{id: 'fixture-note', text: 'PRIVATE_GO_REPLY'}],
+  },
+}};
+const transcriptFrames = [
+  {kind: 'status', state: 'thinking'},
+  ...goNotesMessages.map(message => ({kind: 'a2ui', message})),
+  goClientActionFrame,
+  {kind: 'status', state: 'thinking'},
+  {kind: 'a2ui', message: goFollowUp},
+  {kind: 'status', state: 'idle'},
+];
+const transcriptBytes = Buffer.from(transcriptFrames.map(frame =>
+  JSON.stringify(frame)).join('\n') + '\n');
+const transcript = decodeWebSocketBrowserTranscript(transcriptBytes, true, true);
+assert.equal(transcript.actionAfterEventIndex, 2);
+assert.deepEqual(transcript.messages, [...goNotesMessages, goFollowUp]);
+assert.deepEqual(transcript.expectedAction, goExpectedAction);
+assert.deepEqual(transcript.expectedDataModel, {notes: [], draft: ''});
+assert.throws(() => decodeWebSocketBrowserTranscript(transcriptBytes),
+  /Invalid A2UI WebSocket transcript size or options/,
+  'Explicit v0.9.1 opt-in must be required');
+assert.equal(parseBrowserCaptureOptions(['--input', 'private-transcript.ws',
+  '--input-format', 'websocket-transcript', '--accept-v091', '--click-single-button',
+  '--compare-client-data-model']).inputFormat, 'websocket-transcript');
+for (const extra of [
+  ['--action-after-event-index', '2'],
+  ['--expect-client-action-frame', 'separate-private.json'],
+  ['--stop-after-event-index', '2'],
+  ['--report-first-error'],
+]) {
+  assert.throws(() => parseBrowserCaptureOptions(['--input', 'private-transcript.ws',
+    '--input-format', 'websocket-transcript', '--accept-v091', '--click-single-button',
+    ...extra]), /Usage:/, 'A transcript must own the outbound action boundary');
+}
+for (const flags of [
+  ['--input-format', 'websocket-transcript', '--click-single-button'],
+  ['--input-format', 'websocket-transcript', '--accept-v091'],
+]) assert.throws(() => parseBrowserCaptureOptions(['--input', 'private-transcript.ws',
+  ...flags]), /Usage:/);
+const serializeTranscript = frames => Buffer.from(frames.map(frame =>
+  JSON.stringify(frame)).join('\n') + '\n');
+const invalidTranscript = [
+  goWsFrames,
+  [goClientActionFrame, ...transcriptFrames],
+  [...transcriptFrames, goClientActionFrame],
+  transcriptFrames.slice(0, -2),
+  [transcriptFrames[0], ...goNotesMessages.map(message => ({kind: 'a2ui', message})),
+    {kind: 'error', message: 'PRIVATE_ERROR'}, goClientActionFrame,
+    {kind: 'a2ui', message: goFollowUp}],
+  transcriptFrames.map(frame => frame === goClientActionFrame ? {
+    ...goClientActionFrame, message: {
+      ...goClientActionFrame.message,
+      action: {...goClientActionFrame.message.action, timestamp: 'PRIVATE_INVALID'},
+    },
+  } : frame),
+];
+for (const frames of invalidTranscript)
+  assert.throws(() => decodeWebSocketBrowserTranscript(serializeTranscript(frames), true, true),
+    /Invalid/, 'Malformed or incomplete bidirectional transcripts must fail closed');
+assert.throws(() => decodeWebSocketBrowserTranscript(transcriptBytes.subarray(0, -1), true),
+  /Invalid A2UI WebSocket transcript size or options/);
+assert.throws(() => decodeWebSocketBrowserTranscript(Buffer.from([255, 10]), true),
+  /Invalid A2UI WebSocket transcript encoding or JSON/);
+assert.throws(() => decodeWebSocketBrowserTranscript(serializeTranscript(
+  transcriptFrames.map(frame => frame === goClientActionFrame ?
+    {kind: 'action', message: frame.message} : frame)), true, true),
+  /Invalid expected Go client action frame/,
+  'Full model parity must reject a client frame with no model');
+
 const wsTempDir = mkdtempSync(join(tmpdir(), 'a2ui-real-go-ws-'));
 try {
   const capturePath = join(wsTempDir, 'PRIVATE_GO_WS_SERVER_FRAMES.jsonl');
@@ -2708,6 +2782,43 @@ try {
   assert.doesNotMatch(wsActionReplay.stdout + wsActionReplay.stderr,
     /PRIVATE_GO|add_note|add-btn|draft|PRIVATE_DRIFT|sourceComponentId/,
     'A real Chromium action match must never disclose private Go action fields');
+  const transcriptPath = join(wsTempDir, 'PRIVATE_GO_INTERLEAVED_TRANSCRIPT.jsonl');
+  writeFileSync(transcriptPath, transcriptBytes);
+  const transcriptReplay = spawnSync(process.execPath, [
+    resolve(root, 'scripts/browser-capture-replay.mjs'), '--input', transcriptPath,
+    '--input-format', 'websocket-transcript', '--accept-v091', '--click-single-button',
+    '--compare-client-data-model',
+  ], {encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 256 * 1024});
+  assert.equal(transcriptReplay.error, undefined);
+  assert.equal(transcriptReplay.status, 0, transcriptReplay.stderr);
+  const transcriptReport = JSON.parse(transcriptReplay.stdout);
+  assert.equal(transcriptReport.events, 4);
+  assert.equal(transcriptReport.actionAfterEventIndex, 2);
+  assert.equal(transcriptReport.expectedClientActionMatched, true);
+  assert.equal(transcriptReport.expectedClientDataModelMatched, true);
+  assert.equal(transcriptReport.steps[2].actionCount, 0);
+  assert.equal(transcriptReport.steps[3].actionCount, 1);
+  assert.ok(transcriptReport.steps[3].visibleButtonCount >
+    transcriptReport.steps[2].visibleButtonCount,
+    'The follow-up Go-format dataModel update must visibly render another real Button');
+  assert.doesNotMatch(transcriptReplay.stdout + transcriptReplay.stderr,
+    /PRIVATE_GO|add_note|add-btn|draft|fixture-note|sourceComponentId/);
+  const badTranscriptPath = join(wsTempDir, 'PRIVATE_BAD_TRANSCRIPT.jsonl');
+  writeFileSync(badTranscriptPath, serializeTranscript(transcriptFrames.map(frame =>
+    frame === goClientActionFrame ? {
+      ...frame, message: {...frame.message,
+        action: {...frame.message.action, context: {text: 'PRIVATE_DRIFT'}}},
+    } : frame)));
+  const badTranscriptReplay = spawnSync(process.execPath, [
+    resolve(root, 'scripts/browser-capture-replay.mjs'), '--input', badTranscriptPath,
+    '--input-format', 'websocket-transcript', '--accept-v091', '--click-single-button',
+    '--compare-client-data-model',
+  ], {encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 256 * 1024});
+  assert.equal(badTranscriptReplay.status, 2,
+    'An incorrect saved client action must fail against actual Chromium output');
+  assert.doesNotMatch(badTranscriptReplay.stdout + badTranscriptReplay.stderr,
+    /PRIVATE_GO|PRIVATE_DRIFT|add_note|add-btn|draft|sourceComponentId/,
+    'Invalid private client action content must never appear in diagnostics');
 } finally {
   rmSync(wsTempDir, {recursive: true, force: true});
 }
