@@ -55,8 +55,33 @@ async function run(){
   const status=await api(root+'/commits/'+pr.head.sha+'/status');
   if(status.statuses?.length&&status.state!=='success'){console.log('SKIP #'+pr.number+': commit status');continue;}
   const final=await api(root+'/pulls/'+pr.number);
-  if(final.head.sha!==pr.head.sha||preliminary(final)||(await api(root+'/branches/main')).commit.sha!==main){
+  if(final.head.sha!==pr.head.sha||final.base.sha!==main||preliminary(final)||
+     (await api(root+'/branches/main')).commit.sha!==main){
    console.log('SKIP #'+pr.number+': head or main changed');continue;
+  }
+  // The PR metadata re-read above is not enough: reviews, security checks and
+  // PR files can change while the first round of read-only API calls runs.
+  // Require fresh exact-head evidence just before the write; GitHub's own
+  // branch protection remains the final independent enforcement layer.
+  const freshFiles=await api(root+'/pulls/'+pr.number+'/files?per_page=100');
+  if(final.changed_files>=100||freshFiles.length!==final.changed_files||
+     freshFiles.some(x=>!permittedPath(x.filename))){
+   console.log('SKIP #'+pr.number+': final path gate changed');continue;
+  }
+  const freshReviews=await api(root+'/pulls/'+pr.number+'/reviews?per_page=100');
+  if(freshReviews.length>=100||freshReviews.some(x=>x.state==='CHANGES_REQUESTED')||
+     !await threadsClear(pr.number)){
+   console.log('SKIP #'+pr.number+': final review gate changed');continue;
+  }
+  if(!checksGreen(await api(root+'/commits/'+pr.head.sha+'/check-runs?per_page=100'),required)){
+   console.log('SKIP #'+pr.number+': final exact-head checks changed');continue;
+  }
+  const freshStatus=await api(root+'/commits/'+pr.head.sha+'/status');
+  if(freshStatus.statuses?.length&&freshStatus.state!=='success'){
+   console.log('SKIP #'+pr.number+': final commit status changed');continue;
+  }
+  if((await api(root+'/branches/main')).commit.sha!==main){
+   console.log('SKIP #'+pr.number+': main changed after final checks');continue;
   }
   if(dry){console.log('DRY RUN eligible #'+pr.number+' sha='+pr.head.sha);return;}
   const result=await api(root+'/pulls/'+pr.number+'/merge','PUT',{

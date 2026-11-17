@@ -33,8 +33,12 @@ export function checksGreen(result, required) {
  const relevant = result.check_runs;
  if(relevant.some(x => x.status !== 'completed' ||
    !['success','neutral','skipped'].includes(x.conclusion))) return false;
+ // A third-party Check Run may use the same display name as a required job.
+ // Only actual GitHub Actions checks can satisfy our three SDK/browser/audit
+ // gates. Other apps still participate in the all-checks-must-pass gate above.
  return required.every(name =>
-  relevant.some(x => x.name === name && x.status === 'completed' && x.conclusion === 'success'));
+  relevant.some(x => x.name === name && x.app?.slug === 'github-actions' &&
+   x.status === 'completed' && x.conclusion === 'success'));
 }
 
 /**

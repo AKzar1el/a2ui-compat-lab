@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {preliminary,permittedPath,repo,checksGreen,latestMainCiRun,mainChecksGreen} from '../scripts/merge-policy.mjs';
 const sha='a'.repeat(40);
 const good={draft:false,state:'open',mergeable:true,mergeable_state:'clean',
@@ -26,6 +27,15 @@ test('PR-head CI refuses missing, unfinished, historical failed, or incomplete c
   name,app:{slug:'github-actions'},status:'completed',conclusion:'success'
  }))};
  assert.equal(checksGreen(reports,required),true);
+ const forged=structuredClone(reports);
+ forged.check_runs[0].app.slug='unrelated-security-app';
+ assert.equal(checksGreen(forged,required),false,
+  'a successful third-party check with the required name is not trusted CI');
+ const duplicate=structuredClone(reports);
+ duplicate.check_runs.push({...duplicate.check_runs[0],app:{slug:'third-party'},conclusion:'failure'});
+ duplicate.total_count++;
+ assert.equal(checksGreen(duplicate,required),false,
+  'a failed unrelated check sharing a required job name is not ignored');
  const pending=structuredClone(reports);
  pending.check_runs[2].status='in_progress';pending.check_runs[2].conclusion=null;
  assert.equal(checksGreen(pending,required),false);
@@ -105,4 +115,30 @@ test('main gate tolerates superseded foreign-branch cancellations but rejects mi
  assert.equal(mainChecksGreen(wrongSelfJob,jobs,required,42),false,
   'only exact current run and job id may be ignored');
  assert.equal(mainChecksGreen({...checks,total_count:100},jobs,required,42),false);
+});
+
+test('privileged CI wake only uses trusted main code and same-repo worker PR provenance',()=>{
+ const workflow=readFileSync(new URL('../.github/workflows/auto-merge.yml',import.meta.url),'utf8');
+ assert.match(workflow,/workflow_run:\s*\n\s+workflows: \['A2UI Compatibility CI'\]/);
+ assert.match(workflow,/github\.event\.workflow_run\.event == 'pull_request'/);
+ assert.match(workflow,/github\.event\.workflow_run\.conclusion == 'success'/);
+ assert.match(workflow,/startsWith\(github\.event\.workflow_run\.head_branch, 'revshot\/'\)/);
+ assert.match(workflow,/github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
+ assert.match(workflow,/ref: main/);
+ assert.match(workflow,/persist-credentials: false/);
+ assert.doesNotMatch(workflow,/actions\/download-artifact/);
+ assert.doesNotMatch(workflow,/cache: write/);
+});
+
+test('guard revalidates live security, branch and reviews before privileged merge',()=>{
+ const guard=readFileSync(new URL('../scripts/guarded-merge.mjs',import.meta.url),'utf8');
+ const from=guard.indexOf('const final=await api(');
+ const to=guard.indexOf("'/merge','PUT'");
+ assert.ok(from>0&&to>from,'final gate must precede merge');
+ const gate=guard.slice(from,to);
+ for(const required of ['/files?per_page=100','/reviews?per_page=100','threadsClear(',
+   '/check-runs?per_page=100','/status','/branches/main']){
+  assert.ok(gate.includes(required),'missing final gate '+required);
+ }
+ assert.match(gate,/if\(!checksGreen\(/);
 });
