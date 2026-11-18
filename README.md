@@ -646,7 +646,7 @@ the baseline's verified Button action positions, pointer/Tab-Enter modes, event
 boundaries, and optional sampled loading-placeholder inspection, then checks the
 fresh browser report without saving an intermediate report or private capture.
 `--after` and `--after-capture` are mutually exclusive. The child is bounded,
-shell-free, offline except ephemeral loopback Vite traffic, and reports generic
+shell-free, offline except ephemeral loopback HTTP traffic, and reports generic
 errors rather than replay diagnostics containing private text. Captures and
 baseline reports remain on disk; structural event patterns are **not anonymized**.
 
@@ -696,7 +696,7 @@ npm test
 npm run build
 ```
 
-The test runs Vite on loopback with deterministic fixture data, drives real headless Chromium pointer and keyboard input, and closes both the browser and server afterward. Inspect `renderer-react/out/react-browser-trace.json` and `renderer-react/out/react-browser.png`. Browser artifacts are published only after all assertions pass, and a previous output directory is never overwritten. For another local run, use a fresh name from `renderer-react/`: `npm test -- --out-dir run-2` (one alphanumeric, dash or underscore directory name). GitHub CI uses the fresh default `out/` directory. No LLM, credentials, or external HTTP endpoint is involved after dependency and Chromium installation; GitHub CI installs the browser and uploads both artifacts.
+The test bundles the published renderer with esbuild, serves it over ephemeral loopback HTTP using deterministic fixture data, drives real headless Chromium pointer and keyboard input, and closes both the browser and server afterward. Inspect `renderer-react/out/react-browser-trace.json` and `renderer-react/out/react-browser.png`. Browser artifacts are published only after all assertions pass, and a previous output directory is never overwritten. For another local run, use a fresh name from `renderer-react/`: `npm test -- --out-dir run-2` (one alphanumeric, dash or underscore directory name). GitHub CI uses the fresh default `out/` directory. No LLM, credentials, or external HTTP endpoint is involved after dependency and Chromium installation; GitHub CI installs the browser and uploads both artifacts.
 
 ## Replay a private capture in actual React/Chromium (experimental)
 
@@ -787,7 +787,7 @@ indices and simultaneous action modes fail closed without fallback.
 Failed focus/navigation is a failed replay, not a silent skip; this is
 not comprehensive accessibility certification.
 Browser HTTP and WebSocket traffic is limited to the ephemeral loopback
-Vite origin; no external service or inference endpoint is contacted.
+HTTP server origin; no external service or inference endpoint is contacted.
 
 For a private capture that fails only after several agent events, isolate a
 **renderer replay prefix** without editing or splitting the JSONL:
