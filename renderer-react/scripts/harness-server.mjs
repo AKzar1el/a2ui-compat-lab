@@ -15,7 +15,14 @@ export async function startHarnessServer() {
       response.writeHead(405, {Allow: 'GET, HEAD'}).end();
       return;
     }
-    const path = new URL(request.url, 'http://127.0.0.1').pathname;
+    // Malformed absolute request targets can reach Node's request handler.
+    let path;
+    try {
+      path = new URL(request.url, 'http://127.0.0.1').pathname;
+    } catch {
+      response.writeHead(400).end();
+      return;
+    }
     const entry = path === '/' ?
       {data: assets.html, type: 'text/html; charset=utf-8'} :
       path === '/bundle.js' ?

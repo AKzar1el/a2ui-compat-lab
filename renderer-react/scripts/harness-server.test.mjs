@@ -42,6 +42,10 @@ try {
   assert.match(bundle.headers['content-type'], /^text\/javascript/);
   assert.equal((await probe('/bundle.js', {method: 'HEAD'})).body.length, 0);
 
+  // Invalid request targets must fail closed without crashing the server.
+  assert.equal((await probe('http://[')).status, 400);
+  assert.equal((await probe('http://127.0.0.1:99999/')).status, 400);
+  assert.equal((await probe('/bundle.js')).status, 200);
   assert.equal((await probe('/src/main.jsx')).status, 404);
   assert.equal((await probe('/%2e%2e%2fprivate')).status, 404);
   assert.equal((await probe('/favicon.ico')).status, 204);
