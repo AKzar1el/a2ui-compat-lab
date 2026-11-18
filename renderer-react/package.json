@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "test": "node scripts/browser-regression.mjs",
-    "build": "vite build"
+    "dev": "node scripts/dev.mjs",
+    "test": "node scripts/harness-server.test.mjs && node scripts/browser-regression.mjs",
+    "build": "node scripts/build.mjs"
   },
   "dependencies": {
     "@a2ui/react": "0.14.0",
@@ -15,7 +15,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
-    "vite": "7.3.7"
+    "esbuild": "0.28.2"
   },
   "overrides": {
     "dompurify": "3.4.17"

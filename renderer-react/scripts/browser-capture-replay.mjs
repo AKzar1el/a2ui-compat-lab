@@ -5,7 +5,7 @@ import {readFileSync, statSync, mkdirSync, writeFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {chromium} from '@playwright/test';
-import {createServer} from 'vite';
+import {startHarnessServer} from './harness-server.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const USAGE = 'Usage: node scripts/browser-capture-replay.mjs --input PRIVATE.jsonl [--input-format jsonl|copilotkit-operations|websocket-frames|websocket-transcript] [--accept-v091] [--compat-copilotkit-basic-catalog] [--expect-client-action-frame PRIVATE.json] [--compare-client-data-model] [--click-single-button | --press-single-button-enter | --click-button-index N | --press-button-index-enter N] [--action-after-event-index N | --action-step EVENT:BUTTON:click|enter|space ... | --stop-after-event-index N] [--report-first-error] [--inspect-loading-placeholders | --reject-loading-placeholders] [--out NEW-REPORT.json]';
@@ -482,15 +482,8 @@ export async function runBrowserCapture(messages, {
   let deniedSockets = 0;
   let currentEventIndex = null;
   try {
-    server = await createServer({
-      root, configFile: resolve(root, 'vite.config.mjs'),
-      server: {port: 0, host: '127.0.0.1', strictPort: true},
-      logLevel: 'silent',
-    });
-    await server.listen();
-    const address = server.httpServer?.address();
-    assert.ok(address && typeof address !== 'string' && address.port > 0);
-    const origin = 'http://127.0.0.1:' + address.port;
+    server = await startHarnessServer();
+    const origin = server.origin;
     browser = await chromium.launch({headless: true, timeout: 20000});
     const context = await browser.newContext({serviceWorkers: 'block'});
     await context.route('**/*', async route => {

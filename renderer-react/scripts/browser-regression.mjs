@@ -8,7 +8,7 @@ import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from '@playwright/test';
 import {resolveBrowserEvidenceDir, assertBrowserEvidenceUnused, publishBrowserEvidence} from '../../src/browser-evidence.mjs';
-import {createServer} from 'vite';
+import {startHarnessServer} from './harness-server.mjs';
 import {decodeBrowserCapture, decodeCopilotKitBrowserCapture, decodeWebSocketBrowserCapture, decodeWebSocketBrowserTranscript, decodeExpectedClientActionFrame, parseBrowserCaptureOptions, runBrowserCapture} from './browser-capture-replay.mjs';
 import {compareBrowserCaptureSummaries} from '../../src/browser-capture-summary-compare.mjs';
 import {testDirectBrowserCaptureBaseline} from './browser-capture-baseline-regression.mjs';
@@ -19,7 +19,7 @@ const outDir = resolveBrowserEvidenceDir(root, process.argv.slice(2));
 assertBrowserEvidenceUnused(outDir);
 const fixture = readFileSync(resolve(root, 'src/fixture.json'), 'utf8');
 const installed = Object.fromEntries([
-  '@a2ui/react', '@a2ui/web_core', 'react', 'react-dom', 'vite', '@playwright/test',
+  '@a2ui/react', '@a2ui/web_core', 'react', 'react-dom', 'esbuild', '@playwright/test',
 ].map(name => [name, JSON.parse(readFileSync(resolve(root, 'node_modules', name, 'package.json'), 'utf8')).version]));
 const expectedActions = [
   {name: 'confirm-choice', surfaceId: 'action-replay', sourceComponentId: 'submit', context: {selection: 'alpha'}},
@@ -30,18 +30,8 @@ const consoleErrors = [];
 const checkpoints = [];
 let server, browser;
 try {
-  server = await createServer({
-    root,
-    configFile: resolve(root, 'vite.config.mjs'),
-    server: {port: 0, host: '127.0.0.1', strictPort: true},
-    logLevel: 'error',
-  });
-  await server.listen();
-  const address = server.httpServer?.address();
-  assert.ok(address && typeof address !== 'string' &&
-    Number.isInteger(address.port) && address.port > 0,
-  'Vite must bind an OS-assigned loopback port before the browser starts');
-  const origin = 'http://127.0.0.1:' + address.port;
+  server = await startHarnessServer();
+  const origin = server.origin;
   browser = await chromium.launch({headless: true, timeout: 20000});
   const context = await browser.newContext({serviceWorkers: 'block'});
   const deniedRequests = [];
@@ -55,8 +45,8 @@ try {
     }
     await route.continue();
   });
-  // Playwright's HTTP route does not cover WebSocket handshakes. Keep Vite's
-  // same-origin HMR socket, but never connect an off-origin socket to a server.
+  // Playwright's HTTP route does not cover WebSocket handshakes.
+  // Keep a same-origin allowance but never connect off-origin sockets.
   const deniedWebSockets = [];
   const allowedSocketOrigin = origin.replace(/^http:/, 'ws:');
   await context.routeWebSocket('**/*', socket => {
