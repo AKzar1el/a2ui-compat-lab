@@ -5,7 +5,7 @@ A2UI Compatibility Lab is a **local developer test harness**, not a production r
 ## Mitigations applied
 
 - React harness: DOMPurify 3.4.17 pinned via npm override, fixing GHSA-cg2g-xh64-v4q7.
-- React development tooling: Vite 7.3.7, replacing vulnerable 7.1.12.
+- React browser harness build tooling: esbuild 0.28.2 replaces Vite 7.3.7 and removes its picomatch-dependent build chain. This does not fix the unresolved Zod 3 advisory below.
 - Root reference validation: Ajv 8.20.0, replacing vulnerable 8.17.1.
 - A2UI SDK versions remain intentionally pinned at 0.14.0 (React) and 0.15.0 (schema parity).
 
