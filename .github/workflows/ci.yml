@@ -49,7 +49,9 @@ jobs:
           retention-days: 7
 
   react-browser:
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 cannot install Chromium on ubuntu-26.04 during latest-image rollout.
+    # Remove this pin after a reviewed Playwright/runtime compatibility upgrade.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
