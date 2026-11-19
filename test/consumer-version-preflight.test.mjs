@@ -275,6 +275,22 @@ test('workspace-local SDK resolution shadows a different hoisted version', () =>
   assert.equal(report.eligible, false);
 });
 
+test('nested workspaces reject ancestor-installed SDK drift before root hoists', () => {
+  const lock = structuredClone(workspaceLock);
+  lock.packages['packages/node_modules/@a2ui/react'] = {version: '0.15.0'};
+  const mismatch = evaluateConsumer(workspaceManifest, 'v0.9', lock,
+    {workspace: 'packages/app'});
+  assert.equal(mismatch.eligible, false);
+  assert.equal(mismatch.reason, 'lockfile_sdk_mismatch');
+  // The nearest workspace-local installation takes precedence over its parent.
+  lock.packages['packages/app/node_modules/@a2ui/react'] = {version: '0.14.0'};
+  assert.equal(evaluateConsumer(workspaceManifest, 'v0.9', lock,
+    {workspace: 'packages/app'}).eligible, true);
+  delete lock.packages['packages/app/node_modules/@a2ui/react'];
+  lock.packages['packages/node_modules/@a2ui/react'] = null;
+  assert.equal(evaluateConsumer(workspaceManifest, 'v0.9', lock,
+    {workspace: 'packages/app'}).eligible, false, 'malformed ancestor must not fall back');
+});
 test('npm workspace path, link and declaration mismatches fail closed without data disclosure', () => {
   const opts = {workspace: 'packages/app'};
   for (const change of [

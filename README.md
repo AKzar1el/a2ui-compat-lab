@@ -172,7 +172,7 @@ node src/cli.mjs compare --before out/before.json --after out/after.json --stric
 
 `doctor` is a fast, read-only, offline installation preflight. It checks the declared Node.js minimum, exact direct dependency pins, package-lock entries and the actual installed package versions. Use `doctor --json --strict --out out/doctor.json` for a machine-readable report (exit 1 on mismatch; exit 2 on invalid invocation). It checks *this workspace's direct packages*, not the npm registry, transitive dependency provenance, React's isolated renderer workspace or remote published-release compatibility. Run `npm ci --ignore-scripts --no-audit --no-fund` to repair a missing or stale installation before retrying.
 
-For an **npm v2/v3 monorepo lockfile**, the separate offline consumer version preflight can check a named workspace instead of comparing that workspace's SDK declarations with the monorepo root. Both the manifest and the exact lockfile workspace link must match, and workspace-local SDK resolutions override hoisted versions:
+For an **npm v2/v3 monorepo lockfile**, the separate offline consumer version preflight can check a named workspace instead of comparing that workspace's SDK declarations with the monorepo root. Both the manifest and the exact lockfile workspace link must match. Recorded SDK resolutions follow Node's nearest-first lookup through workspace-local, ancestor and root `node_modules` entries:
 
 ```bash
 node src/consumer-version-preflight.mjs --manifest packages/app/package.json --protocol v0.9 --lockfile package-lock.json --workspace packages/app

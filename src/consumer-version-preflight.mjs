@@ -154,9 +154,20 @@ export function evaluateConsumer(manifest, protocol, lockfile, {workspace} = {})
       }));
       if (!matchingRoot) reason = 'lockfile_root_mismatch';
       else if (SDK.every(name => {
-        const local = selected === null ? undefined :
-          lockfile.packages[`${selected}/node_modules/${name}`];
-        const installed = local === undefined ? lockfile.packages[`node_modules/${name}`] : local;
+        // Node checks each ancestor's node_modules before reaching the root.
+        const ancestors = selected === null ? [] : selected.split('/');
+        let installed;
+        let found = false;
+        while (ancestors.length > 0) {
+          const key = `${ancestors.join('/')}/node_modules/${name}`;
+          if (Object.hasOwn(lockfile.packages, key)) {
+            installed = lockfile.packages[key];
+            found = true;
+            break;
+          }
+          ancestors.pop();
+        }
+        if (!found) installed = lockfile.packages[`node_modules/${name}`];
         return isRecord(installed) && installed.version === '0.14.0' &&
           installed.link !== true;
       })) reason = 'lockfile_exact_pair';
