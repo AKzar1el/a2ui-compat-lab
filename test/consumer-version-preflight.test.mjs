@@ -162,6 +162,18 @@ test('stale npm lockfile root declarations cannot inherit green manifest pins', 
   assert.equal(report.lockfileCheck.recordedExactPair, false);
 });
 
+test('SDK root declarations moved to another npm dependency section fail closed', () => {
+  for (const section of ['devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    const lockfile = structuredClone(exactLock);
+    delete lockfile.packages[''].dependencies;
+    lockfile.packages[''][section] = {...pinned.dependencies};
+    const report = evaluateConsumer(pinned, 'v0.9', lockfile);
+    assert.equal(report.eligible, false, section);
+    assert.equal(report.reason, 'lockfile_root_mismatch', section);
+    assert.equal(report.lockfileCheck.recordedExactPair, false, section);
+  }
+});
+
 test('missing and unexpected direct package versions fail the optional lockfile check', () => {
   for (const badVersion of ['0.15.0', undefined]) {
     const lockfile = structuredClone(exactLock);

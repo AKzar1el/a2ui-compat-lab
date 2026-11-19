@@ -117,12 +117,14 @@ export function evaluateConsumer(manifest, protocol, lockfile) {
   if ([2, 3].includes(lockfile.lockfileVersion) &&
       isRecord(lockfile.packages) && isRecord(lockfile.packages[''])) {
     const root = lockfile.packages[''];
-    const matchingRoot = SDK.every(name => {
-      const declared = declaredSpecs(manifest, name);
-      const locked = declaredSpecs(root, name);
+    // A package moved between dependency sections changes the npm install lane.
+    // Compare the declaration location as well as its version, not just flattened specs.
+    const matchingRoot = SDK.every(name => SECTIONS.every(section => {
+      const declared = declaredSpecs({[section]: manifest[section]}, name);
+      const locked = declaredSpecs({[section]: root[section]}, name);
       return declared.length === locked.length &&
         declared.every((value, index) => value === locked[index]);
-    });
+    }));
     if (!matchingRoot) reason = 'lockfile_root_mismatch';
     else if (SDK.every(name => {
       const installed = lockfile.packages[`node_modules/${name}`];
