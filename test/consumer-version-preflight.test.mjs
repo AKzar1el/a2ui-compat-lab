@@ -240,3 +240,112 @@ test('optional lockfile CLI has fixed redacted output and rejects malformed inpu
     rmSync(dir, {recursive: true, force: true});
   }
 });
+
+const workspaceManifest = {...pinned, name: '@private/workspace-app'};
+const workspaceLock = {
+  lockfileVersion: 3,
+  packages: {
+    '': {workspaces: ['packages/*']},
+    'packages/app': {name: '@private/workspace-app', dependencies: {...pinned.dependencies}},
+    'node_modules/@private/workspace-app': {link: true, resolved: 'packages/app'},
+    'node_modules/@a2ui/react': {version: '0.14.0'},
+    'node_modules/@a2ui/web_core': {version: '0.14.0'},
+  },
+};
+
+test('explicit named npm workspaces verify linked manifest and hoisted pinned SDKs offline', () => {
+  const rootOnly = evaluateConsumer(workspaceManifest, 'v0.9', workspaceLock);
+  assert.equal(rootOnly.eligible, false, 'root must not pretend it owns workspace SDK declarations');
+  const selected = evaluateConsumer(workspaceManifest, 'v0.9', workspaceLock,
+    {workspace: 'packages/app'});
+  assert.equal(selected.eligible, true);
+  assert.equal(selected.reason, 'eligible_declared_pair');
+  assert.deepEqual(selected.lockfileCheck,
+    {recordedExactPair: true, reason: 'lockfile_exact_pair', scope: 'npm-workspace'});
+  assert.doesNotMatch(JSON.stringify(selected), /private|packages\/app/i,
+    'consumer package name/path must not appear in the shareable report');
+});
+
+test('workspace-local SDK resolution shadows a different hoisted version', () => {
+  const lockfile = structuredClone(workspaceLock);
+  lockfile.packages['packages/app/node_modules/@a2ui/react'] = {version: '0.15.0'};
+  const report = evaluateConsumer(workspaceManifest, 'v0.9', lockfile,
+    {workspace: 'packages/app'});
+  assert.equal(report.reason, 'lockfile_sdk_mismatch');
+  assert.equal(report.eligible, false);
+});
+
+test('nested workspaces reject ancestor-installed SDK drift before root hoists', () => {
+  const lock = structuredClone(workspaceLock);
+  lock.packages['packages/node_modules/@a2ui/react'] = {version: '0.15.0'};
+  const mismatch = evaluateConsumer(workspaceManifest, 'v0.9', lock,
+    {workspace: 'packages/app'});
+  assert.equal(mismatch.eligible, false);
+  assert.equal(mismatch.reason, 'lockfile_sdk_mismatch');
+  // The nearest workspace-local installation takes precedence over its parent.
+  lock.packages['packages/app/node_modules/@a2ui/react'] = {version: '0.14.0'};
+  assert.equal(evaluateConsumer(workspaceManifest, 'v0.9', lock,
+    {workspace: 'packages/app'}).eligible, true);
+  delete lock.packages['packages/app/node_modules/@a2ui/react'];
+  lock.packages['packages/node_modules/@a2ui/react'] = null;
+  assert.equal(evaluateConsumer(workspaceManifest, 'v0.9', lock,
+    {workspace: 'packages/app'}).eligible, false, 'malformed ancestor must not fall back');
+});
+test('npm workspace path, link and declaration mismatches fail closed without data disclosure', () => {
+  const opts = {workspace: 'packages/app'};
+  for (const change of [
+    lock => {delete lock.packages['packages/app'];},
+    lock => {delete lock.packages['node_modules/@private/workspace-app'];},
+    lock => {lock.packages['node_modules/@private/workspace-app'].resolved = 'packages/other';},
+  ]) {
+    const lock = structuredClone(workspaceLock);
+    change(lock);
+    const report = evaluateConsumer(workspaceManifest, 'v0.9', lock, opts);
+    assert.equal(report.eligible, false);
+    assert.equal(report.reason, 'lockfile_workspace_mismatch');
+  }
+  const drift = structuredClone(workspaceLock);
+  delete drift.packages['packages/app'].dependencies;
+  drift.packages['packages/app'].devDependencies = {...pinned.dependencies};
+  assert.equal(evaluateConsumer(workspaceManifest, 'v0.9', drift, opts).reason,
+    'lockfile_root_mismatch');
+  for (const path of ['../SECRET', '/tmp/SECRET', 'packages//app',
+    'packages/../app', 'packages\\app', 'packages/node_modules/app']) {
+    assert.throws(() => evaluateConsumer(workspaceManifest, 'v0.9', workspaceLock,
+      {workspace: path}), /Invalid npm workspace path; input omitted/);
+  }
+  assert.throws(() => evaluateConsumer(workspaceManifest, 'v0.9', undefined, opts),
+    /requires a lockfile/);
+  const invalidName = {...workspaceManifest, name: ['@private/workspace-app']};
+  assert.equal(evaluateConsumer(invalidName, 'v0.9', workspaceLock, opts).reason,
+    'lockfile_workspace_mismatch');
+});
+
+test('workspace CLI checks metadata without exposing private package names or paths', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-private-npm-workspace-'));
+  try {
+    const manifest = join(dir, 'PRIVATE-MANIFEST.json');
+    const lockfile = join(dir, 'PRIVATE-LOCK.json');
+    writeFileSync(manifest, JSON.stringify(workspaceManifest));
+    writeFileSync(lockfile, JSON.stringify(workspaceLock));
+    const argv = ['--manifest', manifest, '--protocol', 'v0.9',
+      '--lockfile', lockfile, '--workspace', 'packages/app'];
+    const pass = spawnSync(process.execPath, [cli, ...argv],
+      {encoding: 'utf8', timeout: 5000});
+    assert.equal(pass.status, 0, pass.stderr);
+    assert.equal(JSON.parse(pass.stdout).lockfileCheck.scope, 'npm-workspace');
+    assert.doesNotMatch(pass.stdout + pass.stderr, /PRIVATE-|@private|packages\/app/);
+    for (const bad of [
+      [...argv.slice(0, -1), '../PRIVATE-PATH'],
+      ['--manifest', manifest, '--protocol', 'v0.9', '--workspace', 'packages/app'],
+    ]) {
+      const rejected = spawnSync(process.execPath, [cli, ...bad],
+        {encoding: 'utf8', timeout: 5000});
+      assert.equal(rejected.status, 2);
+      assert.equal(rejected.stdout, '');
+      assert.doesNotMatch(rejected.stderr, /PRIVATE-|@private|packages\/app/);
+    }
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
