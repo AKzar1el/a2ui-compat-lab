@@ -300,6 +300,9 @@ test('npm workspace path, link and declaration mismatches fail closed without da
   }
   assert.throws(() => evaluateConsumer(workspaceManifest, 'v0.9', undefined, opts),
     /requires a lockfile/);
+  const invalidName = {...workspaceManifest, name: ['@private/workspace-app']};
+  assert.equal(evaluateConsumer(invalidName, 'v0.9', workspaceLock, opts).reason,
+    'lockfile_workspace_mismatch');
 });
 
 test('workspace CLI checks metadata without exposing private package names or paths', () => {
