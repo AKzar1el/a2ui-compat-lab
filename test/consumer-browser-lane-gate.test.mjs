@@ -147,7 +147,7 @@ test('explicit npm workspace gate accepts a verified named consumer before Chrom
   assert.equal(run.status, 2, run.stderr);
   assert.match(run.stderr, /private Chromium error-boundary comparison refused/);
   assert.doesNotMatch(run.stderr, /unverified consumer SDK/);
-  assert.doesNotMatch(run.stdout + run.stderr, /PRIVATE-|@private|packages\\/app/);
+  assert.doesNotMatch(run.stdout + run.stderr, /PRIVATE-|@private|packages/);
   const rootOnly = invoke({manifest: namedWorkspaceManifest, lockfile: namedWorkspaceLock});
   assert.equal(rootOnly.status, 1, rootOnly.stderr);
   assert.match(rootOnly.stderr, /lockfile_root_mismatch/);
@@ -171,7 +171,7 @@ test('workspace gate rejects ancestor SDK shadowing and broken workspace links',
   });
   assert.equal(linkFailure.status, 1, linkFailure.stderr);
   assert.match(linkFailure.stderr, /lockfile_workspace_mismatch/);
-  assert.doesNotMatch(rejected.stderr + linkFailure.stderr, /PRIVATE-|@private|packages\\/app/);
+  assert.doesNotMatch(rejected.stderr + linkFailure.stderr, /PRIVATE-|@private|packages/);
 });
 
 test('workspace gate refuses incomplete, duplicate and path-traversal selectors', () => {
@@ -190,7 +190,7 @@ test('workspace gate refuses incomplete, duplicate and path-traversal selectors'
   });
   assert.equal(traversal.status, 2);
   assert.equal(traversal.stdout, '');
-  assert.doesNotMatch(traversal.stderr, /PRIVATE-|@private|packages\\/app/);
+  assert.doesNotMatch(traversal.stderr, /PRIVATE-|@private|packages/);
   const selected = parseErrorBoundaryOptions([...base, ...required,
     '--consumer-lockfile', 'package-lock.json', '--consumer-workspace', 'packages/app']);
   assert.equal(selected['consumer-workspace'], 'packages/app');
