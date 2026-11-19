@@ -9,6 +9,17 @@ const MAX_MANIFEST_BYTES = 128 * 1024;
 const MAX_LOCKFILE_BYTES = 8 * 1024 * 1024;
 const SDK = ['@a2ui/react', '@a2ui/web_core'];
 const SECTIONS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
+const WORKSPACE_PATH = /^[A-Za-z0-9_@-][A-Za-z0-9._@-]*(?:\/[A-Za-z0-9_@-][A-Za-z0-9._@-]*)*$/;
+const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+
+// A caller must select an exact npm lockfile package path, not a filesystem traversal.
+function selectedWorkspace(workspace) {
+  if (workspace === undefined) return null;
+  if (typeof workspace !== 'string' || workspace.length > 512 ||
+      !WORKSPACE_PATH.test(workspace) || workspace.split('/').includes('node_modules'))
+    throw new Error('Invalid npm workspace path; input omitted');
+  return workspace;
+}
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -69,6 +80,10 @@ function result(reason, protocol, classifications) {
       false, 'The npm lockfile root SDK declarations differ from the application manifest.',
       'Regenerate and review the lockfile with strict npm dependency resolution before replay.',
     ],
+    lockfile_workspace_mismatch: [
+      false, 'The selected npm workspace has no matching package record or verified lockfile link.',
+      'Select a named npm workspace and its exact package-lock.json path without bypassing strict resolution.',
+    ],
     lockfile_sdk_mismatch: [
       false, 'The npm lockfile does not record the exact direct React/core 0.14.0 installation pair.',
       'Inspect the resolved direct package entries before interpreting Chromium results.',
@@ -109,29 +124,43 @@ export function evaluateManifest(manifest, protocol) {
 // An npm lockfile is metadata, not proof of the files loaded by a live app.
 // Check both its root declarations and direct resolution entries, without
 // reporting private package names, lockfile paths or dependency graph data.
-export function evaluateConsumer(manifest, protocol, lockfile) {
+export function evaluateConsumer(manifest, protocol, lockfile, {workspace} = {}) {
+  const selected = selectedWorkspace(workspace);
   const base = evaluateManifest(manifest, protocol);
-  if (lockfile === undefined) return base;
+  if (lockfile === undefined) {
+    if (selected !== null)
+      throw new Error('Npm workspace checking requires a lockfile; input omitted');
+    return base;
+  }
   if (!isRecord(lockfile)) throw new Error('Invalid lockfile shape; input contents omitted');
   let reason = 'lockfile_unsupported';
   if ([2, 3].includes(lockfile.lockfileVersion) &&
       isRecord(lockfile.packages) && isRecord(lockfile.packages[''])) {
-    const root = lockfile.packages[''];
-    // A package moved between dependency sections changes the npm install lane.
-    // Compare the declaration location as well as its version, not just flattened specs.
-    const matchingRoot = SDK.every(name => SECTIONS.every(section => {
-      const declared = declaredSpecs({[section]: manifest[section]}, name);
-      const locked = declaredSpecs({[section]: root[section]}, name);
-      return declared.length === locked.length &&
-        declared.every((value, index) => value === locked[index]);
-    }));
-    if (!matchingRoot) reason = 'lockfile_root_mismatch';
-    else if (SDK.every(name => {
-      const installed = lockfile.packages[`node_modules/${name}`];
-      return isRecord(installed) && installed.version === '0.14.0' &&
-        installed.link !== true;
-    })) reason = 'lockfile_exact_pair';
-    else reason = 'lockfile_sdk_mismatch';
+    const root = selected === null ? lockfile.packages[''] : lockfile.packages[selected];
+    const link = selected !== null && PACKAGE_NAME.test(manifest.name ?? '')
+      ? lockfile.packages[`node_modules/${manifest.name}`] : null;
+    if (selected !== null && (!isRecord(root) || !isRecord(link) ||
+        link.link !== true || link.resolved !== selected)) {
+      reason = 'lockfile_workspace_mismatch';
+    } else {
+      // A package moved between dependency sections changes the npm install lane.
+      // Compare location and version. Workspace-local installs shadow hoisted packages.
+      const matchingRoot = SDK.every(name => SECTIONS.every(section => {
+        const declared = declaredSpecs({[section]: manifest[section]}, name);
+        const locked = declaredSpecs({[section]: root[section]}, name);
+        return declared.length === locked.length &&
+          declared.every((value, index) => value === locked[index]);
+      }));
+      if (!matchingRoot) reason = 'lockfile_root_mismatch';
+      else if (SDK.every(name => {
+        const local = selected === null ? undefined :
+          lockfile.packages[`${selected}/node_modules/${name}`];
+        const installed = local === undefined ? lockfile.packages[`node_modules/${name}`] : local;
+        return isRecord(installed) && installed.version === '0.14.0' &&
+          installed.link !== true;
+      })) reason = 'lockfile_exact_pair';
+      else reason = 'lockfile_sdk_mismatch';
+    }
   }
   const report = base.eligible && reason !== 'lockfile_exact_pair'
     ? result(reason, base.protocol, base.sdkDeclarations) : base;
@@ -140,6 +169,7 @@ export function evaluateConsumer(manifest, protocol, lockfile) {
     lockfileCheck: {
       recordedExactPair: reason === 'lockfile_exact_pair',
       reason,
+      ...(selected !== null ? {scope: 'npm-workspace'} : {}),
     },
     limitations: 'Manifest and npm lockfile metadata only; no installed-files, runtime, capture or third-party compatibility verification.',
   };
@@ -179,28 +209,30 @@ export function readLockfile(path) {
 }
 
 function parseArgs(argv) {
-  let manifest, protocol, lockfile;
+  let manifest, protocol, lockfile, workspace;
   const seen = new Set();
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
-    if (!['--manifest', '--protocol', '--lockfile'].includes(token) || seen.has(token))
+    if (!['--manifest', '--protocol', '--lockfile', '--workspace'].includes(token) || seen.has(token))
       throw new Error('Unknown or duplicate option');
     seen.add(token);
     const value = argv[++i];
     if (!value || value.startsWith('--')) throw new Error('Missing option value');
     if (token === '--manifest') manifest = value;
     else if (token === '--lockfile') lockfile = value;
+    else if (token === '--workspace') workspace = value;
     else protocol = value;
   }
-  if (!manifest || !protocol) throw new Error('Usage: --manifest FILE --protocol v0.9');
-  return {manifest, protocol, lockfile};
+  if (!manifest || !protocol || (workspace && !lockfile))
+    throw new Error('Usage: --manifest FILE --protocol v0.9 [--lockfile FILE --workspace PATH]');
+  return {manifest, protocol, lockfile, workspace};
 }
 
 function run() {
   try {
-    const {manifest, protocol, lockfile} = parseArgs(process.argv.slice(2));
+    const {manifest, protocol, lockfile, workspace} = parseArgs(process.argv.slice(2));
     const report = evaluateConsumer(readManifest(manifest), protocol,
-      lockfile ? readLockfile(lockfile) : undefined);
+      lockfile ? readLockfile(lockfile) : undefined, {workspace});
     console.log(JSON.stringify(report, null, 2));
     process.exitCode = report.eligible ? 0 : 1;
   } catch (error) {
