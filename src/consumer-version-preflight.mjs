@@ -137,7 +137,8 @@ export function evaluateConsumer(manifest, protocol, lockfile, {workspace} = {})
   if ([2, 3].includes(lockfile.lockfileVersion) &&
       isRecord(lockfile.packages) && isRecord(lockfile.packages[''])) {
     const root = selected === null ? lockfile.packages[''] : lockfile.packages[selected];
-    const link = selected !== null && PACKAGE_NAME.test(manifest.name ?? '')
+    const link = selected !== null && typeof manifest.name === 'string' &&
+        PACKAGE_NAME.test(manifest.name)
       ? lockfile.packages[`node_modules/${manifest.name}`] : null;
     if (selected !== null && (!isRecord(root) || !isRecord(link) ||
         link.link !== true || link.resolved !== selected)) {
