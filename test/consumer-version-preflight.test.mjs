@@ -266,6 +266,29 @@ test('explicit named npm workspaces verify linked manifest and hoisted pinned SD
     'consumer package name/path must not appear in the shareable report');
 });
 
+test('named workspace requires root membership, not merely a local file link', () => {
+  const options = {workspace: 'packages/app'};
+  for (const workspaces of [
+    undefined, [], ['other/*'], ['packages/*', '!packages/app'],
+    ['packages/{app,web}'], {packages: ['packages/*']},
+  ]) {
+    const lock = structuredClone(workspaceLock);
+    if (workspaces === undefined) delete lock.packages[''].workspaces;
+    else lock.packages[''].workspaces = workspaces;
+    const report = evaluateConsumer(workspaceManifest, 'v0.9', lock, options);
+    assert.equal(report.eligible, false, 'unverified workspace must fail closed');
+    assert.equal(report.reason, 'lockfile_workspace_mismatch');
+    assert.doesNotMatch(JSON.stringify(report), /@private|packages\/app/i);
+  }
+  for (const patterns of [
+    ['packages/app'], ['packages/*'], ['packages/**'], ['./packages/*'],
+  ]) {
+    const lock = structuredClone(workspaceLock);
+    lock.packages[''].workspaces = patterns;
+    assert.equal(evaluateConsumer(workspaceManifest, 'v0.9', lock, options).eligible, true);
+  }
+});
+
 test('workspace-local SDK resolution shadows a different hoisted version', () => {
   const lockfile = structuredClone(workspaceLock);
   lockfile.packages['packages/app/node_modules/@a2ui/react'] = {version: '0.15.0'};
