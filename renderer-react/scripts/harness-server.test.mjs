@@ -45,6 +45,10 @@ try {
   // Invalid request targets must fail closed without crashing the server.
   assert.equal((await probe('http://[')).status, 400);
   assert.equal((await probe('http://127.0.0.1:99999/')).status, 400);
+  // A valid Host must not override a mismatched absolute-form URI authority.
+  assert.equal((await probe('http://untrusted.invalid/bundle.js')).status, 403);
+  assert.equal((await probe('//untrusted.invalid/bundle.js')).status, 403);
+  assert.equal((await probe(server.origin + '/bundle.js')).status, 200);
   assert.equal((await probe('/bundle.js')).status, 200);
   assert.equal((await probe('/src/main.jsx')).status, 404);
   assert.equal((await probe('/%2e%2e%2fprivate')).status, 404);

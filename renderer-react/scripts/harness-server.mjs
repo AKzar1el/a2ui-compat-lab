@@ -18,7 +18,13 @@ export async function startHarnessServer() {
     // Malformed absolute request targets can reach Node's request handler.
     let path;
     try {
-      path = new URL(request.url, 'http://127.0.0.1').pathname;
+      const target = new URL(request.url, 'http://127.0.0.1:' + port);
+      // Absolute-form and network-path targets must agree with the Host gate.
+      if (target.origin !== 'http://127.0.0.1:' + port) {
+        response.writeHead(403).end();
+        return;
+      }
+      path = target.pathname;
     } catch {
       response.writeHead(400).end();
       return;
