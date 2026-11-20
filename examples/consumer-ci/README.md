@@ -37,8 +37,15 @@ package record, unsupported npm lockfile v1, or workspace-only lockfile
 fails closed with exit 1. Malformed/oversized lockfile input fails with
 exit 2. Package names, paths, resolution URLs and private manifest values
 never appear in the fixed-label report; the input lockfile is not uploaded.
-This check is for the **root npm application**, not an arbitrary monorepo
-subworkspace. It checks metadata, not actual installed files, npm peer
+Without a workspace selector, this check applies to the **root npm application**.
+For an explicit npm v2/v3 workspace, pass the workspace manifest, the **root**
+lockfile and an exact lockfile package path, such as `packages/app`:
+
+```sh
+node src/consumer-version-preflight.mjs --manifest packages/app/package.json --lockfile package-lock.json --protocol v0.9 --workspace packages/app
+```
+
+Both modes check metadata, not actual installed files, npm peer
 resolution, browser-loaded code or capture contents. It makes no new
 claims about 0.15/v1.0 compatibility.
 
@@ -74,10 +81,18 @@ node src/browser-capture-error-boundary-compare.mjs \
   --report-dir out/consumer-lane-reviewed
 ```
 
+For a named npm workspace, add `--consumer-workspace packages/app` to the
+same Chromium comparison command, supply its manifest as `--consumer-manifest`,
+and retain the monorepo root lockfile as `--consumer-lockfile`. The gate then
+checks the workspace link and nearest-first SDK lockfile records **before**
+launching either Chromium replay. Wrong workspace links or shadowed SDK versions
+fail closed with fixed reason labels.
+
 Supply your own **actual** application manifest, capture protocol and private
 capture paths. `--consumer-manifest` and `--consumer-protocol` must be used
 together. `--consumer-lockfile` is optional and requires both; it accepts only
-a root npm v2/v3 lockfile. An unsupported declared SDK/protocol lane returns
+an npm v2/v3 root lockfile. `--consumer-workspace` additionally requires
+`--consumer-lockfile` and cannot be used alone. An unsupported declared SDK/protocol lane returns
 exit **1** with a fixed reason and **does not launch Chromium or write a report**.
 Unreadable or malformed private metadata, incomplete flags and invalid
 capture inputs return exit **2** without revealing input data or paths.
