@@ -178,7 +178,7 @@ For an **npm v2/v3 monorepo lockfile**, the separate offline consumer version pr
 node src/consumer-version-preflight.mjs --manifest packages/app/package.json --protocol v0.9 --lockfile package-lock.json --workspace packages/app
 ```
 
-The selector is an exact forward-slash lockfile package path, not a filesystem traversal. It reports only fixed eligibility categories and does not verify installed package files, runtime behavior, non-npm lockfiles, or a v1.0/0.15 renderer lane.
+The selector is an exact forward-slash lockfile package path, not a filesystem traversal. The lockfile root must also declare a matching workspace pattern (exact path, segment `*`, or terminal `**`); missing, unsupported or negated patterns fail closed. A generic local `file:` package link alone is not a verified npm workspace. The check reports only fixed eligibility categories and does not verify installed package files, runtime behavior, non-npm lockfiles, or a v1.0/0.15 renderer lane.
 
 ### Share a structural capture summary without raw values
 
