@@ -70,9 +70,12 @@ export function mainChecksGreen(checks, jobs, required, activeIntegrationRunId) 
  // Only the currently executing integration job may remain in progress.
  // Other historical integration jobs, including failures, still gate merges.
  const activeJobUrl='https://github.com/'+repo+'/actions/runs/'+activeIntegrationRunId+'/job/';
+ // A superseded branch run may leave cancelled checks at main's SHA.
+ // Only waive those cancellations; failed/pending same-name checks still gate.
  const unrelated=checks.check_runs.filter(check=>
   !(check.app?.slug==='github-actions'&&
-    (required.includes(check.name)||
+    ((required.includes(check.name)&&check.status==='completed'&&
+       check.conclusion==='cancelled')||
       (check.name==='integrate'&&Number.isSafeInteger(check.id)&&
         check.details_url===activeJobUrl+check.id))));
  if(unrelated.some(check=>check.status!=='completed'||

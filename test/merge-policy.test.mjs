@@ -114,6 +114,18 @@ test('main gate tolerates superseded foreign-branch cancellations but rejects mi
  wrongSelfJob.check_runs[7].details_url='https://github.com/AKzar1el/a2ui-compat-lab/actions/runs/41/job/1234';
  assert.equal(mainChecksGreen(wrongSelfJob,jobs,required,42),false,
   'only exact current run and job id may be ignored');
+ const failedName=structuredClone(checks);
+ failedName.check_runs.push({name:'sdk-parity',app:{slug:'github-actions'},
+  status:'completed',conclusion:'failure'});
+ failedName.total_count++;
+ assert.equal(mainChecksGreen(failedName,jobs,required,42),false,
+  'failed duplicate required-name Actions check must not be silently ignored');
+ const pendingName=structuredClone(checks);
+ pendingName.check_runs.push({name:'react-browser',app:{slug:'github-actions'},
+  status:'in_progress',conclusion:null});
+ pendingName.total_count++;
+ assert.equal(mainChecksGreen(pendingName,jobs,required,42),false,
+  'pending duplicate required-name Actions check must not be silently ignored');
  assert.equal(mainChecksGreen({...checks,total_count:100},jobs,required,42),false);
 });
 
