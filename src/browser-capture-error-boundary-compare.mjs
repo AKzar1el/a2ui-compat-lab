@@ -7,7 +7,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {compareBrowserCaptureSummaries} from './browser-capture-summary-compare.mjs';
 import {evaluateConsumer, readManifest, readLockfile} from './consumer-version-preflight.mjs';
 
-const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--before-input-format jsonl|copilotkit-operations] [--after-input-format jsonl|copilotkit-operations] [--compat-copilotkit-basic-catalog] [--require-no-observed-failures] [--compare-rendered-text] [--compare-button-geometry] [--compare-button-focus] [--format json|markdown|junit] [--out NEW-REPORT | --report-dir NEW-DIRECTORY] [--consumer-manifest APP/package.json --consumer-protocol v0.9 [--consumer-lockfile APP/package-lock.json]]';
+const USAGE = 'Usage: node src/browser-capture-error-boundary-compare.mjs --before-capture PRIVATE-OLD.jsonl --after-capture PRIVATE-NEW.jsonl [--strict] [--before-input-format jsonl|copilotkit-operations] [--after-input-format jsonl|copilotkit-operations] [--compat-copilotkit-basic-catalog] [--require-no-observed-failures] [--compare-rendered-text] [--compare-button-geometry] [--compare-button-focus] [--format json|markdown|junit] [--out NEW-REPORT | --report-dir NEW-DIRECTORY] [--consumer-manifest APP/package.json --consumer-protocol v0.9 [--consumer-lockfile APP/package-lock.json [--consumer-workspace packages/app]]]';
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'renderer-react');
 const RENDERER_SCRIPT = resolve(RENDERER_DIR, 'scripts/browser-capture-replay.mjs');
 const RENDERER = '@a2ui/react@0.14.0 + @a2ui/web_core@0.14.0';
@@ -39,6 +39,8 @@ export function parseErrorBoundaryOptions(argv) {
       !Object.hasOwn(args, arg.slice(2)) &&
       ['jsonl', 'copilotkit-operations'].includes(argv[i + 1]))
       args[arg.slice(2)] = argv[++i];
+    else if (arg === '--consumer-workspace' && !Object.hasOwn(args, 'consumer-workspace') &&
+      argv[i + 1] && !argv[i + 1].startsWith('--')) args['consumer-workspace'] = argv[++i];
     else if (arg === '--consumer-protocol' && !Object.hasOwn(args, 'consumer-protocol') &&
       argv[i + 1] && !argv[i + 1].startsWith('--')) args['consumer-protocol'] = argv[++i];
     else if (['--before-capture', '--after-capture', '--out', '--report-dir',
@@ -52,10 +54,11 @@ export function parseErrorBoundaryOptions(argv) {
       ((args.compareRenderedText || args.compareButtonGeometry || args.compareButtonFocus) && !args.requireNoObservedFailures) ||
       (args.compatCopilotkitBasicCatalog && !['before-input-format', 'after-input-format']
         .some(key => args[key] === 'copilotkit-operations'))) throw invalid();
-  const hasConsumerOptions = ['consumer-manifest', 'consumer-protocol', 'consumer-lockfile']
+  const hasConsumerOptions = ['consumer-manifest', 'consumer-protocol', 'consumer-lockfile', 'consumer-workspace']
     .some(key => Object.hasOwn(args, key));
   if (hasConsumerOptions && (!args['consumer-manifest'] || !args['consumer-protocol']))
     throw invalid();
+  if (args['consumer-workspace'] && !args['consumer-lockfile']) throw invalid();
   return args;
 }
 
@@ -357,7 +360,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
         // Neither the application manifest nor its lockfile is included in reports.
         const preflight = evaluateConsumer(readManifest(args['consumer-manifest']),
           args['consumer-protocol'], args['consumer-lockfile'] ?
-            readLockfile(args['consumer-lockfile']) : undefined);
+            readLockfile(args['consumer-lockfile']) : undefined,
+          {workspace: args['consumer-workspace']});
         if (!preflight.eligible) throw new UnsupportedConsumerLaneError(preflight.reason);
       }
       // One ephemeral key shared by both Chromium children, never logged or persisted.
