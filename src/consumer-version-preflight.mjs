@@ -21,6 +21,29 @@ function selectedWorkspace(workspace) {
   return workspace;
 }
 
+// A local file: dependency also gets a lockfile link. A named npm workspace
+// must additionally match a declaration on the lockfile root. Accept only
+// unambiguous exact paths, segment '*' and trailing '**'; unsupported and
+// exclusion patterns fail closed rather than overstate compatibility.
+function rootDeclaresWorkspace(lockfileRoot, selected) {
+  const patterns = lockfileRoot.workspaces;
+  if (!Array.isArray(patterns) || !patterns.length ||
+      patterns.some(pattern => typeof pattern !== 'string' || pattern.startsWith('!')))
+    return false;
+  const chosen = selected.split('/');
+  return patterns.some(raw => {
+    const parts = (raw.startsWith('./') ? raw.slice(2) : raw).split('/');
+    if (parts.some(part => part !== '*' && part !== '**' &&
+        (!WORKSPACE_PATH.test(part) || part.includes('/')))) return false;
+    if (parts.slice(0, -1).includes('**')) return false;
+    const recursive = parts.at(-1) === '**';
+    const prefix = recursive ? parts.slice(0, -1) : parts;
+    return chosen.length >= prefix.length + Number(recursive) &&
+      (recursive || chosen.length === prefix.length) &&
+      prefix.every((part, i) => part === '*' || part === chosen[i]);
+  });
+}
+
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -141,7 +164,8 @@ export function evaluateConsumer(manifest, protocol, lockfile, {workspace} = {})
         PACKAGE_NAME.test(manifest.name)
       ? lockfile.packages[`node_modules/${manifest.name}`] : null;
     if (selected !== null && (!isRecord(root) || !isRecord(link) ||
-        link.link !== true || link.resolved !== selected)) {
+        link.link !== true || link.resolved !== selected ||
+        !rootDeclaresWorkspace(lockfile.packages[''], selected))) {
       reason = 'lockfile_workspace_mismatch';
     } else {
       // A package moved between dependency sections changes the npm install lane.
