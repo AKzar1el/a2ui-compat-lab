@@ -33,8 +33,12 @@ export function checksGreen(result, required) {
  const relevant = result.check_runs;
  if(relevant.some(x => x.status !== 'completed' ||
    !['success','neutral','skipped'].includes(x.conclusion))) return false;
+ // A third-party Check Run may use the same display name as a required job.
+ // Only actual GitHub Actions checks can satisfy our three SDK/browser/audit
+ // gates. Other apps still participate in the all-checks-must-pass gate above.
  return required.every(name =>
-  relevant.some(x => x.name === name && x.status === 'completed' && x.conclusion === 'success'));
+  relevant.some(x => x.name === name && x.app?.slug === 'github-actions' &&
+   x.status === 'completed' && x.conclusion === 'success'));
 }
 
 /**
@@ -66,9 +70,12 @@ export function mainChecksGreen(checks, jobs, required, activeIntegrationRunId) 
  // Only the currently executing integration job may remain in progress.
  // Other historical integration jobs, including failures, still gate merges.
  const activeJobUrl='https://github.com/'+repo+'/actions/runs/'+activeIntegrationRunId+'/job/';
+ // A superseded branch run may leave cancelled checks at main's SHA.
+ // Only waive those cancellations; failed/pending same-name checks still gate.
  const unrelated=checks.check_runs.filter(check=>
   !(check.app?.slug==='github-actions'&&
-    (required.includes(check.name)||
+    ((required.includes(check.name)&&check.status==='completed'&&
+       check.conclusion==='cancelled')||
       (check.name==='integrate'&&Number.isSafeInteger(check.id)&&
         check.details_url===activeJobUrl+check.id))));
  if(unrelated.some(check=>check.status!=='completed'||
