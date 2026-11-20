@@ -121,3 +121,77 @@ test('CopilotKit browser pair formats are explicit per input and fail closed', (
   ]) assert.throws(() => parseErrorBoundaryOptions([...base, ...invalid]),
     /Invalid private capture comparison/);
 });
+
+const namedWorkspaceManifest = {...pinned, name: '@private/workspace-app'};
+const namedWorkspaceLock = {
+  lockfileVersion: 3,
+  packages: {
+    '': {workspaces: ['packages/*']},
+    'packages/app': {
+      name: '@private/workspace-app',
+      dependencies: {...pinned.dependencies},
+    },
+    'node_modules/@private/workspace-app': {link: true, resolved: 'packages/app'},
+    'node_modules/@a2ui/react': {version: '0.14.0'},
+    'node_modules/@a2ui/web_core': {version: '0.14.0'},
+  },
+};
+
+test('explicit npm workspace gate accepts a verified named consumer before Chromium replay', () => {
+  const run = invoke({
+    manifest: namedWorkspaceManifest, lockfile: namedWorkspaceLock,
+    extra: ['--consumer-workspace', 'packages/app'],
+  });
+  // Deliberately missing private captures must be reached only after the
+  // workspace metadata passes; they are never opened for an ineligible lane.
+  assert.equal(run.status, 2, run.stderr);
+  assert.match(run.stderr, /private Chromium error-boundary comparison refused/);
+  assert.doesNotMatch(run.stderr, /unverified consumer SDK/);
+  assert.doesNotMatch(run.stdout + run.stderr, /PRIVATE-|@private|packages/);
+  const rootOnly = invoke({manifest: namedWorkspaceManifest, lockfile: namedWorkspaceLock});
+  assert.equal(rootOnly.status, 1, rootOnly.stderr);
+  assert.match(rootOnly.stderr, /lockfile_root_mismatch/);
+});
+
+test('workspace gate rejects ancestor SDK shadowing and broken workspace links', () => {
+  const shadowed = structuredClone(namedWorkspaceLock);
+  shadowed.packages['packages/node_modules/@a2ui/react'] = {version: '0.15.0'};
+  const rejected = invoke({
+    manifest: namedWorkspaceManifest, lockfile: shadowed,
+    extra: ['--consumer-workspace', 'packages/app'],
+  });
+  assert.equal(rejected.status, 1, rejected.stderr);
+  assert.match(rejected.stderr, /lockfile_sdk_mismatch/);
+  assert.equal(rejected.stdout, '');
+  const unlinked = structuredClone(namedWorkspaceLock);
+  unlinked.packages['node_modules/@private/workspace-app'].resolved = 'packages/other';
+  const linkFailure = invoke({
+    manifest: namedWorkspaceManifest, lockfile: unlinked,
+    extra: ['--consumer-workspace', 'packages/app'],
+  });
+  assert.equal(linkFailure.status, 1, linkFailure.stderr);
+  assert.match(linkFailure.stderr, /lockfile_workspace_mismatch/);
+  assert.doesNotMatch(rejected.stderr + linkFailure.stderr, /PRIVATE-|@private|packages/);
+});
+
+test('workspace gate refuses incomplete, duplicate and path-traversal selectors', () => {
+  const base = ['--before-capture', 'before.jsonl', '--after-capture', 'after.jsonl'];
+  const required = ['--consumer-manifest', 'package.json', '--consumer-protocol', 'v0.9'];
+  for (const flags of [
+    [...required, '--consumer-workspace', 'packages/app'],
+    ['--consumer-workspace', 'packages/app'],
+    [...required, '--consumer-lockfile', 'package-lock.json',
+      '--consumer-workspace', 'packages/app', '--consumer-workspace', 'packages/app'],
+  ]) assert.throws(() => parseErrorBoundaryOptions([...base, ...flags]),
+    /Invalid private capture comparison/);
+  const traversal = invoke({
+    manifest: namedWorkspaceManifest, lockfile: namedWorkspaceLock,
+    extra: ['--consumer-workspace', '../PRIVATE-PATH'],
+  });
+  assert.equal(traversal.status, 2);
+  assert.equal(traversal.stdout, '');
+  assert.doesNotMatch(traversal.stderr, /PRIVATE-|@private|packages/);
+  const selected = parseErrorBoundaryOptions([...base, ...required,
+    '--consumer-lockfile', 'package-lock.json', '--consumer-workspace', 'packages/app']);
+  assert.equal(selected['consumer-workspace'], 'packages/app');
+});
