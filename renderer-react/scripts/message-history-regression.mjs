@@ -26,8 +26,11 @@ async function mountAgentHistory(page, origin) {
   await page.evaluate(messages => {
     for (const message of messages) window.__a2uiLab.applyMessage(message);
   }, agentMessages);
-  const input = page.getByRole('textbox', {name: 'Choice'});
-  await input.waitFor({state: 'visible', timeout: 10000});
+  // The pinned React catalog may not expose TextField's label as an HTML accessible name.
+  // The fixture has exactly one native editable control; test its actual DOM state.
+  const input = page.locator('input, textarea');
+  await input.first().waitFor({state: 'visible', timeout: 10000});
+  assert.equal(await input.count(), 1, 'Fixture must mount exactly one native input');
   assert.equal(await input.inputValue(), 'alpha',
     'Agent-created form starts from the last persisted updateDataModel');
   return input;
