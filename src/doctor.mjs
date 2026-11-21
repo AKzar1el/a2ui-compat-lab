@@ -25,12 +25,16 @@ export function inspectInstallation({root = defaultRoot, nodeVersion = process.v
     throw new Error('Project dependencies must be an object');
   }
   const required = manifest.data.engines?.node ?? null;
-  const supportedEngine = typeof required === 'string' ? /^>=(\d+)(?:\.(\d+))?$/.exec(required.trim()) : null;
-  const installedNode = /^(\d+)\.(\d+)\./.exec(nodeVersion);
-  const nodeOk = Boolean(supportedEngine && installedNode &&
-    (Number(installedNode[1]) > Number(supportedEngine[1]) ||
-      (Number(installedNode[1]) === Number(supportedEngine[1]) &&
-       Number(installedNode[2]) >= Number(supportedEngine[2] ?? 0))));
+  const supportedEngine = typeof required === 'string' ?
+    /^>=(\d+)(?:\.(\d+)(?:\.(\d+))?)?$/.exec(required.trim()) : null;
+  const installedNode = /^(\d+)\.(\d+)\.(\d+)/.exec(nodeVersion);
+  const minimum = supportedEngine?.slice(1).map(part => Number(part ?? 0));
+  const actual = installedNode?.slice(1).map(Number);
+  const nodeOk = Boolean(minimum && actual &&
+    (actual[0] > minimum[0] ||
+      (actual[0] === minimum[0] &&
+       (actual[1] > minimum[1] ||
+        (actual[1] === minimum[1] && actual[2] >= minimum[2])))));
 
   const lock = loadJson(join(root, 'package-lock.json'));
   const lockRoot = lock.data?.packages?.[''];
