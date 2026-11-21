@@ -2,11 +2,11 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {inspectInstallation} from '../src/doctor.mjs';
 
-function fixture({nodeVersion = '22.22.2', installed = '0.15.0', locked = '0.15.0',
+function fixture({nodeVersion = '22.22.2', nodeEngine = '>=22', installed = '0.15.0', locked = '0.15.0',
   lockRootPin = '0.15.0', lockRootVersion = '0.1.0', malformedLock = false,
   dependencyName = '@a2ui/web_core', absentInstall = false} = {}) {
   const files = new Map([
-    ['package.json', {name: 'a2ui-compat-lab', version: '0.1.0', engines: {node: '>=22'}, dependencies: {[dependencyName]: '0.15.0'}}],
+    ['package.json', {name: 'a2ui-compat-lab', version: '0.1.0', engines: {node: nodeEngine}, dependencies: {[dependencyName]: '0.15.0'}}],
     ['package-lock.json', {packages: {'': {version: lockRootVersion, dependencies: {[dependencyName]: lockRootPin}},
       ['node_modules/' + dependencyName]: {version: locked}}}],
     ['node_modules/' + dependencyName + '/package.json', {name: dependencyName, version: installed}],
@@ -26,6 +26,19 @@ test('doctor validates exact installed, locked and manifest versions without net
   assert.equal(report.node.ok, true);
   assert.equal(report.packages[0].name, '@a2ui/web_core');
   assert.deepEqual(report.packages[0].issues, []);
+});
+
+test('doctor respects three-part Node engine minimums including patch floors', () => {
+  for (const [nodeEngine, nodeVersion, expected] of [
+    ['>=22.12.0', '22.22.2', true],
+    ['>=22.12.1', '22.12.0', false],
+    ['>=22.12.1', '22.12.1', true],
+    ['>=22.12.0', '22.11.99', false],
+    ['>=23.0.0', '22.22.2', false],
+  ]) {
+    assert.equal(fixture({nodeEngine, nodeVersion}).node.ok, expected,
+      `${nodeVersion} should ${expected ? '' : 'not '}satisfy ${nodeEngine}`);
+  }
 });
 
 test('doctor fails closed when the locally installed SDK is absent', () => {
