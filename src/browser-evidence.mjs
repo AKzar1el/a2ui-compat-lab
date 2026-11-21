@@ -52,6 +52,7 @@ function hasCompletePng(png) {
     return false;
   let offset = PNG_SIGNATURE.length;
   let layout;
+  let bitDepth, colorType, sawPalette = false;
   let sawData = false;
   let dataEnded = false;
   const idat = [];
@@ -67,8 +68,8 @@ function hasCompletePng(png) {
       if (type !== 'IHDR' || length !== 13) return false;
       const width = png.readUInt32BE(offset + 8);
       const height = png.readUInt32BE(offset + 12);
-      const bitDepth = png[offset + 16];
-      const colorType = png[offset + 17];
+      bitDepth = png[offset + 16];
+      colorType = png[offset + 17];
       const channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[colorType];
       const depths = {0: [1, 2, 4, 8, 16], 2: [8, 16],
         3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16]}[colorType];
@@ -81,8 +82,16 @@ function hasCompletePng(png) {
     } else if (type === 'IHDR') {
       return false;
     }
+    if (type === 'PLTE') {
+      // Indexed PNGs require a palette before IDAT. Permitted palette
+      // chunks must be unique, bounded and made of complete RGB triples.
+      if (sawPalette || sawData || ![2, 3, 6].includes(colorType) ||
+          length < 3 || length > 768 || length % 3 !== 0 ||
+          (colorType === 3 && length / 3 > (1 << bitDepth))) return false;
+      sawPalette = true;
+    }
     if (type === 'IDAT') {
-      if (dataEnded) return false;
+      if (dataEnded || (colorType === 3 && !sawPalette)) return false;
       sawData = true;
       idat.push(png.subarray(offset + 8, dataEnd));
     } else if (sawData) {
