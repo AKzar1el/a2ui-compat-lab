@@ -26,3 +26,31 @@ Run via `cd renderer-react && npm test` after the pinned offline dependencies
 and Chromium are installed. External rationale:
 [a2ui-project/a2ui#2932](https://github.com/a2ui-project/a2ui/issues/2932)
 and the [v0.9 protocol's two-way binding contract](https://github.com/a2ui-project/a2ui/blob/main/specification/v0_9/docs/a2ui_protocol.md).
+
+## Opt-in host policy: optimistic replay from saved client actions
+
+A public [integrator reply in upstream #2932](https://github.com/a2ui-project/a2ui/issues/2932#issuecomment-6975901104)
+clarifies a concrete requirement: a web chat host intentionally persists only the
+agent and user message stream, not out-of-band form snapshots. That integrator
+describes action-derived optimistic state and later agent-authored state taking
+precedence. This is third-party **problem and desired-behavior evidence**, not
+proof that this Lab is deployed in that host or that A2UI specifies the policy.
+
+The same offline published React/Chromium test now contrasts two explicit
+host policies after a real captured `submit-choice` client action:
+
+- **Agent echo:** apply a subsequent agent-authored `updateDataModel` to
+  restore the field; a later agent update overrides it.
+- **Action-derived optimistic replay:** rebuild from agent messages, then
+  resolve the saved action against the **trusted original** Button definition
+  and its single absolute `/choice` path binding. The host synthesizes one
+  data-model update to restore the submitted field without an agent echo;
+  a later agent-authored update again overrides it. Refuse mismatched
+  surface/component/event, unexpected action context and unsupported binding.
+
+The latter is a deliberately narrow, fail-closed **test policy**, not a generic
+or secure production binding inverter. It does not infer relative paths,
+literal/function expressions, multiple fields, action rejection semantics,
+or edits not submitted in an action. Real host adoption and a cross-host
+semantic contract remain unverified. The regression returns only boolean
+checkpoints, never recorded user field values.
