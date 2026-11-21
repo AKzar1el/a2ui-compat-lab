@@ -6,6 +6,54 @@ const usage = 'Usage: npm test -- [--out-dir NEW_DIRECTORY_NAME]';
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_PNG_BYTES = 32 * 1024 * 1024;
 
+const PNG_CRC_TABLE = Uint32Array.from({length: 256}, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit++)
+    value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
+  return value >>> 0;
+});
+
+function chunkCrc32(buffer, start, end) {
+  let crc = 0xffffffff;
+  for (let i = start; i < end; i++)
+    crc = PNG_CRC_TABLE[(crc ^ buffer[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+// Verify framing and chunk CRCs before publishing a claimed successful PNG.
+// This is a bounded integrity preflight, not a general PNG image decoder.
+function hasCompletePng(png) {
+  if (!png.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE))
+    return false;
+  let offset = PNG_SIGNATURE.length;
+  let sawHeader = false;
+  let sawData = false;
+  while (offset + 12 <= png.length) {
+    const length = png.readUInt32BE(offset);
+    if (length > png.length - offset - 12) return false;
+    const type = png.toString('ascii', offset + 4, offset + 8);
+    const dataEnd = offset + 8 + length;
+    const after = dataEnd + 4;
+    if (chunkCrc32(png, offset + 4, dataEnd) !== png.readUInt32BE(dataEnd))
+      return false;
+    if (!sawHeader) {
+      if (type !== 'IHDR' || length !== 13 ||
+          png.readUInt32BE(offset + 8) === 0 ||
+          png.readUInt32BE(offset + 12) === 0)
+        return false;
+      sawHeader = true;
+    } else if (type === 'IHDR') {
+      return false;
+    }
+    if (type === 'IDAT') sawData = true;
+    if (type === 'IEND')
+      return length === 0 && sawData && after === png.length;
+    offset = after;
+  }
+  return false;
+}
+
+
 /** Keep browser artifacts in a new, predictable directory inside renderer-react. */
 export function resolveBrowserEvidenceDir(root, args) {
   if (args.length === 0) return resolve(root, 'out');
@@ -31,7 +79,7 @@ export function publishBrowserEvidence(outputDir, screenshot, report) {
   // publish a successful report paired with missing, corrupt or mismatched PNG evidence.
   if (!Buffer.isBuffer(screenshot) || screenshot.length < PNG_SIGNATURE.length ||
       screenshot.length > MAX_PNG_BYTES ||
-      !screenshot.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE) ||
+      !hasCompletePng(screenshot) ||
       report?.passed !== true ||
       typeof report.screenshotSha256 !== 'string' ||
       !/^[a-f0-9]{64}$/i.test(report.screenshotSha256) ||
