@@ -48,7 +48,32 @@ function deriveFixtureActionUpdate(action, messages) {
   }};
 }
 
-async function mountAgentHistory(page, origin) {
+// Reconstruct only this public fixture's single Button action in transcript order.
+// Later agent updates must never be moved before an optimistic client action.
+function reconstructFixtureHistory(entries) {
+  assert.ok(Array.isArray(entries), 'A chronological history array is required');
+  const agentPrefix = [];
+  const updates = [];
+  let actionCount = 0;
+  for (const entry of entries) {
+    if (entry?.kind === 'agent') {
+      assert.deepEqual(Object.keys(entry).sort(), ['kind', 'message']);
+      agentPrefix.push(entry.message);
+      updates.push(entry.message);
+    } else if (entry?.kind === 'action') {
+      assert.deepEqual(Object.keys(entry).sort(), ['action', 'kind']);
+      assert.equal(++actionCount, 1, 'Fixture supports exactly one saved action');
+      updates.push(deriveFixtureActionUpdate(entry.action, agentPrefix));
+    } else {
+      assert.fail('Unknown persisted history entry');
+    }
+  }
+  assert.equal(actionCount, 1, 'Fixture requires one saved action');
+  return updates;
+}
+
+async function mountAgentHistory(page, origin, messages = agentMessages,
+  expectedChoice = 'alpha') {
   await page.goto(origin + '/?capture=1', {waitUntil: 'domcontentloaded'});
   await page.waitForFunction(() => Boolean(window.__a2uiLab?.trace), null, {timeout: 10000});
   // The capture-mode React root subscribes to surface creation in useEffect.
@@ -56,14 +81,15 @@ async function mountAgentHistory(page, origin) {
     requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await page.evaluate(messages => {
     for (const message of messages) window.__a2uiLab.applyMessage(message);
-  }, agentMessages);
+  }, messages);
   // The pinned React catalog may not expose TextField's label as an HTML accessible name.
   // The fixture has exactly one native editable control; test its actual DOM state.
   const input = page.locator('input, textarea');
   await input.first().waitFor({state: 'visible', timeout: 10000});
   assert.equal(await input.count(), 1, 'Fixture must mount exactly one native input');
-  assert.equal(await input.inputValue(), 'alpha',
-    'Agent-created form starts from the last persisted updateDataModel');
+  await waitForModel(page, expectedChoice);
+  assert.equal(await input.inputValue(), expectedChoice,
+    'Replayed message order must determine the rendered TextField value');
   return input;
 }
 
@@ -80,6 +106,7 @@ export async function testMessageOnlyHistoryReplay(context, origin) {
   let live;
   let rebuilt;
   let optimistic;
+  let ordered;
   const watch = page => {
     page.on('pageerror', error => observedErrors.push(error.message));
     page.on('console', message => {
@@ -149,6 +176,35 @@ export async function testMessageOnlyHistoryReplay(context, origin) {
       /surface deletion/,
       'A saved Button action must not restore a deleted surface');
 
+    // A real chat transcript interleaves client actions and agent messages.
+    // Replaying all agent messages first and this action last would wrongly
+    // resurrect beta after the agent's authoritative gamma update.
+    const afterActionAgent = {version: 'v0.9', updateDataModel: {
+      surfaceId, path: '/choice', value: 'gamma',
+    }};
+    const persistedStream = [
+      ...agentMessages.map(message => ({kind: 'agent', message})),
+      {kind: 'action', action},
+      {kind: 'agent', message: afterActionAgent},
+    ];
+    assert.throws(() => reconstructFixtureHistory([
+      {kind: 'action', action}, ...persistedStream.slice(0, 3),
+    ]), /Ambiguous component history/,
+    'An action before its Button definition cannot be optimistically replayed');
+    assert.throws(() => reconstructFixtureHistory([
+      ...persistedStream, {kind: 'action', action},
+    ]), /exactly one saved action/,
+    'Do not silently synthesize a second optimistic mutation');
+    const chronologicalMessages = reconstructFixtureHistory(persistedStream);
+    ordered = await context.newPage();
+    watch(ordered);
+    const orderedInput = await mountAgentHistory(ordered, origin,
+      chronologicalMessages, 'gamma');
+    assert.equal(await orderedInput.inputValue(), 'gamma',
+      'Later saved agent update wins on full chronological history reconstruction');
+    assert.equal((await ordered.evaluate(id => window.__a2uiLab.trace(id).data,
+      surfaceId)).choice, 'gamma');
+
     const optimisticUpdate = deriveFixtureActionUpdate(action, agentMessages);
     optimistic = await context.newPage();
     watch(optimistic);
@@ -180,8 +236,10 @@ export async function testMessageOnlyHistoryReplay(context, origin) {
       optimisticActionReplayRestored: true, laterAgentOverrodeOptimisticReplay: true,
       unsupportedActionBindingRejected: true,
       staleDeletedSurfaceActionRejected: true,
+      chronologicalAgentOverrideReplayed: true,
       deletedSurfaceUnmountObserved: true};
   } finally {
+    if (ordered && !ordered.isClosed()) await ordered.close();
     if (optimistic && !optimistic.isClosed()) await optimistic.close();
     if (rebuilt && !rebuilt.isClosed()) await rebuilt.close();
     if (live && !live.isClosed()) await live.close();
