@@ -137,6 +137,28 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
       return Buffer.concat([png.subarray(0, offset), chunk,
         png.subarray(offset + 12 + previousLength)]);
     };
+    const makeChunk = (type, data) => {
+      const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+      const result = Buffer.alloc(body.length + 8);
+      result.writeUInt32BE(data.length, 0);
+      body.copy(result, 4);
+      result.writeUInt32BE(crc32(body), body.length + 4);
+      return result;
+    };
+    const indexedHeader = Buffer.from(png.subarray(16, 29));
+    indexedHeader[9] = 3; // Indexed-color instead of RGBA.
+    const palette = makeChunk('PLTE', Buffer.from([0, 0, 0]));
+    const indexedData = makeChunk('IDAT', deflateSync(Buffer.from([0, 0])));
+    const indexedEnd = makeChunk('IEND', Buffer.alloc(0));
+    const indexedImage = (before = [], after = []) => Buffer.concat([
+      png.subarray(0, 8), makeChunk('IHDR', indexedHeader),
+      ...before, indexedData, ...after, indexedEnd,
+    ]);
+    const validIndexed = indexedImage([palette]);
+    const indexedMissingPalette = indexedImage();
+    const indexedShortPalette = indexedImage([makeChunk('PLTE', Buffer.from([0, 0]))]);
+    const indexedDuplicatePalette = indexedImage([palette, palette]);
+    const indexedLatePalette = indexedImage([], [palette]);
     const invalidZlib = replaceIdat(Buffer.alloc(13));
     const invalidFilter = replaceIdat(deflateSync(Buffer.from([7, 0, 0, 0, 0])));
     const shortScanline = replaceIdat(deflateSync(Buffer.from([0, 0])));
@@ -155,6 +177,14 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
         {...valid, screenshotSha256: digestFor(invalidFilter)}, /valid PNG/],
       ['short-inflated-scanline-with-valid-crc', shortScanline,
         {...valid, screenshotSha256: digestFor(shortScanline)}, /valid PNG/],
+      ['indexed-missing-required-palette', indexedMissingPalette,
+        {...valid, screenshotSha256: digestFor(indexedMissingPalette)}, /valid PNG/],
+      ['indexed-incomplete-palette-triple', indexedShortPalette,
+        {...valid, screenshotSha256: digestFor(indexedShortPalette)}, /valid PNG/],
+      ['indexed-duplicate-palette', indexedDuplicatePalette,
+        {...valid, screenshotSha256: digestFor(indexedDuplicatePalette)}, /valid PNG/],
+      ['indexed-palette-after-idat', indexedLatePalette,
+        {...valid, screenshotSha256: digestFor(indexedLatePalette)}, /valid PNG/],
       ['invalid-png', Buffer.from('not-a-png'), valid, /valid PNG/],
       ['wrong-digest', png, {...valid, screenshotSha256: '0'.repeat(64)}, /matching SHA-256/],
       ['missing-digest', png, {schemaVersion: 1, passed: true}, /matching SHA-256/],
@@ -172,6 +202,11 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
     const path = join(root, 'not-serializable');
     assert.throws(() => publishBrowserEvidence(path, png, circular), /not JSON-serializable/);
     assert.equal(existsSync(path), false, 'Serialization failure must happen before mkdir');
+
+    const validIndexedReport = {...valid, screenshotSha256: digestFor(validIndexed)};
+    const indexedPublished = publishBrowserEvidence(join(root, 'indexed-valid'),
+      validIndexed, validIndexedReport);
+    assert.deepEqual(readFileSync(indexedPublished.screenshotPath), validIndexed);
 
     const upper = {...valid, screenshotSha256: digest.toUpperCase()};
     const created = publishBrowserEvidence(join(root, 'uppercase-digest'), png, upper);
