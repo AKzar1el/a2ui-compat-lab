@@ -54,3 +54,14 @@ literal/function expressions, multiple fields, action rejection semantics,
 or edits not submitted in an action. Real host adoption and a cross-host
 semantic contract remain unverified. The regression returns only boolean
 checkpoints, never recorded user field values.
+
+## Deleted-surface action replay safety
+
+The synthetic action-derived host policy additionally refuses an old Button
+submission if the persisted agent history contains `deleteSurface` for that
+surface, even when an earlier trusted Button schema still matches. The offline
+Chromium test also checks that the published React renderer unmounts that
+surface and drops its data model. This conservative rule avoids treating a
+captured action as permission to restore a deleted or later-recreated surface.
+It does **not** resolve message-stream temporal correlation, distinguish
+surface lifetimes after ID reuse, or establish behavior in an external host.
