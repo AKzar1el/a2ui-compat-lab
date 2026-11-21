@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import {createHash} from 'node:crypto';
+import {deflateSync} from 'node:zlib';
 import assert from 'node:assert/strict';
 import {existsSync, mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -112,6 +113,33 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
     const badCrc = Buffer.from(png);
     badCrc[44] ^= 1; // Tamper with IDAT while matching the forged digest.
     const trailing = Buffer.concat([png, Buffer.from('trailing')]);
+    // A valid chunk CRC and SHA are insufficient if IDAT is not a PNG image.
+    // Mutate the known 1x1 RGBA fixture, rebuilding IDAT with a correct CRC.
+    const crc32 = bytes => {
+      let crc = 0xffffffff;
+      for (const byte of bytes) {
+        crc ^= byte;
+        for (let bit = 0; bit < 8; bit++)
+          crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+      }
+      return (crc ^ 0xffffffff) >>> 0;
+    };
+    const replaceIdat = data => {
+      const offset = 33; // IHDR is always 13 bytes in this fixture.
+      assert.equal(png.toString('ascii', offset + 4, offset + 8), 'IDAT');
+      const previousLength = png.readUInt32BE(offset);
+      const chunk = Buffer.alloc(12 + data.length);
+      chunk.writeUInt32BE(data.length, 0);
+      chunk.write('IDAT', 4, 'ascii');
+      data.copy(chunk, 8);
+      chunk.writeUInt32BE(crc32(chunk.subarray(4, 8 + data.length)),
+        8 + data.length);
+      return Buffer.concat([png.subarray(0, offset), chunk,
+        png.subarray(offset + 12 + previousLength)]);
+    };
+    const invalidZlib = replaceIdat(Buffer.alloc(13));
+    const invalidFilter = replaceIdat(deflateSync(Buffer.from([7, 0, 0, 0, 0])));
+    const shortScanline = replaceIdat(deflateSync(Buffer.from([0, 0])));
     const cases = [
       ['signature-only', png.subarray(0, 8),
         {...valid, screenshotSha256: digestFor(png.subarray(0, 8))}, /valid PNG/],
@@ -121,6 +149,12 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
         {...valid, screenshotSha256: digestFor(badCrc)}, /valid PNG/],
       ['trailing-bytes', trailing,
         {...valid, screenshotSha256: digestFor(trailing)}, /valid PNG/],
+      ['invalid-idat-zlib-with-valid-crc', invalidZlib,
+        {...valid, screenshotSha256: digestFor(invalidZlib)}, /valid PNG/],
+      ['invalid-row-filter-with-valid-crc', invalidFilter,
+        {...valid, screenshotSha256: digestFor(invalidFilter)}, /valid PNG/],
+      ['short-inflated-scanline-with-valid-crc', shortScanline,
+        {...valid, screenshotSha256: digestFor(shortScanline)}, /valid PNG/],
       ['invalid-png', Buffer.from('not-a-png'), valid, /valid PNG/],
       ['wrong-digest', png, {...valid, screenshotSha256: '0'.repeat(64)}, /matching SHA-256/],
       ['missing-digest', png, {schemaVersion: 1, passed: true}, /matching SHA-256/],
