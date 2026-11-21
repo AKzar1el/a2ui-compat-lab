@@ -24,7 +24,7 @@ test('successful browser evidence is exclusive and preserves older artifacts', (
   try {
     const target = join(root, 'out');
     const screenshot = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==',
       'base64');
     const report = {schemaVersion: 1, passed: true,
       screenshotSha256: createHash('sha256').update(screenshot).digest('hex'),
@@ -40,7 +40,8 @@ test('successful browser evidence is exclusive and preserves older artifacts', (
     assert.deepEqual(readFileSync(first.screenshotPath), screenshot);
     assert.deepEqual(JSON.parse(readFileSync(first.tracePath, 'utf8')), report);
     assert.throws(() => assertBrowserEvidenceUnused(target), /already exists/);
-    const changedScreenshot = Buffer.concat([screenshot, Buffer.from('different')]);
+    const changedScreenshot = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
     const changedReport = {...report,
       screenshotSha256: createHash('sha256').update(changedScreenshot).digest('hex')};
     assert.throws(() => publishBrowserEvidence(target, changedScreenshot, changedReport),
@@ -65,7 +66,7 @@ test('browser evidence filesystem failures redact private paths and never overwr
   const root = mkdtempSync(join(tmpdir(), 'a2ui-browser-private-'));
   try {
     const screenshot = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==',
       'base64');
     const report = {passed: true,
       screenshotSha256: createHash('sha256').update(screenshot).digest('hex')};
@@ -103,11 +104,23 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
   const root = mkdtempSync(join(tmpdir(), 'a2ui-png-preflight-'));
   try {
     const png = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==',
       'base64');
     const digest = createHash('sha256').update(png).digest('hex');
     const valid = {schemaVersion: 1, passed: true, screenshotSha256: digest};
+    const digestFor = bytes => createHash('sha256').update(bytes).digest('hex');
+    const badCrc = Buffer.from(png);
+    badCrc[44] ^= 1; // Tamper with IDAT while matching the forged digest.
+    const trailing = Buffer.concat([png, Buffer.from('trailing')]);
     const cases = [
+      ['signature-only', png.subarray(0, 8),
+        {...valid, screenshotSha256: digestFor(png.subarray(0, 8))}, /valid PNG/],
+      ['truncated-iend', png.subarray(0, -5),
+        {...valid, screenshotSha256: digestFor(png.subarray(0, -5))}, /valid PNG/],
+      ['invalid-idat-crc', badCrc,
+        {...valid, screenshotSha256: digestFor(badCrc)}, /valid PNG/],
+      ['trailing-bytes', trailing,
+        {...valid, screenshotSha256: digestFor(trailing)}, /valid PNG/],
       ['invalid-png', Buffer.from('not-a-png'), valid, /valid PNG/],
       ['wrong-digest', png, {...valid, screenshotSha256: '0'.repeat(64)}, /matching SHA-256/],
       ['missing-digest', png, {schemaVersion: 1, passed: true}, /matching SHA-256/],
