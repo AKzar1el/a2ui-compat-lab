@@ -24,6 +24,10 @@ function deriveFixtureActionUpdate(action, messages) {
   assert.equal(action.surfaceId, surfaceId, 'Recorded action must target this surface');
   assert.equal(action.sourceComponentId, 'submit', 'Recorded action must target this Button');
   assert.equal(action.name, 'submit-choice', 'Recorded action event must match');
+  // A persisted deletion ends this fixture surface lifetime. Old Button actions
+  // must not be replayed into a deleted or recreated instance with the same ID.
+  assert.ok(!messages.some(message => message.deleteSurface?.surfaceId === surfaceId),
+    'Refuse optimistic action replay after surface deletion');
   assert.deepEqual(Object.keys(action.context ?? {}).sort(), ['choice'],
     'Refuse unbound or extra action context');
   assert.equal(typeof action.context.choice, 'string', 'Fixture expects text input');
@@ -139,6 +143,12 @@ export async function testMessageOnlyHistoryReplay(context, origin) {
       {literal: 'beta'};
     assert.throws(() => deriveFixtureActionUpdate(action, unsafeMessages));
 
+    const deletedHistory = [...agentMessages,
+      {version: 'v0.9', deleteSurface: {surfaceId}}];
+    assert.throws(() => deriveFixtureActionUpdate(action, deletedHistory),
+      /surface deletion/,
+      'A saved Button action must not restore a deleted surface');
+
     const optimisticUpdate = deriveFixtureActionUpdate(action, agentMessages);
     optimistic = await context.newPage();
     watch(optimistic);
@@ -154,11 +164,23 @@ export async function testMessageOnlyHistoryReplay(context, origin) {
     await waitForModel(optimistic, 'gamma');
     assert.equal(await optimisticInput.inputValue(), 'gamma',
       'A subsequent agent message wins over the optimistic action-derived write');
+    await optimistic.evaluate(id => window.__a2uiLab.applyMessage({
+      version: 'v0.9', deleteSurface: {surfaceId: id},
+    }), surfaceId);
+    await optimistic.waitForFunction(id =>
+      !window.__a2uiLab.trace().surfaceIds.includes(id),
+    surfaceId, {timeout: 5000});
+    await optimisticInput.first().waitFor({state: 'detached', timeout: 5000});
+    assert.equal((await optimistic.evaluate(id =>
+      window.__a2uiLab.trace(id), surfaceId)).data, null,
+    'The deleted real React surface must not retain prior model data');
     assert.deepEqual(observedErrors, [], 'Real React pages must have no runtime errors');
     return {localInputActionObserved: true, messageOnlyStateLossObserved: true,
       explicitEchoRestored: true, laterAgentUpdateOverrides: true,
       optimisticActionReplayRestored: true, laterAgentOverrodeOptimisticReplay: true,
-      unsupportedActionBindingRejected: true};
+      unsupportedActionBindingRejected: true,
+      staleDeletedSurfaceActionRejected: true,
+      deletedSurfaceUnmountObserved: true};
   } finally {
     if (optimistic && !optimistic.isClosed()) await optimistic.close();
     if (rebuilt && !rebuilt.isClosed()) await rebuilt.close();
