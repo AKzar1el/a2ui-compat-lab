@@ -76,7 +76,23 @@ Chromium fixture now reconstructs one interleaved sequence in original order:
 agent messages, the actual saved Button action resolved against the preceding
 trusted component definition, then an agent `updateDataModel`. It asserts the
 fresh React DOM and model finish with the agent's `gamma`, not the earlier
-submitted `beta`. An action before its trusted definition and multiple saved
-actions are rejected rather than guessed at. This is **one single-action
-public fixture**, not general multi-action correlation or a production replay
-algorithm; no third-party host acceptance has been observed.
+submitted `beta`.
+
+## Bounded two-turn replay from real captured actions
+
+The same offline published React/Chromium fixture now captures **two actual**
+Button submissions, not synthetic action objects: `beta`, an intervening
+agent-authored `/choice` update to `gamma`, and a distinct second submission
+of `delta`. Chronological reconstruction from the saved messages and actions
+shows `delta` before the second agent response and `epsilon` afterward, in
+the mounted React DOM and model. Action-before-definition, two consecutive
+actions without an intervening agent `/choice` update, a repeated identical
+choice, and a third action are rejected conservatively rather than silently
+replayed.
+
+This intentionally bounded host-policy test does **not** infer agent acceptance,
+correlate response IDs, support unchanged-value re-submission, reuse a deleted
+surface, or establish arbitrary multi-turn replay interoperability. Treating
+an agent `/choice` update as a turn boundary is a local fixture restriction,
+not a protocol contract; independent host acceptance and adoption remain
+unverified.
