@@ -65,3 +65,18 @@ surface and drops its data model. This conservative rule avoids treating a
 captured action as permission to restore a deleted or later-recreated surface.
 It does **not** resolve message-stream temporal correlation, distinguish
 surface lifetimes after ID reuse, or establish behavior in an external host.
+
+## Chronological transcript ordering (synthetic host policy)
+
+A saved conversation may contain an agent-created form, a client Button action,
+**then** an agent-authored update that rejects or supersedes the submitted value.
+Applying all agent history first and replaying the optimistic action last would
+incorrectly replace that later authoritative agent update. The offline real
+Chromium fixture now reconstructs one interleaved sequence in original order:
+agent messages, the actual saved Button action resolved against the preceding
+trusted component definition, then an agent `updateDataModel`. It asserts the
+fresh React DOM and model finish with the agent's `gamma`, not the earlier
+submitted `beta`. An action before its trusted definition and multiple saved
+actions are rejected rather than guessed at. This is **one single-action
+public fixture**, not general multi-action correlation or a production replay
+algorithm; no third-party host acceptance has been observed.
