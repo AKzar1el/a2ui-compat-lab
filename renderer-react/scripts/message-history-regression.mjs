@@ -55,20 +55,37 @@ function reconstructFixtureHistory(entries) {
   const agentPrefix = [];
   const updates = [];
   let actionCount = 0;
+  let lastSubmittedChoice;
+  let agentChoiceUpdateSinceAction = false;
   for (const entry of entries) {
     if (entry?.kind === 'agent') {
       assert.deepEqual(Object.keys(entry).sort(), ['kind', 'message']);
       agentPrefix.push(entry.message);
       updates.push(entry.message);
+      // Conservative fixture-only turn boundary, not action acknowledgment.
+      if (actionCount > 0 &&
+          entry.message?.updateDataModel?.surfaceId === surfaceId &&
+          entry.message.updateDataModel.path === '/choice') {
+        agentChoiceUpdateSinceAction = true;
+      }
     } else if (entry?.kind === 'action') {
       assert.deepEqual(Object.keys(entry).sort(), ['action', 'kind']);
-      assert.equal(++actionCount, 1, 'Fixture supports exactly one saved action');
+      assert.ok(actionCount < 2, 'Fixture supports at most two saved actions');
+      if (actionCount > 0) {
+        assert.ok(agentChoiceUpdateSinceAction,
+          'Second action requires an intervening agent choice update');
+        assert.notEqual(entry.action?.context?.choice, lastSubmittedChoice,
+          'Second action requires a distinct submitted choice');
+      }
       updates.push(deriveFixtureActionUpdate(entry.action, agentPrefix));
+      lastSubmittedChoice = entry.action.context.choice;
+      actionCount++;
+      agentChoiceUpdateSinceAction = false;
     } else {
       assert.fail('Unknown persisted history entry');
     }
   }
-  assert.equal(actionCount, 1, 'Fixture requires one saved action');
+  assert.ok(actionCount >= 1, 'Fixture requires at least one saved action');
   return updates;
 }
 
@@ -107,6 +124,7 @@ export async function testMessageOnlyHistoryReplay(context, origin) {
   let rebuilt;
   let optimistic;
   let ordered;
+  let secondPending;
   const watch = page => {
     page.on('pageerror', error => observedErrors.push(error.message));
     page.on('console', message => {
@@ -126,6 +144,21 @@ export async function testMessageOnlyHistoryReplay(context, origin) {
     assert.equal(action.name, 'submit-choice');
     assert.equal(action.surfaceId, surfaceId);
     assert.deepEqual(action.context, {choice: 'beta'});
+    // Capture the second action from the actual published React renderer.
+    await live.evaluate(id => window.__a2uiLab.applyMessage({
+      version: 'v0.9', updateDataModel: {surfaceId: id, path: '/choice', value: 'gamma'},
+    }), surfaceId);
+    await waitForModel(live, 'gamma');
+    assert.equal(await originalInput.inputValue(), 'gamma');
+    await originalInput.fill('delta');
+    await waitForModel(live, 'delta');
+    await live.getByRole('button', {name: 'Submit choice'}).click();
+    await live.waitForFunction(() =>
+      window.__a2uiLab.trace().actions.length === 2, null, {timeout: 5000});
+    const secondAction = (await live.evaluate(() => window.__a2uiLab.trace())).actions[1];
+    assert.equal(secondAction.name, 'submit-choice');
+    assert.equal(secondAction.surfaceId, surfaceId);
+    assert.deepEqual(secondAction.context, {choice: 'delta'});
     await live.close();
     live = null;
 
@@ -193,17 +226,40 @@ export async function testMessageOnlyHistoryReplay(context, origin) {
     'An action before its Button definition cannot be optimistically replayed');
     assert.throws(() => reconstructFixtureHistory([
       ...persistedStream, {kind: 'action', action},
-    ]), /exactly one saved action/,
-    'Do not silently synthesize a second optimistic mutation');
-    const chronologicalMessages = reconstructFixtureHistory(persistedStream);
+    ]), /distinct submitted choice/,
+    'An identical re-delivery cannot be distinguished from a new submission');
+    assert.throws(() => reconstructFixtureHistory([
+      ...agentMessages.map(message => ({kind: 'agent', message})),
+      {kind: 'action', action}, {kind: 'action', action: secondAction},
+    ]), /intervening agent choice update/,
+    'Do not infer a new turn from adjacent actions');
+    const secondTurnStream = [...persistedStream,
+      {kind: 'action', action: secondAction}];
+    const secondTurnMessages = reconstructFixtureHistory(secondTurnStream);
+    secondPending = await context.newPage();
+    watch(secondPending);
+    const secondPendingInput = await mountAgentHistory(secondPending, origin,
+      secondTurnMessages, 'delta');
+    assert.equal(await secondPendingInput.inputValue(), 'delta',
+      'Second captured action survives chronological reconstruction');
+    const laterSecondAgent = {version: 'v0.9', updateDataModel: {
+      surfaceId, path: '/choice', value: 'epsilon',
+    }};
+    const twoTurnStream = [...secondTurnStream,
+      {kind: 'agent', message: laterSecondAgent}];
+    assert.throws(() => reconstructFixtureHistory([...twoTurnStream,
+      {kind: 'action', action: {...secondAction, context: {choice: 'zeta'}}},
+    ]), /at most two saved actions/,
+    'A third action remains outside this fixture policy');
+    const chronologicalMessages = reconstructFixtureHistory(twoTurnStream);
     ordered = await context.newPage();
     watch(ordered);
     const orderedInput = await mountAgentHistory(ordered, origin,
-      chronologicalMessages, 'gamma');
-    assert.equal(await orderedInput.inputValue(), 'gamma',
-      'Later saved agent update wins on full chronological history reconstruction');
+      chronologicalMessages, 'epsilon');
+    assert.equal(await orderedInput.inputValue(), 'epsilon',
+      'Second later agent update wins over optimistic action state');
     assert.equal((await ordered.evaluate(id => window.__a2uiLab.trace(id).data,
-      surfaceId)).choice, 'gamma');
+      surfaceId)).choice, 'epsilon');
 
     const optimisticUpdate = deriveFixtureActionUpdate(action, agentMessages);
     optimistic = await context.newPage();
@@ -237,8 +293,10 @@ export async function testMessageOnlyHistoryReplay(context, origin) {
       unsupportedActionBindingRejected: true,
       staleDeletedSurfaceActionRejected: true,
       chronologicalAgentOverrideReplayed: true,
+      twoCapturedActionsReplayed: true, secondAgentOverrideReplayed: true,
       deletedSurfaceUnmountObserved: true};
   } finally {
+    if (secondPending && !secondPending.isClosed()) await secondPending.close();
     if (ordered && !ordered.isClosed()) await ordered.close();
     if (optimistic && !optimistic.isClosed()) await optimistic.close();
     if (rebuilt && !rebuilt.isClosed()) await rebuilt.close();
