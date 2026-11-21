@@ -106,6 +106,38 @@ test('rejects untrusted fields and invalid action counters without disclosing se
   assert.doesNotMatch(result.stderr, /PRIVATE_SUMMARY_SECRET_SENTINEL/);
 }));
 
+test('rejects saved summaries with components on an absent surface', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a2ui-invalid-surface-'));
+  try {
+    const beforePath = join(dir, 'before.json');
+    const afterPath = join(dir, 'after.json');
+    const valid = {
+      schemaVersion: 1, kind: 'a2ui-capture-safe-summary', protocol: 'v0.9',
+      events: 1, chunksVerified: false,
+      steps: [{
+        index: 0, operation: 'deleteSurface', surfacePresent: false,
+        componentCount: 0, actionCount: 0, actionsEmitted: 0,
+      }],
+    };
+    writeFileSync(beforePath, JSON.stringify(valid));
+    writeFileSync(afterPath, JSON.stringify(valid));
+    let result = run(compare, ['--before', beforePath, '--after', afterPath, '--strict']);
+    assert.equal(result.status, 0, result.stderr);
+
+    // A deleted surface cannot contain components in replay's own snapshots.
+    const impossible = structuredClone(valid);
+    impossible.steps[0].componentCount = 1;
+    writeFileSync(beforePath, JSON.stringify(impossible));
+    writeFileSync(afterPath, JSON.stringify(impossible));
+    result = run(compare, ['--before', beforePath, '--after', afterPath, '--strict']);
+    assert.equal(result.status, 2, 'malformed evidence must never report MATCH');
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Invalid A2UI safe summary step/);
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
 
 test('compares a new private JSONL capture directly to its saved structural baseline', () => withReports(({before, beforePath, dir}) => {
   writeFileSync(beforePath, JSON.stringify(before));
