@@ -848,6 +848,19 @@ Installed published `@a2ui/web_core@0.15.0` initializes Modal `isOpen=false` and
 
 Published `@a2ui/web_core@0.15.0` v0.9 Tabs initializes activeIndex=0 and renders only `tabs[0].child` until a tab-header click. An independent Node 22 `MessageProcessor` + `GenericBinder` probe with a root Tabs whose second tab contained a Button emitted one `hidden-action` event from that inactive Button. Lab headless `isRootReachable` traversed all Tabs children and falsely presented it as a user tap. This continuation limits headless Tabs traversal to the first tab; offline regressions cover inactive root/nested Tabs, initially visible Button, and a later update hiding that Button. It is intentionally conservative: no simulated tab-header click, no physical browser visibility proof, no upstream security claim, and no user/revenue evidence. Existing #172 head `2e6a2e9132d62307b858ba8b80fa2ff659e248ff` was green before this change; **new final-head hosted CI remains required**, with merger handoff withdrawn pending verification.
 
+## P1 headless template-instance Button replay (2026-11-22)
+
+The pinned published v0.9 MessageProcessor and GenericBinder resolve a templated
+Column/Row/List child reference into current `{id,basePath}` row instances.
+`replayV09Actions` now accepts an explicit `tap.basePath` for one of those
+currently materialized instances; it refuses ID-only template taps, missing or
+deleted rows, malformed paths and detached child lists. Relative event context
+resolves against the chosen current row; a reorder changes which record occupies
+a numeric index. This is **headless published-SDK evidence**, not a physical DOM
+click or a stable record identity. Existing closed Modal, inactive Tabs and
+disabled Button guards still apply. A real browser template click and third-party
+adoption are separate unverified milestones.
+
 ## Real Chromium templated Button row replay — proposed regression (2026-11-22)
 
 The browser harness on the published React/core 0.14.0 pair now includes a separate capture-mode 0/1/2-row test for templated Column children. Its Playwright pointer clicks target actual rendered Button instances, asserting distinct relative action contexts, removal after deletion, and current-index semantics after a reorder. This is independent of PR #173's published core 0.15 headless replay. The added regression is **unverified until exact-head hosted React/Chromium CI passes**; do not infer upstream renderer defects, native renderer parity, durable record IDs, customer adoption or revenue from this proposed test alone.

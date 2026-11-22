@@ -217,3 +217,114 @@ test('action report includes deterministic Unicode byte-stream trial evidence', 
     ['Čebelica 🌍', 'こんにちは 👋']);
   assert.match(report.unicodeFixtureSha256, /^[0-9a-f]{64}$/);
 });
+
+test('published SDK template Button replay selects only an explicit live row instance', async () => {
+  const template = values => {
+    const seeded = structuredClone(steps.slice(0, 3));
+    seeded[1].message.updateComponents.components[0].children = {
+      componentId: 'submit', path: '/items',
+    };
+    const button = seeded[1].message.updateComponents.components.find(c => c.id === 'submit');
+    button.action.event.context.selection = {path: 'choice'};
+    seeded[2].message.updateDataModel.value = {
+      items: values.map(choice => ({choice})),
+    };
+    return seeded;
+  };
+  const tap = basePath => ({tap: {
+    surfaceId: 'action-replay', componentId: 'submit', basePath,
+  }});
+
+  const twoRows = template(['alpha', 'beta']);
+  await assert.rejects(replayV09Actions([...twoRows, {
+    tap: {surfaceId: 'action-replay', componentId: 'submit'},
+  }]), /not an active Button/);
+  // Each published Basic Catalog layout materializes the same row-scoped child list.
+  for (const layout of ['Row', 'List']) {
+    const variant = template(['alpha', 'beta']);
+    variant[1].message.updateComponents.components[0].component = layout;
+    assert.deepEqual((await replayV09Actions([...variant, tap('/items/1')]))
+      .actions.map(action => action.context.selection), ['beta'], layout);
+  }
+  const selected = await replayV09Actions([...twoRows, tap('/items/1')]);
+  assert.deepEqual(selected.actions.map(action => action.context.selection), ['beta']);
+  assert.equal(selected.snapshots.at(-1).basePath, '/items/1');
+  assert.deepEqual((await replayV09Actions([...twoRows, tap('/items/0')]))
+    .actions.map(action => action.context.selection), ['alpha']);
+
+  await assert.rejects(replayV09Actions([...template([]), tap('/items/0')]), /not an active Button/);
+  await assert.rejects(replayV09Actions([...template(['alpha']), tap('/items/1')]), /not an active Button/);
+  await assert.rejects(replayV09Actions([...twoRows, tap('/items/01')]), /not an active Button/);
+  await assert.rejects(replayV09Actions([...twoRows, tap('items/1')]), /absolute template instance path/);
+
+  const nested = template(['alpha', 'beta']);
+  nested[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Card', child: 'rows',
+  };
+  nested[1].message.updateComponents.components.push({
+    id: 'rows', component: 'Column', children: {componentId: 'submit', path: '/items'},
+  });
+  assert.deepEqual((await replayV09Actions([...nested, tap('/items/1')]))
+    .actions.map(action => action.context.selection), ['beta']);
+});
+
+test('template Button replay checks fresh membership after deletion and row reorder', async () => {
+  const seeded = structuredClone(steps.slice(0, 3));
+  seeded[1].message.updateComponents.components[0].children = {
+    componentId: 'submit', path: '/items',
+  };
+  seeded[1].message.updateComponents.components.find(c => c.id === 'submit')
+    .action.event.context.selection = {path: 'choice'};
+  seeded[2].message.updateDataModel.value = {
+    items: [{choice: 'alpha'}, {choice: 'beta'}],
+  };
+  const tap = {tap: {surfaceId: 'action-replay', componentId: 'submit', basePath: '/items/1'}};
+  const replaceItems = value => ({message: {
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/items', value,
+    },
+  }});
+  await assert.rejects(replayV09Actions([
+    ...seeded, replaceItems([{choice: 'alpha'}]), tap,
+  ]), /not an active Button/);
+
+  const reordered = await replayV09Actions([
+    ...seeded, tap, replaceItems([{choice: 'beta'}, {choice: 'alpha'}]), tap,
+  ]);
+  // The same numeric path now denotes the new row at that index, not the old record.
+  assert.deepEqual(reordered.actions.map(action => action.context.selection), ['beta', 'alpha']);
+  const detached = {message: {version: 'v0.9', updateComponents: {
+    surfaceId: 'action-replay',
+    components: [{id: 'root', component: 'Column', children: ['label']}],
+  }}};
+  await assert.rejects(replayV09Actions([...seeded, detached, tap]), /not an active Button/);
+});
+
+test('templated instances under closed Modal or inactive Tabs remain unclickable', async () => {
+  const make = () => {
+    const seeded = structuredClone(steps.slice(0, 3));
+    seeded[1].message.updateComponents.components[0] = {
+      id: 'root', component: 'Card', child: 'rows',
+    };
+    seeded[1].message.updateComponents.components.push({
+      id: 'rows', component: 'Column', children: {componentId: 'submit', path: '/items'},
+    });
+    seeded[1].message.updateComponents.components.find(c => c.id === 'submit')
+      .action.event.context.selection = {path: 'choice'};
+    seeded[2].message.updateDataModel.value = {items: [{choice: 'alpha'}]};
+    return seeded;
+  };
+  const tap = {tap: {surfaceId: 'action-replay', componentId: 'submit', basePath: '/items/0'}};
+  const closed = make();
+  closed[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Modal', trigger: 'label', content: 'rows',
+  };
+  await assert.rejects(replayV09Actions([...closed, tap]), /not an active Button/);
+  const tabs = make();
+  tabs[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Tabs', tabs: [
+      {title: 'Visible', child: 'label'}, {title: 'Hidden', child: 'rows'},
+    ],
+  };
+  await assert.rejects(replayV09Actions([...tabs, tap]), /not an active Button/);
+});
