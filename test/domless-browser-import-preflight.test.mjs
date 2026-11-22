@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
-  classifyImportResult, hasRequiredBasicV1Exports,
+  classifyImportResult, hasRequiredBasicV1Exports, hasRequiredProcessingExports,
   inspectPublishedBrowserImports, summarizeDomlessReadiness,
 } from '../src/domless-browser-import-preflight.mjs';
 
@@ -24,6 +24,20 @@ test('published web_core 0.15 browser-condition imports reveal real no-DOM catal
     {name: 'v1-entrypoint', state: 'dom-required'},
   ]);
   assert.match(report.limitations, /no React Native/);
+});
+
+test('processing control must expose lifecycle methods, not just load as an empty stub', () => {
+  class MessageProcessor {
+    processMessages() {}
+    getSurface() {}
+  }
+  assert.equal(hasRequiredProcessingExports({MessageProcessor}), true);
+  assert.equal(hasRequiredProcessingExports({}), false);
+  assert.equal(hasRequiredProcessingExports({MessageProcessor: {}}), false);
+  assert.equal(hasRequiredProcessingExports({MessageProcessor: class {}}), false);
+  assert.equal(hasRequiredProcessingExports({
+    MessageProcessor: class {processMessages() {}},
+  }), false);
 });
 
 test('future v1 catalog export contract rejects importable stubs and incomplete APIs', () => {
@@ -57,8 +71,10 @@ test('future API import alone is insufficient without the required proposed expo
   });
   assert.equal(summarizeDomlessReadiness(loaded.map(item =>
     item.name === 'basic-v1-api' ? {...item, state: 'incomplete-api'} : item)).domlessReady, false);
-  assert.equal(summarizeDomlessReadiness(loaded.map(item =>
-    item.name === 'processing-api' ? {...item, state: 'import-error'} : item)).domlessReady, false);
+  const invalidProcessing = summarizeDomlessReadiness(loaded.map(item =>
+    item.name === 'processing-api' ? {...item, state: 'incomplete-api'} : item));
+  assert.equal(invalidProcessing.domlessReady, false);
+  assert.equal(invalidProcessing.preferredEntrypoint, null);
   assert.equal(classifyImportResult({status: 7, stdout: 'INCOMPLETE_API'}), 'incomplete-api');
 });
 
@@ -115,7 +131,9 @@ test('explicit consumer root probes its own SDK instead of the lab dependency', 
         './v1_0': './legacy.mjs',
       },
     }));
-    writeFileSync(join(sdk, 'processing.mjs'), 'export const processor = true;\n');
+    const processingFile = join(sdk, 'processing.mjs');
+    const validProcessing = 'export class MessageProcessor { processMessages() {} getSurface() {} }\n';
+    writeFileSync(processingFile, validProcessing);
     writeFileSync(join(sdk, 'legacy.mjs'), 'export class Legacy extends HTMLElement {}\n');
     const apiFile = join(sdk, 'api.mjs');
     writeFileSync(apiFile, [
@@ -140,6 +158,15 @@ test('explicit consumer root probes its own SDK instead of the lab dependency', 
       ['loaded', 'loaded', 'dom-required', 'dom-required']);
     assert.equal(supported.stdout.includes(root), false);
     assert.equal(supported.stderr, '');
+    // A loadable processing stub must not yield false readiness for the consumer.
+    writeFileSync(processingFile, 'export const processor = true;\n');
+    const processingStub = run(['--strict']);
+    assert.equal(processingStub.status, 1, processingStub.stderr);
+    const stubReport = JSON.parse(processingStub.stdout);
+    assert.equal(stubReport.cases[0].state, 'incomplete-api');
+    assert.equal(stubReport.domlessReady, false);
+    assert.equal(stubReport.preferredEntrypoint, null);
+    writeFileSync(processingFile, validProcessing);
     writeFileSync(apiFile, 'export const ButtonApi = {};\n');
     const incomplete = run(['--strict']);
     assert.equal(incomplete.status, 1, incomplete.stderr);
