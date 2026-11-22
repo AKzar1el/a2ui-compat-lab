@@ -112,10 +112,16 @@ function isRootReachable(surface, componentId) {
     const node = surface.componentsModel.get(id);
     if (!node) continue;
     if (id === componentId) return true;
-    const {child, children} = node.properties ?? {};
-    if (typeof child === 'string') pending.push(child);
+    const {child, children, trigger, content, tabs} = node.properties ?? {};
+    // Published Basic Catalog: single-child slots, rows/columns/lists and tab panels.
+    for (const ref of [child, trigger, content]) {
+      if (typeof ref === 'string') pending.push(ref);
+    }
     if (Array.isArray(children)) {
       for (const ref of children) if (typeof ref === 'string') pending.push(ref);
+    }
+    if (Array.isArray(tabs)) {
+      for (const tab of tabs) if (typeof tab?.child === 'string') pending.push(tab.child);
     }
   }
   return false;
