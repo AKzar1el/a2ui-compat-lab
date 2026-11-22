@@ -91,6 +91,14 @@ test('rooted Button with failed checks cannot be tapped in headless replay', asy
   const tap = {tap: {surfaceId: 'action-replay', componentId: 'submit'}};
   await assert.rejects(replayV09Actions([...disabled, tap]), /Button failed validation checks/);
 
+  // No checks means no validation result: a normal Button is still tappable.
+  const withoutChecks = structuredClone(disabled);
+  delete withoutChecks[1].message.updateComponents.components.find(item => item.id === 'submit').checks;
+  assert.equal((await replayV09Actions([...withoutChecks, tap])).actions.length, 1);
+  const emptyChecks = structuredClone(disabled);
+  emptyChecks[1].message.updateComponents.components.find(item => item.id === 'submit').checks = [];
+  assert.equal((await replayV09Actions([...emptyChecks, tap])).actions.length, 1);
+
   const enabled = structuredClone(disabled);
   enabled[2].message.updateDataModel.value.approval = 'yes';
   const accepted = await replayV09Actions([...enabled, tap]);
