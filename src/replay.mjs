@@ -234,7 +234,8 @@ export async function replayV09Actions(steps) {
       if (actions.length !== before + 1)
         throw new Error('Button must emit exactly one agent event: ' + componentId);
       snapshots.push({
-        index, kind: 'tap', surfaceId, componentId,\n        ...(basePath === undefined ? {} : {basePath}), exists: true,
+        index, kind: 'tap', surfaceId, componentId,
+        ...(basePath === undefined ? {} : {basePath}), exists: true,
         components: [...surface.componentsModel.keys],
         data: structuredClone(surface.dataModel.get('/')) ?? null,
         actionCount: actions.length,
