@@ -101,6 +101,26 @@ export function replayV09(messages) {
   }
 }
 
+/** Only rooted component-tree nodes can be interacted with by a renderer. */
+function isRootReachable(surface, componentId) {
+  const pending = [surface.rootId];
+  const seen = new Set();
+  while (pending.length) {
+    const id = pending.pop();
+    if (typeof id !== 'string' || seen.has(id)) continue;
+    seen.add(id);
+    const node = surface.componentsModel.get(id);
+    if (!node) continue;
+    if (id === componentId) return true;
+    const {child, children} = node.properties ?? {};
+    if (typeof child === 'string') pending.push(child);
+    if (Array.isArray(children)) {
+      for (const ref of children) if (typeof ref === 'string') pending.push(ref);
+    }
+  }
+  return false;
+}
+
 /**
  * Replays agent messages and renderer-side Button actions through the real
  * v0.9 core's binder. This is headless interaction coverage, not a DOM click.
@@ -150,7 +170,8 @@ export async function replayV09Actions(steps) {
         throw new TypeError('Tap must name a surface and component at index ' + index);
       const surface = processor.getSurface(surfaceId);
       const component = surface?.componentsModel.get(componentId);
-      if (!surface || !component || component.type !== 'Button')
+      if (!surface || !component || component.type !== 'Button' ||
+          !isRootReachable(surface, componentId))
         throw new Error('Tap target is not an active Button: ' + surfaceId + '/' + componentId);
       const schema = component.catalog?.components.get('Button')?.schema;
       if (!schema) throw new Error('Button catalog schema unavailable: ' + componentId);
