@@ -185,6 +185,8 @@ export async function replayV09Actions(steps) {
       const before = actions.length;
       try {
         binder.subscribe(() => {});
+        if (binder.snapshot.isValid !== true)
+          throw new Error('Button failed validation checks: ' + componentId);
         if (typeof binder.snapshot.action !== 'function')
           throw new Error('Button has no executable action: ' + componentId);
         await binder.snapshot.action();

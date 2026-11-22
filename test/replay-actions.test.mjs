@@ -82,6 +82,30 @@ test('orphaned Button components cannot produce fake renderer action evidence', 
   }
 });
 
+test('rooted Button with failed checks cannot be tapped in headless replay', async () => {
+  const disabled = structuredClone(steps.slice(0, 3));
+  disabled[1].message.updateComponents.components.find(item => item.id === 'submit').checks = [
+    {condition: {call: 'required', args: {value: {path: '/approval'}}}, message: 'Approval required'},
+  ];
+  disabled[2].message.updateDataModel.value.approval = '';
+  const tap = {tap: {surfaceId: 'action-replay', componentId: 'submit'}};
+  await assert.rejects(replayV09Actions([...disabled, tap]), /Button failed validation checks/);
+
+  const enabled = structuredClone(disabled);
+  enabled[2].message.updateDataModel.value.approval = 'yes';
+  const accepted = await replayV09Actions([...enabled, tap]);
+  assert.equal(accepted.actions.length, 1);
+  assert.equal(accepted.actions[0].name, 'confirm-choice');
+
+  // Changing the model after one valid click must disable the next click.
+  const disabledAgain = [...enabled, tap, {message: {
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/approval', value: '',
+    },
+  }}, tap];
+  await assert.rejects(replayV09Actions(disabledAgain), /Button failed validation checks/);
+});
+
 test('malformed interaction envelopes fail closed instead of silently skipping input', async () => {
   await assert.rejects(replayV09Actions([{tap: {componentId: 'submit'}}]), /must name a surface/);
   await assert.rejects(replayV09Actions([{message: {}, tap: {}}]), /exactly one/);
