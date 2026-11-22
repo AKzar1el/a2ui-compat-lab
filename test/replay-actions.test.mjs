@@ -41,6 +41,25 @@ test('interactions fail closed for missing, deleted, or non-Button components', 
   await assert.rejects(replayV09Actions([{tap: {surfaceId: 'action-replay', componentId: 'submit'}}]), /not an active Button/);
 });
 
+test('orphaned Button components cannot produce fake renderer action evidence', async () => {
+  const orphan = structuredClone(steps.slice(0, 4));
+  // The published processor registers this Button, but the rendered root cannot reach it.
+  orphan[1].message.updateComponents.components[0].children = ['status'];
+  await assert.rejects(replayV09Actions(orphan), /not an active Button/);
+
+  const linkedViaOrphan = structuredClone(orphan);
+  linkedViaOrphan[1].message.updateComponents.components.push({
+    id: 'detached-container', component: 'Column', children: ['submit'],
+  });
+  await assert.rejects(replayV09Actions(linkedViaOrphan), /not an active Button/);
+
+  const reachable = structuredClone(orphan);
+  reachable[1].message.updateComponents.components[0].children = ['status', 'submit'];
+  const output = await replayV09Actions(reachable);
+  assert.equal(output.actions.length, 1);
+  assert.equal(output.actions[0].sourceComponentId, 'submit');
+});
+
 test('malformed interaction envelopes fail closed instead of silently skipping input', async () => {
   await assert.rejects(replayV09Actions([{tap: {componentId: 'submit'}}]), /must name a surface/);
   await assert.rejects(replayV09Actions([{message: {}, tap: {}}]), /exactly one/);
