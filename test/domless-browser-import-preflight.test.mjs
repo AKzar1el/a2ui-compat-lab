@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {
-  classifyImportResult, inspectPublishedBrowserImports,
+  classifyImportResult, inspectPublishedBrowserImports, summarizeDomlessReadiness,
 } from '../src/domless-browser-import-preflight.mjs';
 
 const cli = fileURLToPath(new URL('../src/domless-browser-import-preflight.mjs', import.meta.url));
@@ -20,6 +20,24 @@ test('published web_core 0.15 browser-condition imports reveal real no-DOM catal
     {name: 'v1-entrypoint', state: 'dom-required'},
   ]);
   assert.match(report.limitations, /no React Native/);
+});
+
+test('future API import alone is insufficient without the required published export contract', () => {
+  const loaded = [
+    {name: 'processing-api', state: 'loaded'},
+    {name: 'basic-v1-api', state: 'loaded'},
+    {name: 'basic-v1-catalog', state: 'dom-required'},
+    {name: 'v1-entrypoint', state: 'dom-required'},
+  ];
+  assert.deepEqual(summarizeDomlessReadiness(loaded), {
+    domlessReady: true,
+    preferredEntrypoint: '@a2ui/web_core/catalogs/basic/v1/api',
+  });
+  assert.equal(summarizeDomlessReadiness(loaded.map(item =>
+    item.name === 'basic-v1-api' ? {...item, state: 'incomplete-api'} : item)).domlessReady, false);
+  assert.equal(summarizeDomlessReadiness(loaded.map(item =>
+    item.name === 'processing-api' ? {...item, state: 'import-error'} : item)).domlessReady, false);
+  assert.equal(classifyImportResult({status: 7, stdout: 'INCOMPLETE_API'}), 'incomplete-api');
 });
 
 test('strict CLI fails on the observed published no-DOM incompatibility without leaking a stack', () => {
