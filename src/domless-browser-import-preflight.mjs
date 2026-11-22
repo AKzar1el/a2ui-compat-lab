@@ -30,6 +30,14 @@ export function classifyImportResult(child) {
   return 'import-error';
 }
 
+// A DOM-free import is not usable processing unless it exposes the public lifecycle API.
+export function hasRequiredProcessingExports(exported) {
+  const Processor = exported?.MessageProcessor;
+  return typeof Processor === 'function' &&
+    typeof Processor.prototype?.processMessages === 'function' &&
+    typeof Processor.prototype?.getSurface === 'function';
+}
+
 export function hasRequiredBasicV1Exports(exported) {
   return exported !== null && typeof exported === 'object' &&
     REQUIRED_BASIC_V1_EXPORTS.every(name => Object.hasOwn(exported, name)) &&
@@ -45,9 +53,12 @@ function probeImport(specifier, installRoot) {
   // arbitrary module, local file, network endpoint or executable command.
   const script = `try {
     const exported = await import(${JSON.stringify(specifier)});
-    if (${specifier === ENTRIES[1].specifier}) {
-      const {hasRequiredBasicV1Exports} = await import(${JSON.stringify(import.meta.url)});
-      if (!hasRequiredBasicV1Exports(exported)) {
+    if (${specifier === ENTRIES[0].specifier} || ${specifier === ENTRIES[1].specifier}) {
+      const {hasRequiredProcessingExports, hasRequiredBasicV1Exports} =
+        await import(${JSON.stringify(import.meta.url)});
+      const usable = ${specifier === ENTRIES[0].specifier}
+        ? hasRequiredProcessingExports(exported) : hasRequiredBasicV1Exports(exported);
+      if (!usable) {
         process.stdout.write('INCOMPLETE_API');
         process.exitCode = 7;
       } else {
@@ -80,9 +91,10 @@ function probeImport(specifier, installRoot) {
 export function summarizeDomlessReadiness(cases) {
   const processingReady = cases.some(item => item.name === 'processing-api' && item.state === 'loaded');
   const apiReady = cases.some(item => item.name === 'basic-v1-api' && item.state === 'loaded');
+  const domlessReady = processingReady && apiReady;
   return {
-    domlessReady: processingReady && apiReady,
-    preferredEntrypoint: apiReady ? '@a2ui/web_core/catalogs/basic/v1/api' : null,
+    domlessReady,
+    preferredEntrypoint: domlessReady ? '@a2ui/web_core/catalogs/basic/v1/api' : null,
   };
 }
 
