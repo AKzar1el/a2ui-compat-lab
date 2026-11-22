@@ -123,7 +123,9 @@ function isRootReachable(surface, componentId) {
       for (const ref of children) if (typeof ref === 'string') pending.push(ref);
     }
     if (Array.isArray(tabs)) {
-      for (const tab of tabs) if (typeof tab?.child === 'string') pending.push(tab.child);
+      // The pinned v0.9 Tabs renderer starts on index 0; replay has no tab-switch step.
+      const visibleTabs = node.type === 'Tabs' ? tabs.slice(0, 1) : tabs;
+      for (const tab of visibleTabs) if (typeof tab?.child === 'string') pending.push(tab.child);
     }
   }
   return false;

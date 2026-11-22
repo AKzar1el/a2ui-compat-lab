@@ -97,6 +97,52 @@ test('orphaned Button components cannot produce fake renderer action evidence', 
   }
 });
 
+test('inactive Tabs content cannot produce fake headless Button action evidence', async () => {
+  const hidden = structuredClone(steps.slice(0, 4));
+  hidden[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Tabs', tabs: [
+      {title: 'Visible', child: 'status'},
+      {title: 'Inactive', child: 'submit'},
+    ],
+  };
+  await assert.rejects(replayV09Actions(hidden), /not an active Button/);
+
+  const nested = structuredClone(hidden);
+  nested[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Card', child: 'tab-stack',
+  };
+  nested[1].message.updateComponents.components.push({
+    id: 'tab-stack', component: 'Tabs', tabs: [
+      {title: 'Visible', child: 'status'},
+      {title: 'Inactive', child: 'submit'},
+    ],
+  });
+  await assert.rejects(replayV09Actions(nested), /not an active Button/);
+
+  // The first tab is rendered immediately without requiring a tab-switch action.
+  const visible = structuredClone(hidden);
+  visible[1].message.updateComponents.components[0].tabs = [
+    {title: 'Visible', child: 'submit'},
+    {title: 'Inactive', child: 'status'},
+  ];
+  const accepted = await replayV09Actions(visible);
+  assert.equal(accepted.actions.length, 1);
+  assert.equal(accepted.actions[0].sourceComponentId, 'submit');
+
+  // A later component update must invalidate an initially reachable Button.
+  const switchedByUpdate = structuredClone(visible.slice(0, 3));
+  switchedByUpdate.push({message: {version: 'v0.9', updateComponents: {
+    surfaceId: 'action-replay', components: [{
+      id: 'root', component: 'Tabs', tabs: [
+        {title: 'Visible', child: 'status'},
+        {title: 'Inactive', child: 'submit'},
+      ],
+    }],
+  }}});
+  switchedByUpdate.push({tap: {surfaceId: 'action-replay', componentId: 'submit'}});
+  await assert.rejects(replayV09Actions(switchedByUpdate), /not an active Button/);
+});
+
 test('rooted Button with failed checks cannot be tapped in headless replay', async () => {
   const disabled = structuredClone(steps.slice(0, 3));
   disabled[1].message.updateComponents.components.find(item => item.id === 'submit').checks = [
