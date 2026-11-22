@@ -860,3 +860,7 @@ a numeric index. This is **headless published-SDK evidence**, not a physical DOM
 click or a stable record identity. Existing closed Modal, inactive Tabs and
 disabled Button guards still apply. A real browser template click and third-party
 adoption are separate unverified milestones.
+
+## Real Chromium templated Button row replay — proposed regression (2026-11-22)
+
+The browser harness on the published React/core 0.14.0 pair now includes a separate capture-mode 0/1/2-row test for templated Column children. Its Playwright pointer clicks target actual rendered Button instances, asserting distinct relative action contexts, removal after deletion, and current-index semantics after a reorder. This is independent of PR #173's published core 0.15 headless replay. The added regression is **unverified until exact-head hosted React/Chromium CI passes**; do not infer upstream renderer defects, native renderer parity, durable record IDs, customer adoption or revenue from this proposed test alone.
