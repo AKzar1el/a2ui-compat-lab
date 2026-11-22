@@ -864,3 +864,20 @@ adoption are separate unverified milestones.
 ## Real Chromium templated Button row replay — proposed regression (2026-11-22)
 
 The browser harness on the published React/core 0.14.0 pair now includes a separate capture-mode 0/1/2-row test for templated Column children. Its Playwright pointer clicks target actual rendered Button instances, asserting distinct relative action contexts, removal after deletion, and current-index semantics after a reorder. This is independent of PR #173's published core 0.15 headless replay. The added regression is **unverified until exact-head hosted React/Chromium CI passes**; do not infer upstream renderer defects, native renderer parity, durable record IDs, customer adoption or revenue from this proposed test alone.
+
+## Real Chromium two-level template membership regression (2026-11-22; CI pending)
+
+The published React/core 0.14 browser harness now includes a separate, deterministic
+two-level `Column -> grouped Column -> Button` template test. The outer
+`/groups` expansion and inner relative `items` expansion reuse the same Button
+component ID but should select distinct current nested data-model contexts.
+The test starts with zero groups, clicks individual instances across one and two
+groups, deletes the original group, reindexes, and verifies event selections after
+repopulation. It asserts detached buttons cannot remain visible and checks browser,
+console and SDK-surface error channels.
+
+This test is scoped to the existing offline/loopback Playwright harness and is
+**not yet browser-verified**: no local source-checkout write or full Windows
+test occurred. Exact-head GitHub Actions `react-browser`, `sdk-parity`, and
+`dependency-audit` must pass before any merger handoff. It does not establish
+native renderer parity, durable row IDs, security remediation, adoption or revenue.
