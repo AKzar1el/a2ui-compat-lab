@@ -67,6 +67,19 @@ test('orphaned Button components cannot produce fake renderer action evidence', 
   const output = await replayV09Actions(reachable);
   assert.equal(output.actions.length, 1);
   assert.equal(output.actions[0].sourceComponentId, 'submit');
+
+  // Basic Catalog supports structural child slots beyond Column.children.
+  for (const root of [
+    {id: 'root', component: 'Card', child: 'submit'},
+    {id: 'root', component: 'Tabs', tabs: [{title: 'Confirm', child: 'submit'}]},
+    {id: 'root', component: 'Modal', trigger: 'submit', content: 'label'},
+  ]) {
+    const nested = structuredClone(orphan);
+    nested[1].message.updateComponents.components[0] = root;
+    const trace = await replayV09Actions(nested);
+    assert.equal(trace.actions.length, 1, root.component);
+    assert.equal(trace.actions[0].sourceComponentId, 'submit', root.component);
+  }
 });
 
 test('malformed interaction envelopes fail closed instead of silently skipping input', async () => {
