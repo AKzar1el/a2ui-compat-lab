@@ -41,6 +41,27 @@ test('interactions fail closed for missing, deleted, or non-Button components', 
   await assert.rejects(replayV09Actions([{tap: {surfaceId: 'action-replay', componentId: 'submit'}}]), /not an active Button/);
 });
 
+test('tap envelopes reject unknown fields before any Button action can be misdirected', async () => {
+  const setup = steps.slice(0, 3);
+  const target = {surfaceId: 'action-replay', componentId: 'submit'};
+  const accepted = await replayV09Actions([...setup, {tap: target}]);
+  assert.equal(accepted.actions.length, 1);
+
+  // A typo must not silently fall back to an ID-only tap on a valid static Button.
+  await assert.rejects(
+    replayV09Actions([...setup, {tap: {...target, basePth: '/items/0'}}]),
+    /Tap contains unrecognized fields/,
+  );
+  await assert.rejects(
+    replayV09Actions([...setup, {tap: {...target, ignored: true}}]),
+    /Tap contains unrecognized fields/,
+  );
+  await assert.rejects(
+    replayV09Actions([...setup, {tap: ['action-replay', 'submit']}]),
+    /Tap contains unrecognized fields/,
+  );
+});
+
 test('orphaned Button components cannot produce fake renderer action evidence', async () => {
   const orphan = structuredClone(steps.slice(0, 4));
   // The published processor registers this Button, but the rendered root cannot reach it.
