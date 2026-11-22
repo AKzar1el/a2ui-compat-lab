@@ -41,6 +41,140 @@ test('interactions fail closed for missing, deleted, or non-Button components', 
   await assert.rejects(replayV09Actions([{tap: {surfaceId: 'action-replay', componentId: 'submit'}}]), /not an active Button/);
 });
 
+test('orphaned Button components cannot produce fake renderer action evidence', async () => {
+  const orphan = structuredClone(steps.slice(0, 4));
+  // The published processor registers this Button, but the rendered root cannot reach it.
+  orphan[1].message.updateComponents.components[0].children = ['status'];
+  await assert.rejects(replayV09Actions(orphan), /not an active Button/);
+
+  const linkedViaOrphan = structuredClone(orphan);
+  linkedViaOrphan[1].message.updateComponents.components.push({
+    id: 'detached-container', component: 'Column', children: ['submit'],
+  });
+  await assert.rejects(replayV09Actions(linkedViaOrphan), /not an active Button/);
+
+  // A later partial update can detach a previously rendered Button without deleting its model.
+  const stale = structuredClone(steps.slice(0, 3));
+  stale.push({message: {version: 'v0.9', updateComponents: {
+    surfaceId: 'action-replay',
+    components: [{id: 'root', component: 'Column', children: ['status']}],
+  }}});
+  stale.push({tap: {surfaceId: 'action-replay', componentId: 'submit'}});
+  await assert.rejects(replayV09Actions(stale), /not an active Button/);
+
+  const reachable = structuredClone(orphan);
+  reachable[1].message.updateComponents.components[0].children = ['status', 'submit'];
+  const output = await replayV09Actions(reachable);
+  assert.equal(output.actions.length, 1);
+  assert.equal(output.actions[0].sourceComponentId, 'submit');
+
+  // A closed Modal's content is not rendered; there is no headless open step.
+  const closedModal = structuredClone(orphan);
+  closedModal[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Modal', trigger: 'status', content: 'submit',
+  };
+  await assert.rejects(replayV09Actions(closedModal), /not an active Button/);
+  const nestedClosed = structuredClone(closedModal);
+  nestedClosed[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Card', child: 'modal',
+  };
+  nestedClosed[1].message.updateComponents.components.push({
+    id: 'modal', component: 'Modal', trigger: 'status', content: 'submit',
+  });
+  await assert.rejects(replayV09Actions(nestedClosed), /not an active Button/);
+
+  // Basic Catalog supports structural child slots beyond Column.children.
+  for (const root of [
+    {id: 'root', component: 'Card', child: 'submit'},
+    {id: 'root', component: 'Tabs', tabs: [{title: 'Confirm', child: 'submit'}]},
+    {id: 'root', component: 'Modal', trigger: 'submit', content: 'label'},
+  ]) {
+    const nested = structuredClone(orphan);
+    nested[1].message.updateComponents.components[0] = root;
+    const trace = await replayV09Actions(nested);
+    assert.equal(trace.actions.length, 1, root.component);
+    assert.equal(trace.actions[0].sourceComponentId, 'submit', root.component);
+  }
+});
+
+test('inactive Tabs content cannot produce fake headless Button action evidence', async () => {
+  const hidden = structuredClone(steps.slice(0, 4));
+  hidden[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Tabs', tabs: [
+      {title: 'Visible', child: 'status'},
+      {title: 'Inactive', child: 'submit'},
+    ],
+  };
+  await assert.rejects(replayV09Actions(hidden), /not an active Button/);
+
+  const nested = structuredClone(hidden);
+  nested[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Card', child: 'tab-stack',
+  };
+  nested[1].message.updateComponents.components.push({
+    id: 'tab-stack', component: 'Tabs', tabs: [
+      {title: 'Visible', child: 'status'},
+      {title: 'Inactive', child: 'submit'},
+    ],
+  });
+  await assert.rejects(replayV09Actions(nested), /not an active Button/);
+
+  // The first tab is rendered immediately without requiring a tab-switch action.
+  const visible = structuredClone(hidden);
+  visible[1].message.updateComponents.components[0].tabs = [
+    {title: 'Visible', child: 'submit'},
+    {title: 'Inactive', child: 'status'},
+  ];
+  const accepted = await replayV09Actions(visible);
+  assert.equal(accepted.actions.length, 1);
+  assert.equal(accepted.actions[0].sourceComponentId, 'submit');
+
+  // A later component update must invalidate an initially reachable Button.
+  const switchedByUpdate = structuredClone(visible.slice(0, 3));
+  switchedByUpdate.push({message: {version: 'v0.9', updateComponents: {
+    surfaceId: 'action-replay', components: [{
+      id: 'root', component: 'Tabs', tabs: [
+        {title: 'Visible', child: 'status'},
+        {title: 'Inactive', child: 'submit'},
+      ],
+    }],
+  }}});
+  switchedByUpdate.push({tap: {surfaceId: 'action-replay', componentId: 'submit'}});
+  await assert.rejects(replayV09Actions(switchedByUpdate), /not an active Button/);
+});
+
+test('rooted Button with failed checks cannot be tapped in headless replay', async () => {
+  const disabled = structuredClone(steps.slice(0, 3));
+  disabled[1].message.updateComponents.components.find(item => item.id === 'submit').checks = [
+    {condition: {call: 'required', args: {value: {path: '/approval'}}}, message: 'Approval required'},
+  ];
+  disabled[2].message.updateDataModel.value.approval = '';
+  const tap = {tap: {surfaceId: 'action-replay', componentId: 'submit'}};
+  await assert.rejects(replayV09Actions([...disabled, tap]), /Button failed validation checks/);
+
+  // No checks means no validation result: a normal Button is still tappable.
+  const withoutChecks = structuredClone(disabled);
+  delete withoutChecks[1].message.updateComponents.components.find(item => item.id === 'submit').checks;
+  assert.equal((await replayV09Actions([...withoutChecks, tap])).actions.length, 1);
+  const emptyChecks = structuredClone(disabled);
+  emptyChecks[1].message.updateComponents.components.find(item => item.id === 'submit').checks = [];
+  assert.equal((await replayV09Actions([...emptyChecks, tap])).actions.length, 1);
+
+  const enabled = structuredClone(disabled);
+  enabled[2].message.updateDataModel.value.approval = 'yes';
+  const accepted = await replayV09Actions([...enabled, tap]);
+  assert.equal(accepted.actions.length, 1);
+  assert.equal(accepted.actions[0].name, 'confirm-choice');
+
+  // Changing the model after one valid click must disable the next click.
+  const disabledAgain = [...enabled, tap, {message: {
+    version: 'v0.9', updateDataModel: {
+      surfaceId: 'action-replay', path: '/approval', value: '',
+    },
+  }}, tap];
+  await assert.rejects(replayV09Actions(disabledAgain), /Button failed validation checks/);
+});
+
 test('malformed interaction envelopes fail closed instead of silently skipping input', async () => {
   await assert.rejects(replayV09Actions([{tap: {componentId: 'submit'}}]), /must name a surface/);
   await assert.rejects(replayV09Actions([{message: {}, tap: {}}]), /exactly one/);

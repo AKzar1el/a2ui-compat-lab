@@ -101,6 +101,36 @@ export function replayV09(messages) {
   }
 }
 
+/** Only rooted component-tree nodes can be interacted with by a renderer. */
+function isRootReachable(surface, componentId) {
+  const pending = [surface.rootId];
+  const seen = new Set();
+  while (pending.length) {
+    const id = pending.pop();
+    if (typeof id !== 'string' || seen.has(id)) continue;
+    seen.add(id);
+    const node = surface.componentsModel.get(id);
+    if (!node) continue;
+    if (id === componentId) return true;
+    const {child, children, trigger, content, tabs} = node.properties ?? {};
+    // Modal content is hidden until opened; headless replay has no modal-open step.
+    const refs = [child, trigger];
+    if (node.type !== 'Modal') refs.push(content);
+    for (const ref of refs) {
+      if (typeof ref === 'string') pending.push(ref);
+    }
+    if (Array.isArray(children)) {
+      for (const ref of children) if (typeof ref === 'string') pending.push(ref);
+    }
+    if (Array.isArray(tabs)) {
+      // The pinned v0.9 Tabs renderer starts on index 0; replay has no tab-switch step.
+      const visibleTabs = node.type === 'Tabs' ? tabs.slice(0, 1) : tabs;
+      for (const tab of visibleTabs) if (typeof tab?.child === 'string') pending.push(tab.child);
+    }
+  }
+  return false;
+}
+
 /**
  * Replays agent messages and renderer-side Button actions through the real
  * v0.9 core's binder. This is headless interaction coverage, not a DOM click.
@@ -150,7 +180,8 @@ export async function replayV09Actions(steps) {
         throw new TypeError('Tap must name a surface and component at index ' + index);
       const surface = processor.getSurface(surfaceId);
       const component = surface?.componentsModel.get(componentId);
-      if (!surface || !component || component.type !== 'Button')
+      if (!surface || !component || component.type !== 'Button' ||
+          !isRootReachable(surface, componentId))
         throw new Error('Tap target is not an active Button: ' + surfaceId + '/' + componentId);
       const schema = component.catalog?.components.get('Button')?.schema;
       if (!schema) throw new Error('Button catalog schema unavailable: ' + componentId);
@@ -158,6 +189,8 @@ export async function replayV09Actions(steps) {
       const before = actions.length;
       try {
         binder.subscribe(() => {});
+        if (binder.snapshot.isValid === false)
+          throw new Error('Button failed validation checks: ' + componentId);
         if (typeof binder.snapshot.action !== 'function')
           throw new Error('Button has no executable action: ' + componentId);
         await binder.snapshot.action();
