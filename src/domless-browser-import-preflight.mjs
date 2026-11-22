@@ -10,7 +10,7 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url));
 // The proposed upstream v1 API must expose usable component, function and theme entrypoints.
 const REQUIRED_BASIC_V1_EXPORTS = Object.freeze([
   'ButtonApi', 'TextApi', 'BASIC_COMPONENTS', 'BASIC_FUNCTIONS',
-  'BASIC_FUNCTION_APIS', 'BasicCatalogThemeSchema',
+  'BASIC_FUNCTION_APIS', 'BasicCatalogThemeSchema', 'createBasicCatalogFunctions',
 ]);
 
 const ENTRIES = Object.freeze([
@@ -30,18 +30,29 @@ export function classifyImportResult(child) {
   return 'import-error';
 }
 
+export function hasRequiredBasicV1Exports(exported) {
+  return exported !== null && typeof exported === 'object' &&
+    REQUIRED_BASIC_V1_EXPORTS.every(name => Object.hasOwn(exported, name)) &&
+    Array.isArray(exported.BASIC_COMPONENTS) && exported.BASIC_COMPONENTS.length >= 18 &&
+    exported.BASIC_COMPONENTS.includes(exported.ButtonApi) &&
+    Array.isArray(exported.BASIC_FUNCTIONS) && exported.BASIC_FUNCTIONS.length > 0 &&
+    Array.isArray(exported.BASIC_FUNCTION_APIS) && exported.BASIC_FUNCTION_APIS.length > 0 &&
+    typeof exported.createBasicCatalogFunctions === 'function';
+}
+
 function probeImport(specifier) {
   // Only fixed, audited SDK specifiers are used; input cannot request an
   // arbitrary module, local file, network endpoint or executable command.
   const script = `try {
     const exported = await import(${JSON.stringify(specifier)});
-    if (${specifier === ENTRIES[1].specifier} && (
-      ${JSON.stringify(REQUIRED_BASIC_V1_EXPORTS)}.some(name => !Object.hasOwn(exported, name)) ||
-      !Array.isArray(exported.BASIC_COMPONENTS) || exported.BASIC_COMPONENTS.length < 18 ||
-      !Array.isArray(exported.BASIC_FUNCTIONS) || exported.BASIC_FUNCTIONS.length === 0
-    )) {
-      process.stdout.write('INCOMPLETE_API');
-      process.exitCode = 7;
+    if (${specifier === ENTRIES[1].specifier}) {
+      const {hasRequiredBasicV1Exports} = await import(${JSON.stringify(import.meta.url)});
+      if (!hasRequiredBasicV1Exports(exported)) {
+        process.stdout.write('INCOMPLETE_API');
+        process.exitCode = 7;
+      } else {
+        process.stdout.write('OK');
+      }
     } else {
       process.stdout.write('OK');
     }
