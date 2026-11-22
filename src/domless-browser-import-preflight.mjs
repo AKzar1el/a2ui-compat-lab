@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const ENTRIES = Object.freeze([
   {name: 'processing-api', specifier: '@a2ui/web_core/processing'},
+  {name: 'basic-v1-api', specifier: '@a2ui/web_core/catalogs/basic/v1/api'},
   {name: 'basic-v1-catalog', specifier: '@a2ui/web_core/catalogs/basic/v1'},
   {name: 'v1-entrypoint', specifier: '@a2ui/web_core/v1_0'},
 ]);
@@ -18,6 +19,7 @@ export function classifyImportResult(child) {
   if (child.error) return 'runner-error';
   if (child.status === 0 && child.stdout === 'OK') return 'loaded';
   if (child.status === 4 && child.stdout === 'DOM_REQUIRED') return 'dom-required';
+  if (child.status === 6 && child.stdout === 'NOT_EXPORTED') return 'not-exported';
   return 'import-error';
 }
 
@@ -28,7 +30,10 @@ function probeImport(specifier) {
     await import(${JSON.stringify(specifier)});
     process.stdout.write('OK');
   } catch (error) {
-    if (error?.name === 'ReferenceError' &&
+    if (error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+      process.stdout.write('NOT_EXPORTED');
+      process.exitCode = 6;
+    } else if (error?.name === 'ReferenceError' &&
         error?.message === 'HTMLElement is not defined') {
       process.stdout.write('DOM_REQUIRED');
       process.exitCode = 4;
@@ -56,7 +61,10 @@ export function inspectPublishedBrowserImports() {
     sdk: '@a2ui/web_core',
     installedVersion: packageInfo.version,
     condition: 'Node.js browser export condition, no DOM',
-    domlessReady: cases.every(item => item.state === 'loaded'),
+    domlessReady: cases[0].state === 'loaded' &&
+      cases.some(item => item.name === 'basic-v1-api' && item.state === 'loaded'),
+    preferredEntrypoint: cases.some(item => item.name === 'basic-v1-api' && item.state === 'loaded')
+      ? '@a2ui/web_core/catalogs/basic/v1/api' : null,
     cases,
     limitations: 'Node.js import only; no React Native, Metro, Hermes, renderer or security certification.',
     upstreamIssue: 'https://github.com/a2ui-project/a2ui/issues/4238',
@@ -72,7 +80,7 @@ function main(args) {
   try {
     const report = inspectPublishedBrowserImports();
     process.stdout.write(JSON.stringify(report) + '\n');
-    if (report.cases.some(item => !['loaded', 'dom-required'].includes(item.state)))
+    if (report.cases.some(item => !['loaded', 'dom-required', 'not-exported'].includes(item.state)))
       process.exitCode = 2;
     else if (args[0] === '--strict' && !report.domlessReady)
       process.exitCode = 1;
