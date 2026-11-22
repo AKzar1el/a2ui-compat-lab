@@ -239,6 +239,13 @@ test('published SDK template Button replay selects only an explicit live row ins
   await assert.rejects(replayV09Actions([...twoRows, {
     tap: {surfaceId: 'action-replay', componentId: 'submit'},
   }]), /not an active Button/);
+  // Each published Basic Catalog layout materializes the same row-scoped child list.
+  for (const layout of ['Row', 'List']) {
+    const variant = template(['alpha', 'beta']);
+    variant[1].message.updateComponents.components[0].component = layout;
+    assert.deepEqual((await replayV09Actions([...variant, tap('/items/1')]))
+      .actions.map(action => action.context.selection), ['beta'], layout);
+  }
   const selected = await replayV09Actions([...twoRows, tap('/items/1')]);
   assert.deepEqual(selected.actions.map(action => action.context.selection), ['beta']);
   assert.equal(selected.snapshots.at(-1).basePath, '/items/1');
@@ -291,4 +298,33 @@ test('template Button replay checks fresh membership after deletion and row reor
     components: [{id: 'root', component: 'Column', children: ['label']}],
   }}};
   await assert.rejects(replayV09Actions([...seeded, detached, tap]), /not an active Button/);
+});
+
+test('templated instances under closed Modal or inactive Tabs remain unclickable', async () => {
+  const make = () => {
+    const seeded = structuredClone(steps.slice(0, 3));
+    seeded[1].message.updateComponents.components[0] = {
+      id: 'root', component: 'Card', child: 'rows',
+    };
+    seeded[1].message.updateComponents.components.push({
+      id: 'rows', component: 'Column', children: {componentId: 'submit', path: '/items'},
+    });
+    seeded[1].message.updateComponents.components.find(c => c.id === 'submit')
+      .action.event.context.selection = {path: 'choice'};
+    seeded[2].message.updateDataModel.value = {items: [{choice: 'alpha'}]};
+    return seeded;
+  };
+  const tap = {tap: {surfaceId: 'action-replay', componentId: 'submit', basePath: '/items/0'}};
+  const closed = make();
+  closed[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Modal', trigger: 'label', content: 'rows',
+  };
+  await assert.rejects(replayV09Actions([...closed, tap]), /not an active Button/);
+  const tabs = make();
+  tabs[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Tabs', tabs: [
+      {title: 'Visible', child: 'label'}, {title: 'Hidden', child: 'rows'},
+    ],
+  };
+  await assert.rejects(replayV09Actions([...tabs, tap]), /not an active Button/);
 });
