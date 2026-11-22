@@ -12,8 +12,10 @@ test('published web_core 0.15 browser-condition imports reveal real no-DOM catal
   const report = inspectPublishedBrowserImports();
   assert.equal(report.installedVersion, '0.15.0');
   assert.equal(report.domlessReady, false);
+  assert.equal(report.preferredEntrypoint, null);
   assert.deepEqual(report.cases, [
     {name: 'processing-api', state: 'loaded'},
+    {name: 'basic-v1-api', state: 'not-exported'},
     {name: 'basic-v1-catalog', state: 'dom-required'},
     {name: 'v1-entrypoint', state: 'dom-required'},
   ]);
@@ -37,7 +39,7 @@ test('non-strict CLI reports the observed boundary without treating it as CI fai
     encoding: 'utf8', timeout: 60000, windowsHide: true,
   });
   assert.equal(child.status, 0, child.stderr);
-  assert.equal(JSON.parse(child.stdout).cases.length, 3);
+  assert.equal(JSON.parse(child.stdout).cases.length, 4);
 });
 
 test('invalid CLI flags and subprocess failures fail closed', () => {
@@ -50,5 +52,6 @@ test('invalid CLI flags and subprocess failures fail closed', () => {
   assert.equal(classifyImportResult({error: {code: 'ETIMEDOUT'}}), 'timeout');
   assert.equal(classifyImportResult({error: {code: 'ENOENT'}}), 'runner-error');
   assert.equal(classifyImportResult({status: 5, stdout: 'IMPORT_ERROR'}), 'import-error');
+  assert.equal(classifyImportResult({status: 6, stdout: 'NOT_EXPORTED'}), 'not-exported');
   assert.equal(classifyImportResult({status: 0, stdout: 'OK'}), 'loaded');
 });
