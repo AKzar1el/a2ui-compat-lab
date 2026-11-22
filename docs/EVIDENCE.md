@@ -847,3 +847,16 @@ Installed published `@a2ui/web_core@0.15.0` initializes Modal `isOpen=false` and
 ## Inactive Tabs action-replay integrity (2026-11-22; PR #172, CI pending)
 
 Published `@a2ui/web_core@0.15.0` v0.9 Tabs initializes activeIndex=0 and renders only `tabs[0].child` until a tab-header click. An independent Node 22 `MessageProcessor` + `GenericBinder` probe with a root Tabs whose second tab contained a Button emitted one `hidden-action` event from that inactive Button. Lab headless `isRootReachable` traversed all Tabs children and falsely presented it as a user tap. This continuation limits headless Tabs traversal to the first tab; offline regressions cover inactive root/nested Tabs, initially visible Button, and a later update hiding that Button. It is intentionally conservative: no simulated tab-header click, no physical browser visibility proof, no upstream security claim, and no user/revenue evidence. Existing #172 head `2e6a2e9132d62307b858ba8b80fa2ff659e248ff` was green before this change; **new final-head hosted CI remains required**, with merger handoff withdrawn pending verification.
+
+## P1 headless template-instance Button replay (2026-11-22)
+
+The pinned published v0.9 MessageProcessor and GenericBinder resolve a templated
+Column/Row/List child reference into current `{id,basePath}` row instances.
+`replayV09Actions` now accepts an explicit `tap.basePath` for one of those
+currently materialized instances; it refuses ID-only template taps, missing or
+deleted rows, malformed paths and detached child lists. Relative event context
+resolves against the chosen current row; a reorder changes which record occupies
+a numeric index. This is **headless published-SDK evidence**, not a physical DOM
+click or a stable record identity. Existing closed Modal, inactive Tabs and
+disabled Button guards still apply. A real browser template click and third-party
+adoption are separate unverified milestones.
