@@ -113,8 +113,10 @@ function isRootReachable(surface, componentId) {
     if (!node) continue;
     if (id === componentId) return true;
     const {child, children, trigger, content, tabs} = node.properties ?? {};
-    // Published Basic Catalog: single-child slots, rows/columns/lists and tab panels.
-    for (const ref of [child, trigger, content]) {
+    // Modal content is hidden until opened; headless replay has no modal-open step.
+    const refs = [child, trigger];
+    if (node.type !== 'Modal') refs.push(content);
+    for (const ref of refs) {
       if (typeof ref === 'string') pending.push(ref);
     }
     if (Array.isArray(children)) {

@@ -68,6 +68,21 @@ test('orphaned Button components cannot produce fake renderer action evidence', 
   assert.equal(output.actions.length, 1);
   assert.equal(output.actions[0].sourceComponentId, 'submit');
 
+  // A closed Modal's content is not rendered; there is no headless open step.
+  const closedModal = structuredClone(orphan);
+  closedModal[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Modal', trigger: 'status', content: 'submit',
+  };
+  await assert.rejects(replayV09Actions(closedModal), /not an active Button/);
+  const nestedClosed = structuredClone(closedModal);
+  nestedClosed[1].message.updateComponents.components[0] = {
+    id: 'root', component: 'Card', child: 'modal',
+  };
+  nestedClosed[1].message.updateComponents.components.push({
+    id: 'modal', component: 'Modal', trigger: 'status', content: 'submit',
+  });
+  await assert.rejects(replayV09Actions(nestedClosed), /not an active Button/);
+
   // Basic Catalog supports structural child slots beyond Column.children.
   for (const root of [
     {id: 'root', component: 'Card', child: 'submit'},
