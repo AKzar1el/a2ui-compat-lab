@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {
-  classifyImportResult, inspectPublishedBrowserImports, summarizeDomlessReadiness,
+  classifyImportResult, hasRequiredBasicV1Exports,
+  inspectPublishedBrowserImports, summarizeDomlessReadiness,
 } from '../src/domless-browser-import-preflight.mjs';
 
 const cli = fileURLToPath(new URL('../src/domless-browser-import-preflight.mjs', import.meta.url));
@@ -22,7 +23,25 @@ test('published web_core 0.15 browser-condition imports reveal real no-DOM catal
   assert.match(report.limitations, /no React Native/);
 });
 
-test('future API import alone is insufficient without the required published export contract', () => {
+test('future v1 catalog export contract rejects importable stubs and incomplete APIs', () => {
+  const ButtonApi = {};
+  const complete = {
+    ButtonApi, TextApi: {}, BASIC_COMPONENTS: [ButtonApi, ...Array.from({length: 17}, () => ({}))],
+    BASIC_FUNCTIONS: [{}], BASIC_FUNCTION_APIS: [{}], BasicCatalogThemeSchema: {},
+    createBasicCatalogFunctions: () => ({}),
+  };
+  assert.equal(hasRequiredBasicV1Exports(complete), true);
+  assert.equal(hasRequiredBasicV1Exports({}), false);
+  assert.equal(hasRequiredBasicV1Exports({...complete, BASIC_COMPONENTS: []}), false);
+  assert.equal(hasRequiredBasicV1Exports({...complete, BASIC_COMPONENTS: Array(18).fill({})}), false);
+  assert.equal(hasRequiredBasicV1Exports({...complete, BASIC_FUNCTIONS: []}), false);
+  assert.equal(hasRequiredBasicV1Exports({...complete, BASIC_FUNCTION_APIS: []}), false);
+  assert.equal(hasRequiredBasicV1Exports({...complete, createBasicCatalogFunctions: null}), false);
+  const {BasicCatalogThemeSchema, ...missingTheme} = complete;
+  assert.equal(hasRequiredBasicV1Exports(missingTheme), false);
+});
+
+test('future API import alone is insufficient without the required proposed export contract', () => {
   const loaded = [
     {name: 'processing-api', state: 'loaded'},
     {name: 'basic-v1-api', state: 'loaded'},
