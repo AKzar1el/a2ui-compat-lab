@@ -162,6 +162,7 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
     const unknownCritical = insertBeforeIdat('ABCD');
     const unknownAncillary = insertBeforeIdat('aBCD');
     const invalidChunkName = insertBeforeIdat('9BCD');
+    const invalidHighBitChunkName = insertBeforeIdat(String.fromCharCode(0xe1) + 'BCD');
     const iendOffset = 33 + 12 + png.readUInt32BE(33);
     const criticalAfterIdat = Buffer.concat([
       png.subarray(0, iendOffset), makeChunk('ABCD', Buffer.from([1])),
@@ -189,6 +190,8 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
         {...valid, screenshotSha256: digestFor(criticalAfterIdat)}, /valid PNG/],
       ['nonalphabetic-chunk-name', invalidChunkName,
         {...valid, screenshotSha256: digestFor(invalidChunkName)}, /valid PNG/],
+      ['high-bit-chunk-name', invalidHighBitChunkName,
+        {...valid, screenshotSha256: digestFor(invalidHighBitChunkName)}, /valid PNG/],
       ['invalid-idat-zlib-with-valid-crc', invalidZlib,
         {...valid, screenshotSha256: digestFor(invalidZlib)}, /valid PNG/],
       ['invalid-row-filter-with-valid-crc', invalidFilter,

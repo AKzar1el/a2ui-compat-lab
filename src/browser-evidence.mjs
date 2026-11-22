@@ -60,7 +60,8 @@ function hasCompletePng(png) {
   while (offset + 12 <= png.length) {
     const length = png.readUInt32BE(offset);
     if (length > png.length - offset - 12) return false;
-    const type = png.toString('ascii', offset + 4, offset + 8);
+    // latin1 retains high-bit bytes; ascii decoding would mask them into valid chunk letters.
+    const type = png.toString('latin1', offset + 4, offset + 8);
     // An unknown critical chunk may change pixel interpretation. PNG decoders
     // must not silently ignore it even when the chunk and IDAT CRCs are valid.
     if (!/^[A-Za-z]{4}$/.test(type) ||
