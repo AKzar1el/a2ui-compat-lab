@@ -101,34 +101,64 @@ export function replayV09(messages) {
   }
 }
 
-/** Only rooted component-tree nodes can be interacted with by a renderer. */
-function isRootReachable(surface, componentId) {
-  const pending = [surface.rootId];
+/** Resolve a Button's currently rendered instance, not just a registered component ID. */
+function reachableButtonPath(surface, componentId, requestedBasePath) {
+  const pending = [{id: surface.rootId, basePath: '/', templated: false}];
   const seen = new Set();
+  const matches = [];
   while (pending.length) {
-    const id = pending.pop();
-    if (typeof id !== 'string' || seen.has(id)) continue;
-    seen.add(id);
+    const {id, basePath, templated} = pending.pop();
+    if (typeof id !== 'string' || typeof basePath !== 'string') continue;
+    const key = JSON.stringify([id, basePath]);
+    if (seen.has(key)) continue;
+    seen.add(key);
     const node = surface.componentsModel.get(id);
     if (!node) continue;
-    if (id === componentId) return true;
-    const {child, children, trigger, content, tabs} = node.properties ?? {};
-    // Modal content is hidden until opened; headless replay has no modal-open step.
-    const refs = [child, trigger];
-    if (node.type !== 'Modal') refs.push(content);
-    for (const ref of refs) {
-      if (typeof ref === 'string') pending.push(ref);
+    if (id === componentId) {
+      matches.push({basePath, templated});
+      continue;
     }
+    const push = ref => {
+      if (typeof ref === 'string') pending.push({id: ref, basePath, templated});
+    };
+    const {child, children, trigger, content, tabs} = node.properties ?? {};
+    push(child);
+    push(trigger);
+    // Closed Modal content and inactive Tabs have no visible headless interaction.
+    if (node.type !== 'Modal') push(content);
     if (Array.isArray(children)) {
-      for (const ref of children) if (typeof ref === 'string') pending.push(ref);
+      for (const ref of children) push(ref);
+    } else if (['Column', 'Row', 'List'].includes(node.type) &&
+               typeof children?.componentId === 'string' && typeof children.path === 'string') {
+      // Ask the published SDK to materialize current template members. Numeric
+      // paths are current row indices, never durable identities across reorders.
+      const schema = node.catalog?.components.get(node.type)?.schema;
+      if (schema) {
+        const binder = new GenericBinder(new ComponentContext(surface, id, basePath), schema);
+        try {
+          binder.subscribe(() => {});
+          const resolved = binder.snapshot.children;
+          if (Array.isArray(resolved)) {
+            for (const ref of resolved) {
+              if (typeof ref?.id === 'string' && typeof ref.basePath === 'string')
+                pending.push({id: ref.id, basePath: ref.basePath, templated: true});
+            }
+          }
+        } finally {
+          binder.dispose();
+        }
+      }
     }
     if (Array.isArray(tabs)) {
-      // The pinned v0.9 Tabs renderer starts on index 0; replay has no tab-switch step.
       const visibleTabs = node.type === 'Tabs' ? tabs.slice(0, 1) : tabs;
-      for (const tab of visibleTabs) if (typeof tab?.child === 'string') pending.push(tab.child);
+      for (const tab of visibleTabs) push(tab?.child);
     }
   }
-  return false;
+  // Legacy ID-only taps must not silently select one of multiple template rows.
+  if (requestedBasePath === undefined)
+    return matches.length === 1 && !matches[0].templated ? matches[0].basePath : null;
+  const selected = matches.filter(item => item.templated && item.basePath === requestedBasePath);
+  return selected.length === 1 ? selected[0].basePath : null;
 }
 
 /**
@@ -174,18 +204,22 @@ export async function replayV09Actions(steps) {
         continue;
       }
 
-      const {surfaceId, componentId} = step.tap ?? {};
+      const {surfaceId, componentId, basePath} = step.tap ?? {};
       if (typeof surfaceId !== 'string' || !surfaceId ||
           typeof componentId !== 'string' || !componentId)
         throw new TypeError('Tap must name a surface and component at index ' + index);
+      if (basePath !== undefined &&
+          (typeof basePath !== 'string' || !basePath.startsWith('/') || basePath === '/'))
+        throw new TypeError('Tap basePath must be an absolute template instance path at index ' + index);
       const surface = processor.getSurface(surfaceId);
       const component = surface?.componentsModel.get(componentId);
-      if (!surface || !component || component.type !== 'Button' ||
-          !isRootReachable(surface, componentId))
+      const liveBasePath = surface && component?.type === 'Button'
+        ? reachableButtonPath(surface, componentId, basePath) : null;
+      if (!surface || !component || component.type !== 'Button' || liveBasePath === null)
         throw new Error('Tap target is not an active Button: ' + surfaceId + '/' + componentId);
       const schema = component.catalog?.components.get('Button')?.schema;
       if (!schema) throw new Error('Button catalog schema unavailable: ' + componentId);
-      const binder = new GenericBinder(new ComponentContext(surface, componentId), schema);
+      const binder = new GenericBinder(new ComponentContext(surface, componentId, liveBasePath), schema);
       const before = actions.length;
       try {
         binder.subscribe(() => {});
@@ -200,7 +234,8 @@ export async function replayV09Actions(steps) {
       if (actions.length !== before + 1)
         throw new Error('Button must emit exactly one agent event: ' + componentId);
       snapshots.push({
-        index, kind: 'tap', surfaceId, componentId, exists: true,
+        index, kind: 'tap', surfaceId, componentId,
+        ...(basePath === undefined ? {} : {basePath}), exists: true,
         components: [...surface.componentsModel.keys],
         data: structuredClone(surface.dataModel.get('/')) ?? null,
         actionCount: actions.length,
