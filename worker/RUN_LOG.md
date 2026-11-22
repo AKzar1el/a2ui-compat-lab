@@ -1392,3 +1392,6 @@
 ## 2026-11-22 — #172 continuation: stale Button model after root rewire
 - Independent Windows read-only Node probe with published `@a2ui/web_core@0.15.0`: root originally `['submit']` then partial `updateComponents` switched root children to `['status']`. `submit` ComponentModel persisted and direct `GenericBinder` fired `stale-event`. The same root-reachability guard correctly distinguishes it as disconnected; new offline test rejects synthetic tap after detachment.
 - Same PR #172 branch; final-head hosted CI must be verified again after this test/receipt commit. No full local suite, browser click, protected-main merge, security review bypass, user adoption or revenue claimed.
+
+## 2026-11-22 — #172 continuation: published Basic Catalog slot coverage
+- Verified published v0.9 ComponentModel properties for Tabs `tabs:[{title,child}]`, Modal `trigger/content`, and templated `children:{componentId,path}` with read-only Node 22. Adjusted root-tree reachability to support Card child, Tabs child and Modal trigger/content static slots, and added deterministic positive controls. Dynamic templates remain conservative and unclaimed. Same branch/PR; prior CI head is stale and final-head CI must rerun. No local full test or physical renderer claim.
