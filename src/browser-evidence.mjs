@@ -7,6 +7,7 @@ const usage = 'Usage: npm test -- [--out-dir NEW_DIRECTORY_NAME]';
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_PNG_BYTES = 32 * 1024 * 1024;
 const MAX_PNG_RAW_BYTES = 128 * 1024 * 1024;
+const PNG_CRITICAL_CHUNKS = new Set(['IHDR', 'PLTE', 'IDAT', 'IEND']);
 
 const PNG_CRC_TABLE = Uint32Array.from({length: 256}, (_, index) => {
   let value = index;
@@ -59,7 +60,13 @@ function hasCompletePng(png) {
   while (offset + 12 <= png.length) {
     const length = png.readUInt32BE(offset);
     if (length > png.length - offset - 12) return false;
-    const type = png.toString('ascii', offset + 4, offset + 8);
+    // latin1 retains high-bit bytes; ascii decoding would mask them into valid chunk letters.
+    const type = png.toString('latin1', offset + 4, offset + 8);
+    // An unknown critical chunk may change pixel interpretation. PNG decoders
+    // must not silently ignore it even when the chunk and IDAT CRCs are valid.
+    if (!/^[A-Za-z]{4}$/.test(type) ||
+        (type[0] >= 'A' && type[0] <= 'Z' && !PNG_CRITICAL_CHUNKS.has(type)))
+      return false;
     const dataEnd = offset + 8 + length;
     const after = dataEnd + 4;
     if (chunkCrc32(png, offset + 4, dataEnd) !== png.readUInt32BE(dataEnd))
