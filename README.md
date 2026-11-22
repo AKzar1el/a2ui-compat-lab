@@ -7,7 +7,8 @@
 **DOM-less browser-condition SDK portability:** The installed published 0.15.0
 basic v1 catalog currently imports Lit when resolved with Node's browser
 condition, failing on platforms without `HTMLElement` (reported by an
-actual React Native integrator). Run `node src/domless-browser-import-preflight.mjs`
+actual React Native integrator). A proposed Lit-free API export remains
+unpublished; the probe distinguishes missing API exports from DOM-only imports. Run `node src/domless-browser-import-preflight.mjs`
 to see a bounded JSON import diagnostic, or append `--strict` to flag the
 known incompatibility in CI. This tests Node's browser condition, **not**
 React Native/Metro/Hermes. [Diagnostic and limitations](docs/DOMLESS_IMPORT_PREFLIGHT.md).
