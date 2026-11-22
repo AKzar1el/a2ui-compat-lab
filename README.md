@@ -10,7 +10,8 @@ condition, failing on platforms without `HTMLElement` (reported by an
 actual React Native integrator). A proposed Lit-free API export remains
 unpublished; the probe distinguishes missing API exports from DOM-only imports. Run `node src/domless-browser-import-preflight.mjs`
 to see a bounded JSON import diagnostic, or append `--strict` to flag the
-known incompatibility in CI. This tests Node's browser condition, **not**
+known incompatibility in CI. Opt into `--project-root /path/to/your/app` to
+probe a trusted consumer's directly installed SDK instead of the Lab pin. This tests Node's browser condition, **not**
 React Native/Metro/Hermes. [Diagnostic and limitations](docs/DOMLESS_IMPORT_PREFLIGHT.md).
 
 ## Replay saved Go A2UI WebSocket server frames (opt-in)

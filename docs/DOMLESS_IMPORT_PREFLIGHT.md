@@ -40,3 +40,32 @@ certificate, React Native/Metro/Hermes execution, exploit proof or direct
 runtime fix. The known published 0.15.0 failure is an **observed compatibility
 gap**, not a newly discovered upstream bug. Recheck official SDK releases
 and rerun this test before changing any baseline or claiming the gap is fixed.
+
+## Probe a developer-owned consumer installation
+
+By default, the command tests the Lab's own pinned `@a2ui/web_core` install.
+To check **your application's separate installed SDK** without changing the
+Lab's dependency pins, opt in with an explicit application root:
+
+```sh
+node src/domless-browser-import-preflight.mjs --project-root /path/to/your/app
+node src/domless-browser-import-preflight.mjs --project-root /path/to/your/app --strict
+```
+
+The selected root must have `package.json` with a direct `@a2ui/web_core`
+dependency, devDependency or peerDependency and its own
+`node_modules/@a2ui/web_core/package.json`. Fixed imports execute using
+Node's `browser` condition from that root, not the Lab's dependencies.
+A missing direct install, declaration, malformed version or inaccessible
+root returns exit 2 without printing private file paths. The report's
+`target` field identifies `lab` or `consumer`, but never includes a root
+path, manifest contents or reusable application identifiers. Existing
+compatibility categories and strict exit semantics are unchanged.
+
+**Only select a trusted, developer-owned installation.** Importing an SDK
+executes its module initialization code, including any code in that installed
+package. The Lab does not install or upgrade dependencies, run application
+scripts, or contact the network itself. This is Node export-resolution
+preflight, not Metro/Hermes, React Native, supply-chain or actual UI proof.
+Hoisted-only and workspace-only imports fail closed rather than risk
+attributing an ancestor's SDK version to the consumer.
