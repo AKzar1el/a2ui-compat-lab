@@ -40,7 +40,7 @@ export function hasRequiredBasicV1Exports(exported) {
     typeof exported.createBasicCatalogFunctions === 'function';
 }
 
-function probeImport(specifier) {
+function probeImport(specifier, installRoot) {
   // Only fixed, audited SDK specifiers are used; input cannot request an
   // arbitrary module, local file, network endpoint or executable command.
   const script = `try {
@@ -71,7 +71,7 @@ function probeImport(specifier) {
   }`;
   const child = spawnSync(process.execPath,
     ['--conditions=browser', '--input-type=module', '--eval', script], {
-      cwd: ROOT, encoding: 'utf8', timeout: 15000, maxBuffer: 4096,
+      cwd: installRoot, encoding: 'utf8', timeout: 15000, maxBuffer: 4096,
       windowsHide: true, env: {...process.env, NODE_OPTIONS: ''},
     });
   return classifyImportResult(child);
@@ -86,16 +86,25 @@ export function summarizeDomlessReadiness(cases) {
   };
 }
 
-export function inspectPublishedBrowserImports() {
+export function inspectPublishedBrowserImports(installRoot = ROOT) {
+  // A direct SDK install is required: never attribute an ancestor's package
+  // metadata to a consumer whose dependency graph was not verified.
+  const manifest = JSON.parse(readFileSync(resolve(installRoot, 'package.json'), 'utf8'));
+  const declared = ['dependencies', 'devDependencies', 'peerDependencies']
+    .some(section => typeof manifest[section]?.['@a2ui/web_core'] === 'string');
+  if (!declared) throw new Error('Missing direct web_core declaration');
   const packageInfo = JSON.parse(readFileSync(
-    new URL('../node_modules/@a2ui/web_core/package.json', import.meta.url), 'utf8'));
+    resolve(installRoot, 'node_modules/@a2ui/web_core/package.json'), 'utf8'));
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(packageInfo.version))
+    throw new Error('Invalid installed SDK version');
   const cases = ENTRIES.map(({name, specifier}) => ({
-    name, state: probeImport(specifier),
+    name, state: probeImport(specifier, installRoot),
   }));
   return {
     schemaVersion: 1,
     sdk: '@a2ui/web_core',
     installedVersion: packageInfo.version,
+    target: resolve(installRoot) === resolve(ROOT) ? 'lab' : 'consumer',
     condition: 'Node.js browser export condition, no DOM',
     ...summarizeDomlessReadiness(cases),
     cases,
@@ -105,20 +114,34 @@ export function inspectPublishedBrowserImports() {
 }
 
 function main(args) {
-  if (args.length > 1 || (args.length === 1 && args[0] !== '--strict')) {
-    process.stderr.write('Usage: node src/domless-browser-import-preflight.mjs [--strict]\n');
+  let strict = false;
+  let projectRoot = null;
+  let invalid = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--strict' && !strict) {
+      strict = true;
+    } else if (args[i] === '--project-root' && projectRoot === null &&
+        args[i + 1] && !args[i + 1].startsWith('--')) {
+      projectRoot = resolve(args[++i]);
+    } else {
+      invalid = true;
+      break;
+    }
+  }
+  if (invalid) {
+    process.stderr.write('Usage: node src/domless-browser-import-preflight.mjs [--strict] [--project-root DIR]\n');
     process.exitCode = 2;
     return;
   }
   try {
-    const report = inspectPublishedBrowserImports();
+    const report = inspectPublishedBrowserImports(projectRoot ?? ROOT);
     process.stdout.write(JSON.stringify(report) + '\n');
     if (report.cases.some(item => !['loaded', 'dom-required', 'not-exported', 'incomplete-api'].includes(item.state)))
       process.exitCode = 2;
-    else if (args[0] === '--strict' && !report.domlessReady)
+    else if (strict && !report.domlessReady)
       process.exitCode = 1;
   } catch {
-    process.stderr.write('Unable to inspect the installed published SDK.\n');
+    process.stderr.write('Unable to inspect the selected installed SDK.\n');
     process.exitCode = 2;
   }
 }

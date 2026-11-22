@@ -1,6 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
   classifyImportResult, hasRequiredBasicV1Exports,
@@ -80,7 +83,7 @@ test('non-strict CLI reports the observed boundary without treating it as CI fai
 });
 
 test('invalid CLI flags and subprocess failures fail closed', () => {
-  for (const args of [['--strict', '--strict'], ['--anything']]) {
+  for (const args of [['--strict', '--strict'], ['--anything'], ['--project-root'], ['--project-root', '.', '--project-root', '.']]) {
     const child = spawnSync(process.execPath, [cli, ...args],
       {encoding: 'utf8', timeout: 5000, windowsHide: true});
     assert.equal(child.status, 2);
@@ -91,4 +94,63 @@ test('invalid CLI flags and subprocess failures fail closed', () => {
   assert.equal(classifyImportResult({status: 5, stdout: 'IMPORT_ERROR'}), 'import-error');
   assert.equal(classifyImportResult({status: 6, stdout: 'NOT_EXPORTED'}), 'not-exported');
   assert.equal(classifyImportResult({status: 0, stdout: 'OK'}), 'loaded');
+});
+
+
+test('explicit consumer root probes its own SDK instead of the lab dependency', () => {
+  const root = mkdtempSync(join(tmpdir(), 'a2ui-consumer-root-'));
+  const sdk = join(root, 'node_modules', '@a2ui', 'web_core');
+  try {
+    mkdirSync(sdk, {recursive: true});
+    writeFileSync(join(root, 'package.json'), JSON.stringify({
+      name: 'temporary-a2ui-consumer', private: true,
+      dependencies: {'@a2ui/web_core': '9.9.9'},
+    }));
+    writeFileSync(join(sdk, 'package.json'), JSON.stringify({
+      name: '@a2ui/web_core', version: '9.9.9', type: 'module',
+      exports: {
+        './processing': './processing.mjs',
+        './catalogs/basic/v1/api': './api.mjs',
+        './catalogs/basic/v1': './legacy.mjs',
+        './v1_0': './legacy.mjs',
+      },
+    }));
+    writeFileSync(join(sdk, 'processing.mjs'), 'export const processor = true;\n');
+    writeFileSync(join(sdk, 'legacy.mjs'), 'export class Legacy extends HTMLElement {}\n');
+    const apiFile = join(sdk, 'api.mjs');
+    writeFileSync(apiFile, [
+      'export const ButtonApi = {};',
+      'export const TextApi = {};',
+      'export const BASIC_COMPONENTS = [ButtonApi, ...Array.from({length: 17}, () => ({}))];',
+      'export const BASIC_FUNCTIONS = [{}];',
+      'export const BASIC_FUNCTION_APIS = [{}];',
+      'export const BasicCatalogThemeSchema = {};',
+      'export function createBasicCatalogFunctions() { return {}; }',
+    ].join('\n'));
+    const run = args => spawnSync(process.execPath, [cli, '--project-root', root, ...args], {
+      encoding: 'utf8', timeout: 60000, windowsHide: true,
+    });
+    const supported = run(['--strict']);
+    assert.equal(supported.status, 0, supported.stderr);
+    const ready = JSON.parse(supported.stdout);
+    assert.equal(ready.target, 'consumer');
+    assert.equal(ready.installedVersion, '9.9.9');
+    assert.equal(ready.domlessReady, true);
+    assert.deepEqual(ready.cases.map(item => item.state),
+      ['loaded', 'loaded', 'dom-required', 'dom-required']);
+    assert.equal(supported.stdout.includes(root), false);
+    assert.equal(supported.stderr, '');
+    writeFileSync(apiFile, 'export const ButtonApi = {};\n');
+    const incomplete = run(['--strict']);
+    assert.equal(incomplete.status, 1, incomplete.stderr);
+    assert.equal(JSON.parse(incomplete.stdout).cases[1].state, 'incomplete-api');
+    assert.equal(incomplete.stdout.includes(root), false);
+    writeFileSync(join(root, 'package.json'), JSON.stringify({private: true}));
+    const undeclared = run([]);
+    assert.equal(undeclared.status, 2);
+    assert.equal(undeclared.stdout, '');
+    assert.equal(undeclared.stderr.includes(root), false);
+  } finally {
+    rmSync(root, {recursive: true, force: true});
+  }
 });
