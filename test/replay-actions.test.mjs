@@ -1,7 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {parseJsonLines, replayV09Actions} from '../src/replay.mjs';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {parseJsonLines, parseJsonLinesBytes, replayV09Actions} from '../src/replay.mjs';
 
 const steps = JSON.parse(readFileSync(new URL('../fixtures/action-v09.json', import.meta.url), 'utf8'));
 
@@ -44,4 +46,40 @@ test('malformed interaction envelopes fail closed instead of silently skipping i
   await assert.rejects(replayV09Actions([{message: {}, tap: {}}]), /exactly one/);
   await assert.rejects(replayV09Actions([{unknown: {}}]), /exactly one/);
   await assert.rejects(replayV09Actions([null]), /Invalid replay step/);
+});
+
+
+test('UTF-8 byte chunk boundaries preserve non-ASCII Button action contexts', async () => {
+  const unicode = structuredClone(steps);
+  unicode[2].message.updateDataModel.value.selection = 'Čebelica 🌍';
+  unicode[4].message.updateDataModel.value.selection = 'こんにちは 👋';
+  const expected = await replayV09Actions(unicode);
+  assert.deepEqual(expected.actions.map(action => action.context.selection),
+    ['Čebelica 🌍', 'こんにちは 👋']);
+  const bytes = Buffer.from(unicode.map(x => JSON.stringify(x)).join('\n') + '\n', 'utf8');
+  for (const size of [1, 2, 3, 7, 57, bytes.length]) {
+    const chunks = [];
+    for (let index = 0; index < bytes.length; index += size)
+      chunks.push(bytes.subarray(index, index + size));
+    assert.deepEqual(await replayV09Actions(parseJsonLinesBytes(chunks)), expected,
+      'byte chunk size ' + size);
+  }
+});
+
+test('action report includes deterministic Unicode byte-stream trial evidence', () => {
+  const script = fileURLToPath(new URL('../src/replay-action-report.mjs', import.meta.url));
+  const result = spawnSync(process.execPath, [script], {
+    cwd: fileURLToPath(new URL('../', import.meta.url)),
+    encoding: 'utf8', timeout: 30000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.allMatch, true);
+  assert.equal(report.chunkTrials.length, 4);
+  assert.deepEqual(report.byteChunkTrials.map(trial => trial.chunkSizeBytes),
+    [1, 2, 3, 7, 57, report.byteChunkTrials.at(-1).chunkSizeBytes]);
+  assert.ok(report.byteChunkTrials.every(trial => trial.matches));
+  assert.deepEqual(report.unicodeTrace.actions.map(action => action.context.selection),
+    ['Čebelica 🌍', 'こんにちは 👋']);
+  assert.match(report.unicodeFixtureSha256, /^[0-9a-f]{64}$/);
 });
