@@ -7,6 +7,12 @@ import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
+// The proposed upstream v1 API must expose usable component, function and theme entrypoints.
+const REQUIRED_BASIC_V1_EXPORTS = Object.freeze([
+  'ButtonApi', 'TextApi', 'BASIC_COMPONENTS', 'BASIC_FUNCTIONS',
+  'BASIC_FUNCTION_APIS', 'BasicCatalogThemeSchema',
+]);
+
 const ENTRIES = Object.freeze([
   {name: 'processing-api', specifier: '@a2ui/web_core/processing'},
   {name: 'basic-v1-api', specifier: '@a2ui/web_core/catalogs/basic/v1/api'},
@@ -20,6 +26,7 @@ export function classifyImportResult(child) {
   if (child.status === 0 && child.stdout === 'OK') return 'loaded';
   if (child.status === 4 && child.stdout === 'DOM_REQUIRED') return 'dom-required';
   if (child.status === 6 && child.stdout === 'NOT_EXPORTED') return 'not-exported';
+  if (child.status === 7 && child.stdout === 'INCOMPLETE_API') return 'incomplete-api';
   return 'import-error';
 }
 
@@ -27,8 +34,17 @@ function probeImport(specifier) {
   // Only fixed, audited SDK specifiers are used; input cannot request an
   // arbitrary module, local file, network endpoint or executable command.
   const script = `try {
-    await import(${JSON.stringify(specifier)});
-    process.stdout.write('OK');
+    const exported = await import(${JSON.stringify(specifier)});
+    if (${specifier === ENTRIES[1].specifier} && (
+      ${JSON.stringify(REQUIRED_BASIC_V1_EXPORTS)}.some(name => !Object.hasOwn(exported, name)) ||
+      !Array.isArray(exported.BASIC_COMPONENTS) || exported.BASIC_COMPONENTS.length < 18 ||
+      !Array.isArray(exported.BASIC_FUNCTIONS) || exported.BASIC_FUNCTIONS.length === 0
+    )) {
+      process.stdout.write('INCOMPLETE_API');
+      process.exitCode = 7;
+    } else {
+      process.stdout.write('OK');
+    }
   } catch (error) {
     if (error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
       process.stdout.write('NOT_EXPORTED');
@@ -50,6 +66,15 @@ function probeImport(specifier) {
   return classifyImportResult(child);
 }
 
+export function summarizeDomlessReadiness(cases) {
+  const processingReady = cases.some(item => item.name === 'processing-api' && item.state === 'loaded');
+  const apiReady = cases.some(item => item.name === 'basic-v1-api' && item.state === 'loaded');
+  return {
+    domlessReady: processingReady && apiReady,
+    preferredEntrypoint: apiReady ? '@a2ui/web_core/catalogs/basic/v1/api' : null,
+  };
+}
+
 export function inspectPublishedBrowserImports() {
   const packageInfo = JSON.parse(readFileSync(
     new URL('../node_modules/@a2ui/web_core/package.json', import.meta.url), 'utf8'));
@@ -61,10 +86,7 @@ export function inspectPublishedBrowserImports() {
     sdk: '@a2ui/web_core',
     installedVersion: packageInfo.version,
     condition: 'Node.js browser export condition, no DOM',
-    domlessReady: cases[0].state === 'loaded' &&
-      cases.some(item => item.name === 'basic-v1-api' && item.state === 'loaded'),
-    preferredEntrypoint: cases.some(item => item.name === 'basic-v1-api' && item.state === 'loaded')
-      ? '@a2ui/web_core/catalogs/basic/v1/api' : null,
+    ...summarizeDomlessReadiness(cases),
     cases,
     limitations: 'Node.js import only; no React Native, Metro, Hermes, renderer or security certification.',
     upstreamIssue: 'https://github.com/a2ui-project/a2ui/issues/4238',
@@ -80,7 +102,7 @@ function main(args) {
   try {
     const report = inspectPublishedBrowserImports();
     process.stdout.write(JSON.stringify(report) + '\n');
-    if (report.cases.some(item => !['loaded', 'dom-required', 'not-exported'].includes(item.state)))
+    if (report.cases.some(item => !['loaded', 'dom-required', 'not-exported', 'incomplete-api'].includes(item.state)))
       process.exitCode = 2;
     else if (args[0] === '--strict' && !report.domlessReady)
       process.exitCode = 1;
