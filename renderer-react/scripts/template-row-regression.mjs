@@ -20,9 +20,10 @@ export async function testTemplateRowBrowserReplay(context, origin) {
     });
   }, {id: surfaceId, rows});
   const waitForButtonCount = async count => {
-    await page.waitForFunction(expected =>
-      document.querySelectorAll('button').length === expected,
-    count, {timeout: 10000});
+    // Playwright locators pierce open shadow roots; document.querySelectorAll
+    // would miss native buttons rendered inside the published A2UI elements.
+    if (count > 0) await buttons.nth(count - 1).waitFor({state: 'visible', timeout: 10000});
+    await buttons.nth(count).waitFor({state: 'detached', timeout: 10000});
     assert.equal(await buttons.count(), count);
   };
   const assertSelections = async values => {
