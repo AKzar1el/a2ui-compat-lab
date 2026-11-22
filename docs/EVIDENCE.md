@@ -881,3 +881,9 @@ This test is scoped to the existing offline/loopback Playwright harness and is
 test occurred. Exact-head GitHub Actions `react-browser`, `sdk-parity`, and
 `dependency-audit` must pass before any merger handoff. It does not establish
 native renderer parity, durable row IDs, security remediation, adoption or revenue.
+
+## Fail-closed headless Button tap envelope validation (2026-11-23; hosted CI pending)
+
+The Lab's v0.9 `replayV09Actions` input allows `tap` with exactly `surfaceId`, `componentId`, and optional `basePath`. Prior to this proposed regression, unknown keys such as a misspelled `basePth` were silently discarded. For a live static Button, that silently converted a developer's intended instance selector to an ID-only tap and could emit an action rather than signal invalid input. The new strict envelope check rejects unknown properties and non-object shapes before invoking the SDK binder; deterministic tests preserve a valid static tap and reject a typo, surplus property, and array. This is a **Lab-owned replay input integrity guard**, not an upstream A2UI SDK bug, a physical browser interaction, a production security finding, or evidence of customer adoption.
+
+Validation is **PENDING** until exact-final-head GitHub Actions `sdk-parity`, `react-browser` and `dependency-audit` all pass. The source checkout on historical Windows branch and pre-existing untracked `renderer-react/` remain untouched; no local full-suite execution is claimed.
