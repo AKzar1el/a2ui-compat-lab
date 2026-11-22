@@ -53,6 +53,15 @@ test('orphaned Button components cannot produce fake renderer action evidence', 
   });
   await assert.rejects(replayV09Actions(linkedViaOrphan), /not an active Button/);
 
+  // A later partial update can detach a previously rendered Button without deleting its model.
+  const stale = structuredClone(steps.slice(0, 3));
+  stale.push({message: {version: 'v0.9', updateComponents: {
+    surfaceId: 'action-replay',
+    components: [{id: 'root', component: 'Column', children: ['status']}],
+  }}});
+  stale.push({tap: {surfaceId: 'action-replay', componentId: 'submit'}});
+  await assert.rejects(replayV09Actions(stale), /not an active Button/);
+
   const reachable = structuredClone(orphan);
   reachable[1].message.updateComponents.components[0].children = ['status', 'submit'];
   const output = await replayV09Actions(reachable);
