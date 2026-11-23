@@ -127,8 +127,7 @@ test('the actual pinned published v1 core treats old path as literal, not as bin
   }
   assert.equal(resolveText({'@path': '/name'}), 'Ada');
   assert.deepEqual(resolveText({path: '/name'}), {path: '/name'});
-  const args = {value: 'Hi ' + '});
- + '{/name}'};
+  const args = {value: 'Hi ' + String.fromCharCode(36) + '{/name}'};
   assert.equal(resolveText({'@call': 'formatString', args}), 'Hi Ada');
   assert.deepEqual(resolveText({call: 'formatString', args}), {call: 'formatString', args});
   assert.equal(possibleLegacyTextDirective({path: '/name'}), 'path');
