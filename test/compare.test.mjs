@@ -59,6 +59,20 @@ test('malformed, contradictory and duplicate reports fail closed', () => {
   assert.throws(() => compareScans({...valid, reportVersion: 2}, valid), /version-1/);
 });
 
+test('scan comparison rejects empty implementation provenance rather than false-green parity', () => {
+  const valid = scan([['stable', true, true]]);
+  for (const field of ['webCore', 'reference']) {
+    for (const value of ['', '   ']) {
+      const missing = structuredClone(valid);
+      missing.implementations[field] = value;
+      assert.throws(() => compareScans(missing, valid), /implementation provenance/);
+      assert.throws(() => compareScans(valid, missing), /implementation provenance/);
+      assert.throws(() => compareScans(missing, missing), /implementation provenance/);
+    }
+  }
+  assert.equal(compareScans(valid, structuredClone(valid)).ok, true);
+});
+
 test('changing the reference validator configuration is not silently treated as parity', () => {
   const before = scan([['a', true, true]]);
   const after = structuredClone(before);
