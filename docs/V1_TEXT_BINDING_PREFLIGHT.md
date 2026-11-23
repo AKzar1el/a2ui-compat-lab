@@ -16,13 +16,27 @@ a conformance verdict. Invalid or unsupported input exits 2.
 Input must be newline-terminated JSONL, 1 byte to 1 MiB, at most 1,000
 surface messages, each at most 128 KiB, with protocol version exactly 1.0.
 Only createSurface, updateComponents, updateDataModel, and deleteSurface
-message envelopes are accepted. The scan considers only
-updateComponents.components entries with component: Text and exact legacy-like
-text shapes, not arbitrary component fields or other renderers.
+message envelopes are accepted. The scan considers Text entries in both
+createSurface.components (when provided inline at surface creation) and
+updateComponents.components, using the same legacy-like text shapes. It does
+not scan arbitrary other component fields or other renderers.
 
-Output is fixed-schema JSON with counts, no original component IDs,
-values, paths, full capture digest, filesystem path, or snippets. It does not
-upload data or make network requests.
+Output is fixed-schema JSON with counts and at most **32** `candidateLocations`
+entries. Each contains only a **1-based JSONL line number**, **0-based
+component array index**, and fixed `path`/`call` kind. Open the private
+capture locally at that line to review the affected Text value. The
+`candidateLocationsOmitted` count reports any additional candidates beyond
+32; the total counts always include them. No original component IDs, values,
+paths, full capture digest, filesystem path, or snippets are emitted. These
+structural positions can reveal capture layout, so keep reports within your
+trusted development workflow. It does not upload data or make network requests.
+
+Legacy v0.9 relative data bindings also qualify: `{"path":"firstName"}` inside
+a repeated list row is a valid relative binding, even without a leading slash.
+The advisory now detects that Text.text shape alongside absolute paths. A
+container's `children.path` remains a valid v1 ChildList property and is
+intentionally not flagged; this preflight does not scan TextField.value or
+other component slots.
 
 ## Why this matters
 

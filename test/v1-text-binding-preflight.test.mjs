@@ -50,6 +50,11 @@ test('v1 local capture flags potential v0.9 Text directives without private valu
     assert.equal(report.textComponents, 5);
     assert.equal(report.candidateCount, 2);
     assert.deepEqual(report.candidateKinds, {legacyPathLike: 1, legacyCallLike: 1});
+    assert.deepEqual(report.candidateLocations, [
+      {lineNumber: 2, componentIndex: 1, kind: 'path'},
+      {lineNumber: 2, componentIndex: 2, kind: 'call'},
+    ]);
+    assert.equal(report.candidateLocationsOmitted, 0);
     assert.equal(report.result, 'review_ambiguous_legacy_shapes');
     assert.match(report.recommendation, /may be intentional/);
     for (const secret of ['PRIVATE-CAPTURE', 'PRIVATE-SURFACE', 'PRIVATE-TEXT', 'PRIVATE-ADA',
@@ -69,11 +74,113 @@ test('explicit v1 directives and unrelated literal objects pass the advisory pre
   ]), model];
   const report = inspectV1TextBindings(messages);
   assert.equal(report.candidateCount, 0);
+  assert.deepEqual(report.candidateLocations, []);
+  assert.equal(report.candidateLocationsOmitted, 0);
   assert.equal(report.result, 'no_legacy_text_shapes_detected');
   assert.deepEqual(parseCapture(encode(messages)), messages);
   assert.equal(possibleLegacyTextDirective({path: '/name'}), 'path');
   assert.equal(possibleLegacyTextDirective({path: 42}), null);
   assert.equal(possibleLegacyTextDirective({call: 'fmt', args: {}}), 'call');
+});
+
+test('legacy relative Text paths are candidates without flagging valid ChildList paths', () => {
+  const messages = [surface, {version: '1.0', updateComponents: {
+    surfaceId: 'PRIVATE-SURFACE',
+    components: [
+      {id: 'col', component: 'Column', children: {path: '/guests', componentId: 'row'}},
+      {id: 'row', component: 'Text', text: {path: 'firstName'}},
+      {id: 'absolute', component: 'Text', text: {path: '/label'}},
+      {id: 'valid', component: 'Text', text: {'@path': 'firstName'}},
+      {id: 'empty', component: 'Text', text: {path: ''}},
+    ],
+  }}];
+  const report = inspectV1TextBindings(messages);
+  assert.equal(report.textComponents, 4);
+  assert.equal(report.candidateCount, 2);
+  assert.deepEqual(report.candidateLocations, [
+    {lineNumber: 2, componentIndex: 1, kind: 'path'},
+    {lineNumber: 2, componentIndex: 2, kind: 'path'},
+  ]);
+  assert.equal(possibleLegacyTextDirective({path: 'firstName'}), 'path');
+  assert.equal(possibleLegacyTextDirective({path: ''}), null);
+});
+
+test('inline createSurface Text bindings get private coordinates and a real v1 SDK control', () =>
+  inTemp(dir => {
+    const inline = {version: '1.0', createSurface: {
+      surfaceId: 'PRIVATE-SURFACE', catalogId: v1.basicCatalog.id,
+      dataModel: {name: 'PRIVATE-ADA'},
+      components: [
+        {id: 'root', component: 'Text', text: {path: '/PRIVATE-NAME'}},
+        {id: 'other', component: 'Text', text: {call: 'PRIVATE-FORMAT', args: {}}},
+        {id: 'safe', component: 'Text', text: {'@path': '/PRIVATE-NAME'}},
+      ],
+    }};
+    const capture = [surface, inline, components([{call: 'PRIVATE-FORMAT', args: {}}])];
+    const report = inspectV1TextBindings(capture);
+    assert.equal(report.surfaceMessages, 3);
+    assert.equal(report.textComponents, 4);
+    assert.equal(report.candidateCount, 3);
+    assert.deepEqual(report.candidateKinds, {legacyPathLike: 1, legacyCallLike: 2});
+    assert.deepEqual(report.candidateLocations, [
+      {lineNumber: 2, componentIndex: 0, kind: 'path'},
+      {lineNumber: 2, componentIndex: 1, kind: 'call'},
+      {lineNumber: 3, componentIndex: 0, kind: 'call'},
+    ]);
+    assert.equal(report.candidateLocationsOmitted, 0);
+    const input = join(dir, 'PRIVATE-INLINE.jsonl');
+    writeFileSync(input, encode(capture));
+    const strict = invoke(input, ['--strict']);
+    assert.equal(strict.status, 1, strict.stderr);
+    assert.deepEqual(JSON.parse(strict.stdout), report);
+    assert.doesNotMatch(strict.stdout + strict.stderr, /PRIVATE-/);
+
+    const processor = new v1.MessageProcessor([v1.basicCatalog], undefined, {
+      validationConfig: v1.STRICT_VALIDATION,
+    });
+    try {
+      processor.processMessages([{version: '1.0', createSurface: {
+        surfaceId: 's', catalogId: v1.basicCatalog.id,
+        components: [
+          {id: 'root', component: 'Column', children: ['absolute', 'relative']},
+          {id: 'absolute', component: 'Text', text: {path: '/name'}},
+          {id: 'relative', component: 'Text', text: {path: 'name'}},
+        ],
+        dataModel: {name: 'Ada'},
+      }}]);
+      const state = processor.model.getSurface('s');
+      const property = state.componentsModel.get('absolute').properties.text;
+      assert.deepEqual(new v1.DataContext(state, '/').resolveDynamicValue(property),
+        {path: '/name'});
+      const relative = state.componentsModel.get('relative').properties.text;
+      assert.deepEqual(new v1.DataContext(state, '/').resolveDynamicValue(relative),
+        {path: 'name'});
+    } finally {
+      processor.model.dispose();
+      processor.dispose();
+    }
+    assert.equal(inspectV1TextBindings([surface]).candidateCount, 0);
+    assert.throws(() => inspectV1TextBindings([
+      {version: '1.0', createSurface: {components: 'PRIVATE-INVALID'}},
+    ]), /Unsupported v1.0 component list/);
+  }));
+
+test('candidate coordinates are bounded and contain only local structural indices', () => {
+  const texts = Array.from({length: 36}, (_, i) =>
+    i % 2 ? {call: 'PRIVATE-FORMAT', args: {}} : {path: '/PRIVATE-NAME'});
+  const report = inspectV1TextBindings([surface, components(texts), model]);
+  assert.equal(report.candidateCount, 36);
+  assert.deepEqual(report.candidateKinds, {legacyPathLike: 18, legacyCallLike: 18});
+  assert.equal(report.candidateLocations.length, 32);
+  assert.equal(report.candidateLocationsOmitted, 4);
+  assert.deepEqual(report.candidateLocations[0],
+    {lineNumber: 2, componentIndex: 0, kind: 'path'});
+  assert.deepEqual(report.candidateLocations[31],
+    {lineNumber: 2, componentIndex: 31, kind: 'call'});
+  const serialized = JSON.stringify(report);
+  assert.equal(serialized.includes('PRIVATE-'), false);
+  assert.deepEqual(new Set(report.candidateLocations.map(location =>
+    Object.keys(location).join(','))), new Set(['lineNumber,componentIndex,kind']));
 });
 
 test('invalid, mixed-generation, oversized and malformed local input fail without leaks', () =>
