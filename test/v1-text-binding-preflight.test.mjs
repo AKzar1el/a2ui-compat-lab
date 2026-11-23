@@ -111,7 +111,7 @@ test('inline createSurface Text bindings get private coordinates and a real v1 S
     const strict = invoke(input, ['--strict']);
     assert.equal(strict.status, 1, strict.stderr);
     assert.deepEqual(JSON.parse(strict.stdout), report);
-    assert.doesNotMatch(strict.stdout + strict.stderr, /PRIVATE-|\\/PRIVATE-NAME/);
+    assert.doesNotMatch(strict.stdout + strict.stderr, /PRIVATE-/);
 
     const processor = new v1.MessageProcessor([v1.basicCatalog], undefined, {
       validationConfig: v1.STRICT_VALIDATION,
