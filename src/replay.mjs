@@ -204,7 +204,11 @@ export async function replayV09Actions(steps) {
         continue;
       }
 
-      const {surfaceId, componentId, basePath} = step.tap ?? {};
+      const tap = step.tap;
+      if (!tap || typeof tap !== 'object' || Array.isArray(tap) ||
+          Object.keys(tap).some(key => !['surfaceId', 'componentId', 'basePath'].includes(key)))
+        throw new TypeError('Tap contains unrecognized fields or invalid shape at index ' + index);
+      const {surfaceId, componentId, basePath} = tap;
       if (typeof surfaceId !== 'string' || !surfaceId ||
           typeof componentId !== 'string' || !componentId)
         throw new TypeError('Tap must name a surface and component at index ' + index);
