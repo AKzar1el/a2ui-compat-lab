@@ -10,8 +10,9 @@ const MAX_CAPTURE_BYTES = 1024 * 1024;
 const MAX_FRAME_BYTES = 128 * 1024;
 const MAX_FRAMES = 1000;
 const MAX_CANDIDATE_LOCATIONS = 32;
+const INPUT_VALUE_COMPONENTS = ['TextField', 'CheckBox', 'Slider', 'ChoicePicker', 'DateTimeInput'];
 const OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
-const USAGE = 'Usage: node src/v1-text-binding-preflight.mjs --input PRIVATE.jsonl [--strict]';
+const USAGE = 'Usage: node src/v1-text-binding-preflight.mjs --input PRIVATE.jsonl [--strict] [--include-input-values]';
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -32,11 +33,15 @@ export function possibleLegacyTextDirective(value) {
   return null;
 }
 
-export function inspectV1TextBindings(messages) {
+export function inspectV1TextBindings(messages, {includeInputValues = false} = {}) {
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > MAX_FRAMES)
     throw new Error('Unsupported capture event count');
   const counts = {legacyPathLike: 0, legacyCallLike: 0};
   let textComponents = 0;
+  let inputValueComponents = 0;
+  let inputValueCandidateCount = 0;
+  const inputValueCandidatesByComponent = Object.fromEntries(
+    INPUT_VALUE_COMPONENTS.map(component => [component, 0]));
   const candidateLocations = [];
   for (const [frameIndex, message] of messages.entries()) {
     if (!isRecord(message) || message.version !== '1.0' ||
@@ -52,31 +57,65 @@ export function inspectV1TextBindings(messages) {
       throw new Error('Unsupported v1.0 component list');
     for (const [componentIndex, component] of components.entries()) {
       if (!isRecord(component)) throw new Error('Unsupported v1.0 component');
-      if (component.component !== 'Text') continue;
-      textComponents++;
-      const kind = possibleLegacyTextDirective(component.text);
-      if (kind === 'path') counts.legacyPathLike++;
-      if (kind === 'call') counts.legacyCallLike++;
-      if (kind && candidateLocations.length < MAX_CANDIDATE_LOCATIONS)
-        candidateLocations.push({lineNumber: frameIndex + 1, componentIndex, kind});
+      if (component.component === 'Text') {
+        textComponents++;
+        const kind = possibleLegacyTextDirective(component.text);
+        if (kind === 'path') counts.legacyPathLike++;
+        if (kind === 'call') counts.legacyCallLike++;
+        if (kind && candidateLocations.length < MAX_CANDIDATE_LOCATIONS)
+          candidateLocations.push({lineNumber: frameIndex + 1, componentIndex, kind});
+        continue;
+      }
+      if (!includeInputValues || !INPUT_VALUE_COMPONENTS.includes(component.component))
+        continue;
+      inputValueComponents++;
+      // v1 literal objects remain legal; only an exact legacy path shape is advisory.
+      if (possibleLegacyTextDirective(component.value) !== 'path') continue;
+      inputValueCandidateCount++;
+      inputValueCandidatesByComponent[component.component]++;
+      if (candidateLocations.length < MAX_CANDIDATE_LOCATIONS)
+        candidateLocations.push({lineNumber: frameIndex + 1, componentIndex,
+          kind: 'inputValuePath'});
     }
   }
-  const candidateCount = counts.legacyPathLike + counts.legacyCallLike;
+  const textCandidateCount = counts.legacyPathLike + counts.legacyCallLike;
+  const candidateCount = textCandidateCount + inputValueCandidateCount;
+  const candidateKinds = includeInputValues
+    ? {legacyPathLike: counts.legacyPathLike + inputValueCandidateCount,
+      legacyCallLike: counts.legacyCallLike}
+    : counts;
   return {
-    schemaVersion: 1,
-    kind: 'a2ui-v1-text-binding-migration-preflight',
+    schemaVersion: includeInputValues ? 2 : 1,
+    kind: includeInputValues
+      ? 'a2ui-v1-binding-migration-preflight'
+      : 'a2ui-v1-text-binding-migration-preflight',
     protocol: '1.0',
     surfaceMessages: messages.length,
     textComponents,
     candidateCount,
-    candidateKinds: counts,
+    candidateKinds,
+    ...(includeInputValues ? {
+      textCandidateCount,
+      textCandidateKinds: counts,
+      inputValueComponents,
+      inputValueCandidateCount,
+      inputValueCandidatesByComponent,
+    } : {}),
     candidateLocations,
     candidateLocationsOmitted: candidateCount - candidateLocations.length,
-    result: candidateCount ? 'review_ambiguous_legacy_shapes' : 'no_legacy_text_shapes_detected',
+    result: candidateCount
+      ? 'review_ambiguous_legacy_shapes'
+      : includeInputValues ? 'no_legacy_binding_shapes_detected' : 'no_legacy_text_shapes_detected',
     recommendation: candidateCount
-      ? 'If a Text value was intended as a binding or call, migrate path/call to @path/@call. Plain objects may be intentional v1 literals.'
-      : 'No v0.9-shaped Text bindings detected in the inspected messages.',
-    limitations: 'Heuristic for Text.text only; no renderer, other component slot, schema conformance, intent or customer compatibility certification.',
+      ? includeInputValues
+        ? 'Review Text path/call and input value path objects. If bindings were intended, migrate to @path/@call; literal objects may be intentional.'
+        : 'If a Text value was intended as a binding or call, migrate path/call to @path/@call. Plain objects may be intentional v1 literals.'
+      : includeInputValues
+        ? 'No v0.9-shaped Text or supported input value bindings detected.'
+        : 'No v0.9-shaped Text bindings detected in the inspected messages.',
+    limitations: includeInputValues
+      ? 'Heuristic for Text.text and five named input value slots only; no renderer, two-way writeback, schema conformance, intent or customer certification.'
+      : 'Heuristic for Text.text only; no renderer, other component slot, schema conformance, intent or customer compatibility certification.',
   };
 }
 
@@ -99,6 +138,7 @@ export function parseCapture(raw) {
 
 function main(args) {
   let strict = false;
+  let includeInputValues = false;
   let input = null;
   if (args.length === 1 && args[0] === '--help') {
     process.stdout.write(USAGE + '\n');
@@ -106,6 +146,8 @@ function main(args) {
   }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--strict' && !strict) strict = true;
+    else if (args[i] === '--include-input-values' && !includeInputValues)
+      includeInputValues = true;
     else if (args[i] === '--input' && input === null && args[i + 1] &&
              !args[i + 1].startsWith('--')) input = resolve(args[++i]);
     else throw new Error(USAGE);
@@ -124,7 +166,7 @@ function main(args) {
   // Do not forward their messages into CLI output.
   let report;
   try {
-    report = inspectV1TextBindings(parseCapture(raw));
+    report = inspectV1TextBindings(parseCapture(raw), {includeInputValues});
   } catch {
     throw new Error('Invalid or unsupported v1.0 JSONL surface capture; contents omitted');
   }
