@@ -240,3 +240,131 @@ test('the actual pinned published v1 core treats old path as literal, not as bin
   assert.equal(possibleLegacyTextDirective({path: '/name'}), 'path');
   assert.equal(possibleLegacyTextDirective({call: 'formatString', args}), 'call');
 });
+
+
+test('opt-in input value scan covers five published components without changing Text-only API', () => {
+  const inline = {version: '1.0', createSurface: {
+    surfaceId: 'PRIVATE-SURFACE', catalogId: 'catalog',
+    components: [
+      {id: 'PRIVATE-FIELD', component: 'TextField', value: {path: '/PRIVATE-VALUE'}},
+      {id: 'PRIVATE-SAFE', component: 'CheckBox', value: {'@path': '/PRIVATE-VALUE'}},
+      {id: 'PRIVATE-COLUMN', component: 'Column',
+        children: {path: '/PRIVATE-LIST', componentId: 'PRIVATE-ROW'}},
+    ],
+  }};
+  const update = {version: '1.0', updateComponents: {
+    surfaceId: 'PRIVATE-SURFACE',
+    components: [
+      {id: 'PRIVATE-CHECK', component: 'CheckBox', value: {path: 'enabled'}},
+      {id: 'PRIVATE-SLIDER', component: 'Slider', value: {path: '/PRIVATE-VALUE'}},
+      {id: 'PRIVATE-PICKER', component: 'ChoicePicker', value: {path: 'choice'}},
+      {id: 'PRIVATE-DATE', component: 'DateTimeInput', value: {path: '/date'}},
+      {id: 'PRIVATE-TEXT', component: 'Text', text: {call: 'PRIVATE-FMT', args: {}}},
+      {id: 'PRIVATE-LITERAL', component: 'TextField',
+        value: {path: '/PRIVATE-VALUE', literal: true}},
+      {id: 'PRIVATE-EMPTY', component: 'Slider', value: {path: ''}},
+      {id: 'PRIVATE-BUTTON', component: 'Button', value: {path: '/PRIVATE-VALUE'}},
+    ],
+  }};
+  const frames = [inline, update];
+  const legacy = inspectV1TextBindings(frames);
+  assert.equal(legacy.schemaVersion, 1);
+  assert.equal(legacy.kind, 'a2ui-v1-text-binding-migration-preflight');
+  assert.equal(legacy.candidateCount, 1);
+  assert.deepEqual(legacy.candidateKinds, {legacyPathLike: 0, legacyCallLike: 1});
+  assert.equal(Object.hasOwn(legacy, 'inputValueCandidateCount'), false);
+
+  const report = inspectV1TextBindings(frames, {includeInputValues: true});
+  assert.equal(report.schemaVersion, 2);
+  assert.equal(report.kind, 'a2ui-v1-binding-migration-preflight');
+  assert.equal(report.textComponents, 1);
+  assert.equal(report.textCandidateCount, 1);
+  assert.deepEqual(report.textCandidateKinds, {legacyPathLike: 0, legacyCallLike: 1});
+  assert.equal(report.inputValueComponents, 8);
+  assert.equal(report.inputValueCandidateCount, 5);
+  assert.deepEqual(report.inputValueCandidatesByComponent, {
+    TextField: 1, CheckBox: 1, Slider: 1, ChoicePicker: 1, DateTimeInput: 1,
+  });
+  assert.equal(report.candidateCount, 6);
+  assert.deepEqual(report.candidateKinds, {legacyPathLike: 5, legacyCallLike: 1});
+  assert.deepEqual(report.candidateLocations, [
+    {lineNumber: 1, componentIndex: 0, kind: 'inputValuePath'},
+    {lineNumber: 2, componentIndex: 0, kind: 'inputValuePath'},
+    {lineNumber: 2, componentIndex: 1, kind: 'inputValuePath'},
+    {lineNumber: 2, componentIndex: 2, kind: 'inputValuePath'},
+    {lineNumber: 2, componentIndex: 3, kind: 'inputValuePath'},
+    {lineNumber: 2, componentIndex: 4, kind: 'call'},
+  ]);
+  const serialized = JSON.stringify(report);
+  for (const privateData of ['PRIVATE-', '/date', 'choice', 'enabled']) {
+    assert.equal(serialized.includes(privateData), false, privateData);
+  }
+});
+
+test('opt-in CLI is bounded, privacy-preserving, and strict only for review candidates', () =>
+  inTemp(dir => {
+    const input = join(dir, 'PRIVATE-INPUT-VALUES.jsonl');
+    const frame = {version: '1.0', updateComponents: {
+      surfaceId: 'PRIVATE-SURFACE',
+      components: Array.from({length: 38}, (_, i) => ({
+        id: 'PRIVATE-ID-' + i, component: 'TextField',
+        value: {path: 'PRIVATE-RELATIVE-' + i},
+      })),
+    }};
+    writeFileSync(input, encode([surface, frame]));
+    const old = invoke(input);
+    assert.equal(old.status, 0, old.stderr);
+    assert.equal(JSON.parse(old.stdout).candidateCount, 0);
+    const run = invoke(input, ['--include-input-values', '--strict']);
+    assert.equal(run.status, 1, run.stderr);
+    assert.equal(run.stderr, '');
+    const report = JSON.parse(run.stdout);
+    assert.equal(report.candidateCount, 38);
+    assert.equal(report.textCandidateCount, 0);
+    assert.equal(report.inputValueCandidateCount, 38);
+    assert.equal(report.candidateLocations.length, 32);
+    assert.equal(report.candidateLocationsOmitted, 6);
+    assert.equal(report.candidateLocations[0].kind, 'inputValuePath');
+    assert.equal(report.candidateLocations[31].componentIndex, 31);
+    assert.equal((run.stdout + run.stderr).includes('PRIVATE-'), false);
+    const relaxed = invoke(input, ['--include-input-values']);
+    assert.equal(relaxed.status, 0, relaxed.stderr);
+    assert.deepEqual(JSON.parse(relaxed.stdout), report);
+  }));
+
+test('published v1 SDK resolves five input @path values while legacy path remains literal', () => {
+  const cases = [
+    ['TextField', 'Ada'],
+    ['CheckBox', true],
+    ['Slider', 42],
+    ['ChoicePicker', ['red']],
+    ['DateTimeInput', '2026-11-23'],
+  ];
+  function resolveInputValue(type, value, dataValue) {
+    const processor = new v1.MessageProcessor([v1.basicCatalog], undefined, {
+      validationConfig: v1.STRICT_VALIDATION,
+    });
+    try {
+      processor.processMessages([{version: '1.0', createSurface: {
+        surfaceId: 's', catalogId: v1.basicCatalog.id,
+        components: [
+          {id: 'root', component: 'Column', children: ['input']},
+          {id: 'input', component: type, value},
+        ],
+        dataModel: {value: dataValue},
+      }}]);
+      const state = processor.model.getSurface('s');
+      return new v1.DataContext(state, '/').resolveDynamicValue(
+        state.componentsModel.get('input').properties.value);
+    } finally {
+      processor.model.dispose();
+      processor.dispose();
+    }
+  }
+  for (const [type, expected] of cases) {
+    assert.deepEqual(resolveInputValue(type, {'@path': '/value'}, expected),
+      expected, type + ' @path');
+    assert.deepEqual(resolveInputValue(type, {path: '/value'}, expected),
+      {path: '/value'}, type + ' legacy path');
+  }
+});
