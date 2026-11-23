@@ -109,3 +109,42 @@ No v1.0 React/Chromium renderer, Python parity, actual external capture,
 customer adoption, or revenue is established by this experiment.
 The pinned root SDK remains 0.15.0; no dependency upgrade or exception
 override is required for the test.
+ 
+## Optional Button event-context migration scan
+
+Add `--include-event-context` to inspect direct values under
+`Button.action.event.context` for direct nonempty legacy `{"path":"..."}` or `{"call":"..."}`
+directive shapes. This catches a different integration failure: the actual
+published v1 `GenericBinder` sends the old `path` or `call` object literally in an
+outbound Button event, whereas `@path` resolves the current data-model value.
+The comparison is exercised by an offline strict-SDK action-dispatch test.
+
+The new opt-in report uses **schemaVersion 3** (with or without
+`--include-input-values`). It includes `buttonEventContexts`,
+`eventContextCandidateCount` and `eventContextCandidateKinds`; `candidateKinds` and the shared maximum of
+32 `candidateLocations` include the event findings. Multiple context keys of the same kind in one
+Button produce one shared structural location; totals still count all candidates.
+Event locations use the
+fixed `buttonEventContextPath` or `buttonEventContextCall` kind and report only JSONL line and component
+index, never event names, context keys, private paths, IDs or values. The
+default Text-only schemaVersion 1 and input-only schemaVersion 2 remain
+unchanged. The `--strict` exit rule applies to this option too.
+
+The opt-in scan traverses nested plain context objects and arrays (including
+nested function-call arguments) and counts each candidate occurrence, including
+separate aliases of the same acyclic subtree. To avoid incomplete or unsafe
+reports, it fails closed on cycles, accessor-bearing objects (even hidden
+getters), exotic prototypes, nesting deeper than 12 levels, or more than
+2,048 visited nodes per Button. The exported programmatic inspector enforces
+these bounds too; CLI failures contain no private context data. The shared
+32-location cap still reports only Button structural coordinates, regardless of
+nesting depth. A cap breach never produces a false "no candidates" result.
+
+Scope is bounded Button event actions in createSurface and updateComponents.
+Other action-bearing components, renderer-level interactions and live customer
+systems remain untested. A literal
+`path` object may be intentional. Keep these reports private; this is a
+migration advisory, not a security or conformance verdict.
+
+Published protocol guidance:
+https://a2ui.org/concepts/data-binding/ .

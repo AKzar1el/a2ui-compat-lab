@@ -374,3 +374,270 @@ test('published v1 SDK resolves five input @path values while legacy path remain
       {path: '/value'}, type + ' legacy path');
   }
 });
+
+test('opt-in Button event context scan is structural, bounded and privacy-preserving', () =>
+  inTemp(dir => {
+    const input = join(dir, 'PRIVATE-ACTION.jsonl');
+    const context = Object.fromEntries(Array.from({length: 35}, (_, i) =>
+      ['PRIVATE-KEY-' + i, {path: '/PRIVATE-EMAIL-' + i}]));
+    context.call = {call: 'PRIVATE-FORMAT', args: {value: 'PRIVATE'}};
+    context.safe = {'@path': '/PRIVATE-EMAIL'};
+    context.safeCall = {'@call': 'PRIVATE-FORMAT', args: {value: 'PRIVATE'}};
+    context.literal = {path: '/PRIVATE-EMAIL', literal: true};
+    const frame = {version: '1.0', createSurface: {
+      surfaceId: 'PRIVATE-SURFACE', catalogId: 'catalog', components: [
+        {id: 'PRIVATE-BUTTON', component: 'Button',
+          action: {event: {name: 'PRIVATE-SUBMIT', context}}},
+        {id: 'PRIVATE-FUNCTION', component: 'Button',
+          action: {functionCall: {'@call': 'PRIVATE-FUNC'}}},
+        {id: 'PRIVATE-TEXT', component: 'Text', text: 'Safe'},
+      ],
+    }};
+    writeFileSync(input, encode([frame]));
+    const defaultReport = JSON.parse(invoke(input).stdout);
+    assert.equal(defaultReport.schemaVersion, 1);
+    assert.equal(defaultReport.candidateCount, 0);
+    const inputOnly = JSON.parse(invoke(input, ['--include-input-values']).stdout);
+    assert.equal(inputOnly.schemaVersion, 2);
+    assert.equal(inputOnly.candidateCount, 0);
+    const run = invoke(input, ['--include-event-context', '--strict']);
+    assert.equal(run.status, 1, run.stderr);
+    assert.equal(run.stderr, '');
+    const report = JSON.parse(run.stdout);
+    assert.equal(report.schemaVersion, 3);
+    assert.equal(report.kind, 'a2ui-v1-binding-migration-preflight');
+    assert.equal(report.buttonEventContexts, 1);
+    assert.equal(report.eventContextCandidateCount, 36);
+    assert.doesNotMatch(report.recommendation, /input value/);
+    assert.deepEqual(report.eventContextCandidateKinds, {path: 35, call: 1});
+    assert.equal(report.candidateCount, 36);
+    assert.deepEqual(report.candidateKinds, {legacyPathLike: 35, legacyCallLike: 1});
+    assert.equal(report.candidateLocations.length, 2);
+    assert.equal(report.candidateLocationsOmitted, 34);
+    assert.deepEqual(report.candidateLocations[0],
+      {lineNumber: 1, componentIndex: 0, kind: 'buttonEventContextPath'});
+    assert.deepEqual(report.candidateLocations[1],
+      {lineNumber: 1, componentIndex: 0, kind: 'buttonEventContextCall'});
+    assert.deepEqual(new Set(report.candidateLocations.map(x => Object.keys(x).join(','))),
+      new Set(['lineNumber,componentIndex,kind']));
+    assert.doesNotMatch(run.stdout + run.stderr, /PRIVATE-/);
+    const together = invoke(input, ['--include-input-values', '--include-event-context']);
+    assert.equal(together.status, 0, together.stderr);
+    assert.equal(JSON.parse(together.stdout).schemaVersion, 3);
+    assert.match(JSON.parse(together.stdout).recommendation, /input value/);
+    assert.equal(JSON.parse(together.stdout).eventContextCandidateCount, 36);
+    assert.equal(invoke(input, ['--include-event-context', '--include-event-context']).status, 2);
+  }));
+
+test('published v1 Button action sends resolved @path but literal legacy path context', async () => {
+  async function send(emailValue) {
+    const emitted = [];
+    const processor = new v1.MessageProcessor([v1.basicCatalog],
+      action => emitted.push(action), {validationConfig: v1.STRICT_VALIDATION});
+    try {
+      processor.processMessages([{version: '1.0', createSurface: {
+        surfaceId: 's', catalogId: v1.basicCatalog.id,
+        components: [
+          {id: 'root', component: 'Button', child: 'label',
+            action: {event: {name: 'submit', context: {email: emailValue}}}},
+          {id: 'label', component: 'Text', text: 'Submit'},
+        ], dataModel: {email: 'Ada@example.invalid'},
+      }}]);
+      const surfaceState = processor.model.getSurface('s');
+      const binder = new v1.GenericBinder(
+        new v1.ComponentContext(surfaceState, 'root'),
+        v1.basicCatalog.components.get('Button').schema);
+      try { await binder.snapshot.action(); } finally { binder.dispose(); }
+      assert.equal(emitted.length, 1);
+      assert.equal(emitted[0].name, 'submit');
+      return emitted[0].context;
+    } finally {
+      processor.model.dispose();
+      processor.dispose();
+    }
+  }
+  assert.deepEqual(await send({'@path': '/email'}), {email: 'Ada@example.invalid'});
+  assert.deepEqual(await send({path: '/email'}), {email: {path: '/email'}});
+  const args = {value: 'Hi ' + String.fromCharCode(36) + '{/email}'};
+  assert.deepEqual(await send({'@call': 'formatString', args}),
+    {email: 'Hi Ada@example.invalid'});
+  assert.deepEqual(await send({call: 'formatString', args}),
+    {email: {call: 'formatString', args}});
+});
+
+const buttonMessage = context => ({version: '1.0', createSurface: {
+  surfaceId: 'PRIVATE-SURFACE', catalogId: 'catalog',
+  components: [{id: 'PRIVATE-BUTTON', component: 'Button',
+    action: {event: {name: 'PRIVATE-EVENT', context}}}],
+}});
+
+test('nested event context candidate counts are opt-in, alias-aware and private', () => {
+  const shared = {path: '/PRIVATE-EMAIL'};
+  const frame = buttonMessage({
+    payload: {recipient: shared, duplicate: shared,
+      items: [{call: 'PRIVATE-FORMAT', args: {value: 'PRIVATE-TEXT'}}]},
+    safe: {'@path': '/PRIVATE-EMAIL'},
+    intentionalLiteral: {path: '/PRIVATE-EMAIL', literal: true},
+    unrelatedChildren: {componentId: 'row', path: '/items'},
+  });
+  const defaultReport = inspectV1TextBindings([frame]);
+  assert.equal(defaultReport.schemaVersion, 1);
+  assert.equal(defaultReport.candidateCount, 0);
+  const inputReport = inspectV1TextBindings([frame], {includeInputValues: true});
+  assert.equal(inputReport.schemaVersion, 2);
+  assert.equal(inputReport.candidateCount, 0);
+  const report = inspectV1TextBindings([frame], {includeEventContext: true});
+  assert.equal(report.schemaVersion, 3);
+  assert.equal(report.buttonEventContexts, 1);
+  assert.equal(report.eventContextCandidateCount, 3);
+  assert.deepEqual(report.eventContextCandidateKinds, {path: 2, call: 1});
+  assert.equal(report.candidateCount, 3);
+  assert.deepEqual(report.candidateLocations, [
+    {lineNumber: 1, componentIndex: 0, kind: 'buttonEventContextPath'},
+    {lineNumber: 1, componentIndex: 0, kind: 'buttonEventContextCall'},
+  ]);
+  assert.equal(report.candidateLocationsOmitted, 1);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE-/);
+});
+
+test('nested scanner fails closed on cycles, accessors and exotic objects', () => {
+  const scan = context => inspectV1TextBindings([buttonMessage(context)],
+    {includeEventContext: true});
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.throws(() => scan({payload: cyclic}), /Cyclic Button event context/);
+  let getterCalls = 0;
+  const hidden = {path: '/PRIVATE-EMAIL'};
+  Object.defineProperty(hidden, 'hiddenGetter', {
+    enumerable: false,
+    get() { getterCalls++; throw new Error('PRIVATE-GETTER'); },
+  });
+  assert.throws(() => scan({payload: hidden}),
+    /Unsupported Button event context property/);
+  assert.equal(getterCalls, 0);
+  assert.throws(() => scan({payload: new Date()}),
+    /Unsupported Button event context object/);
+  assert.equal(scan({payload: {path: '/PRIVATE-EMAIL'}}).candidateCount, 1);
+});
+
+test('nested scanner depth and visited-node ceilings reject incomplete scans', () => {
+  const scan = context => inspectV1TextBindings([buttonMessage(context)],
+    {includeEventContext: true});
+  let deep = {path: '/PRIVATE-EMAIL'};
+  for (let i = 0; i < 13; i++) deep = {inside: deep};
+  assert.throws(() => scan({payload: deep}), /depth limit/);
+  assert.throws(() => scan({payload: Array.from({length: 2100}, () => null)}),
+    /node limit/);
+  const candidates = Array.from({length: 40}, () => ({path: '/PRIVATE-EMAIL'}));
+  const bounded = scan({payload: candidates});
+  assert.equal(bounded.eventContextCandidateCount, 40);
+  assert.equal(bounded.candidateCount, 40);
+  assert.deepEqual(bounded.candidateLocations, [
+    {lineNumber: 1, componentIndex: 0, kind: 'buttonEventContextPath'},
+  ]);
+  assert.equal(bounded.candidateLocationsOmitted, 39);
+});
+
+test('nested CLI strict reports coordinates only and fails closed on depth', () =>
+  inTemp(dir => {
+    const path = join(dir, 'PRIVATE-NESTED.jsonl');
+    writeFileSync(path, encode([buttonMessage({payload: {
+      inner: [{path: '/PRIVATE-EMAIL'}, {call: 'PRIVATE-FORMAT', args: {}}],
+    }})]));
+    const plain = invoke(path);
+    assert.equal(plain.status, 0);
+    assert.equal(JSON.parse(plain.stdout).candidateCount, 0);
+    const result = invoke(path, ['--include-event-context', '--strict']);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(JSON.parse(result.stdout).eventContextCandidateCount, 2);
+    assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE-/);
+    let deep = {path: '/PRIVATE-EMAIL'};
+    for (let i = 0; i < 13; i++) deep = {nested: deep};
+    writeFileSync(join(dir, 'PRIVATE-DEEP.jsonl'), encode([buttonMessage({payload: deep})]));
+    const blocked = invoke(join(dir, 'PRIVATE-DEEP.jsonl'), ['--include-event-context']);
+    assert.equal(blocked.status, 2);
+    assert.equal(blocked.stdout, '');
+    assert.doesNotMatch(blocked.stderr, /PRIVATE-/);
+    assert.match(blocked.stderr, /Invalid or unsupported v1.0 JSONL surface capture/);
+  }));
+
+test('published v1 Button dispatch resolves nested @path/@call but not legacy forms', async () => {
+  const emitted = [];
+  const processor = new v1.MessageProcessor([v1.basicCatalog],
+    action => emitted.push(action), {validationConfig: v1.STRICT_VALIDATION});
+  try {
+    const context = {
+      payload: {
+        valid: {'@path': '/email'},
+        literal: {path: '/email'},
+        items: [{'@path': '/email'}, {path: '/email'}],
+        rendered: {'@call': 'formatString', args: {value: 'Hi ${/email}'}},
+        oldCall: {call: 'formatString', args: {value: 'Hi ${/email}'}},
+      },
+    };
+    processor.processMessages([{version: '1.0', createSurface: {
+      surfaceId: 's', catalogId: v1.basicCatalog.id,
+      components: [
+        {id: 'root', component: 'Button', child: 'label',
+          action: {event: {name: 'submit', context}}},
+        {id: 'label', component: 'Text', text: 'Submit'},
+      ], dataModel: {email: 'Ada@example.invalid'},
+    }}]);
+    const state = processor.model.getSurface('s');
+    const binder = new v1.GenericBinder(new v1.ComponentContext(state, 'root'),
+      v1.basicCatalog.components.get('Button').schema);
+    try { await binder.snapshot.action(); } finally { binder.dispose(); }
+    assert.equal(emitted.length, 1);
+    assert.equal(emitted[0].context.payload.valid, 'Ada@example.invalid');
+    assert.deepEqual(emitted[0].context.payload.literal, {path: '/email'});
+    assert.deepEqual(emitted[0].context.payload.items,
+      ['Ada@example.invalid', {path: '/email'}]);
+    assert.equal(emitted[0].context.payload.rendered, 'Hi Ada@example.invalid');
+    assert.deepEqual(emitted[0].context.payload.oldCall,
+      {call: 'formatString', args: {value: 'Hi ${/email}'}});
+    const advisory = inspectV1TextBindings([buttonMessage(context)],
+      {includeEventContext: true});
+    assert.equal(advisory.eventContextCandidateCount, 3);
+    assert.deepEqual(advisory.eventContextCandidateKinds, {path: 2, call: 1});
+  } finally {
+    processor.model.dispose();
+    processor.dispose();
+  }
+});
+
+test('programmatic legacy directive inspection never invokes own or inherited getters', () => {
+  let getterCalls = 0;
+  const accessor = {};
+  Object.defineProperty(accessor, 'call', {
+    enumerable: true,
+    get() { getterCalls++; throw new Error('PRIVATE-GETTER'); },
+  });
+  assert.equal(possibleLegacyTextDirective(accessor), null);
+  const controls = [
+    ['call', {unrelated: 'literal'}, null],
+    ['args', {call: 'formatString'}, 'call'],
+    ['catalogId', {call: 'formatString'}, 'call'],
+  ];
+  for (const [key, value, expected] of controls) {
+    assert.equal(Object.hasOwn(Object.prototype, key), false);
+    Object.defineProperty(Object.prototype, key, {
+      configurable: true,
+      get() { getterCalls++; throw new Error('PRIVATE-INHERITED-GETTER'); },
+    });
+    let result;
+    try {
+      result = possibleLegacyTextDirective(value);
+    } finally {
+      delete Object.prototype[key];
+    }
+    assert.equal(result, expected);
+  }
+  assert.equal(getterCalls, 0);
+  assert.equal(possibleLegacyTextDirective({path: '/PRIVATE-EMAIL'}), 'path');
+  assert.equal(possibleLegacyTextDirective({call: 'formatString', args: {}}), 'call');
+  const report = inspectV1TextBindings([
+    buttonMessage({payload: {recipient: {path: '/PRIVATE-EMAIL'}}}),
+  ], {includeEventContext: true});
+  assert.equal(report.eventContextCandidateCount, 1);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE-/);
+});
