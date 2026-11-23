@@ -50,6 +50,11 @@ test('v1 local capture flags potential v0.9 Text directives without private valu
     assert.equal(report.textComponents, 5);
     assert.equal(report.candidateCount, 2);
     assert.deepEqual(report.candidateKinds, {legacyPathLike: 1, legacyCallLike: 1});
+    assert.deepEqual(report.candidateLocations, [
+      {lineNumber: 2, componentIndex: 1, kind: 'path'},
+      {lineNumber: 2, componentIndex: 2, kind: 'call'},
+    ]);
+    assert.equal(report.candidateLocationsOmitted, 0);
     assert.equal(report.result, 'review_ambiguous_legacy_shapes');
     assert.match(report.recommendation, /may be intentional/);
     for (const secret of ['PRIVATE-CAPTURE', 'PRIVATE-SURFACE', 'PRIVATE-TEXT', 'PRIVATE-ADA',
@@ -69,11 +74,31 @@ test('explicit v1 directives and unrelated literal objects pass the advisory pre
   ]), model];
   const report = inspectV1TextBindings(messages);
   assert.equal(report.candidateCount, 0);
+  assert.deepEqual(report.candidateLocations, []);
+  assert.equal(report.candidateLocationsOmitted, 0);
   assert.equal(report.result, 'no_legacy_text_shapes_detected');
   assert.deepEqual(parseCapture(encode(messages)), messages);
   assert.equal(possibleLegacyTextDirective({path: '/name'}), 'path');
   assert.equal(possibleLegacyTextDirective({path: 42}), null);
   assert.equal(possibleLegacyTextDirective({call: 'fmt', args: {}}), 'call');
+});
+
+test('candidate coordinates are bounded and contain only local structural indices', () => {
+  const texts = Array.from({length: 36}, (_, i) =>
+    i % 2 ? {call: 'PRIVATE-FORMAT', args: {}} : {path: '/PRIVATE-NAME'});
+  const report = inspectV1TextBindings([surface, components(texts), model]);
+  assert.equal(report.candidateCount, 36);
+  assert.deepEqual(report.candidateKinds, {legacyPathLike: 18, legacyCallLike: 18});
+  assert.equal(report.candidateLocations.length, 32);
+  assert.equal(report.candidateLocationsOmitted, 4);
+  assert.deepEqual(report.candidateLocations[0],
+    {lineNumber: 2, componentIndex: 0, kind: 'path'});
+  assert.deepEqual(report.candidateLocations[31],
+    {lineNumber: 2, componentIndex: 31, kind: 'call'});
+  const serialized = JSON.stringify(report);
+  assert.doesNotMatch(serialized, /PRIVATE-|\\/PRIVATE-NAME/);
+  assert.deepEqual(new Set(report.candidateLocations.map(location =>
+    Object.keys(location).join(','))), new Set(['lineNumber,componentIndex,kind']));
 });
 
 test('invalid, mixed-generation, oversized and malformed local input fail without leaks', () =>
