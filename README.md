@@ -14,6 +14,7 @@ migration advisory without changing default Text-only reports. A plain object
 with `path` or `call` may be an intentional v1 literal, not an invalid payload.
 This does not render a v1 browser surface or test two-way input writeback.
 See [scope, evidence, and privacy limits](docs/V1_TEXT_BINDING_PREFLIGHT.md).
+Optional `--include-event-context` also flags direct legacy Button event context paths using the real published v1 action-dispatch behavior; reports retain structural-only private coordinates.
 
 **DOM-less browser-condition SDK portability:** The installed published 0.15.0
 basic v1 catalog currently imports Lit when resolved with Node's browser

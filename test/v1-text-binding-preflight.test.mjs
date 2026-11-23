@@ -374,3 +374,81 @@ test('published v1 SDK resolves five input @path values while legacy path remain
       {path: '/value'}, type + ' legacy path');
   }
 });
+
+test('opt-in Button event context scan is structural, bounded and privacy-preserving', () =>
+  inTemp(dir => {
+    const input = join(dir, 'PRIVATE-ACTION.jsonl');
+    const context = Object.fromEntries(Array.from({length: 35}, (_, i) =>
+      ['PRIVATE-KEY-' + i, {path: '/PRIVATE-EMAIL-' + i}]));
+    context.safe = {'@path': '/PRIVATE-EMAIL'};
+    context.literal = {path: '/PRIVATE-EMAIL', literal: true};
+    const frame = {version: '1.0', createSurface: {
+      surfaceId: 'PRIVATE-SURFACE', catalogId: 'catalog', components: [
+        {id: 'PRIVATE-BUTTON', component: 'Button',
+          action: {event: {name: 'PRIVATE-SUBMIT', context}}},
+        {id: 'PRIVATE-FUNCTION', component: 'Button',
+          action: {functionCall: {'@call': 'PRIVATE-FUNC'}}},
+        {id: 'PRIVATE-TEXT', component: 'Text', text: 'Safe'},
+      ],
+    }};
+    writeFileSync(input, encode([frame]));
+    const defaultReport = JSON.parse(invoke(input).stdout);
+    assert.equal(defaultReport.schemaVersion, 1);
+    assert.equal(defaultReport.candidateCount, 0);
+    const inputOnly = JSON.parse(invoke(input, ['--include-input-values']).stdout);
+    assert.equal(inputOnly.schemaVersion, 2);
+    assert.equal(inputOnly.candidateCount, 0);
+    const run = invoke(input, ['--include-event-context', '--strict']);
+    assert.equal(run.status, 1, run.stderr);
+    assert.equal(run.stderr, '');
+    const report = JSON.parse(run.stdout);
+    assert.equal(report.schemaVersion, 3);
+    assert.equal(report.kind, 'a2ui-v1-binding-migration-preflight');
+    assert.equal(report.buttonEventContexts, 1);
+    assert.equal(report.eventContextCandidateCount, 35);
+    assert.equal(report.candidateCount, 35);
+    assert.deepEqual(report.candidateKinds, {legacyPathLike: 35, legacyCallLike: 0});
+    assert.equal(report.candidateLocations.length, 32);
+    assert.equal(report.candidateLocationsOmitted, 3);
+    assert.deepEqual(report.candidateLocations[0],
+      {lineNumber: 1, componentIndex: 0, kind: 'buttonEventContextPath'});
+    assert.deepEqual(new Set(report.candidateLocations.map(x => Object.keys(x).join(','))),
+      new Set(['lineNumber,componentIndex,kind']));
+    assert.doesNotMatch(run.stdout + run.stderr, /PRIVATE-/);
+    const together = invoke(input, ['--include-input-values', '--include-event-context']);
+    assert.equal(together.status, 0, together.stderr);
+    assert.equal(JSON.parse(together.stdout).schemaVersion, 3);
+    assert.equal(JSON.parse(together.stdout).eventContextCandidateCount, 35);
+    assert.equal(invoke(input, ['--include-event-context', '--include-event-context']).status, 2);
+  }));
+
+test('published v1 Button action sends resolved @path but literal legacy path context', async () => {
+  async function send(emailValue) {
+    const emitted = [];
+    const processor = new v1.MessageProcessor([v1.basicCatalog],
+      action => emitted.push(action), {validationConfig: v1.STRICT_VALIDATION});
+    try {
+      processor.processMessages([{version: '1.0', createSurface: {
+        surfaceId: 's', catalogId: v1.basicCatalog.id,
+        components: [
+          {id: 'root', component: 'Button', child: 'label',
+            action: {event: {name: 'submit', context: {email: emailValue}}}},
+          {id: 'label', component: 'Text', text: 'Submit'},
+        ], dataModel: {email: 'Ada@example.invalid'},
+      }}]);
+      const surfaceState = processor.model.getSurface('s');
+      const binder = new v1.GenericBinder(
+        new v1.ComponentContext(surfaceState, 'root'),
+        v1.basicCatalog.components.get('Button').schema);
+      try { await binder.snapshot.action(); } finally { binder.dispose(); }
+      assert.equal(emitted.length, 1);
+      assert.equal(emitted[0].name, 'submit');
+      return emitted[0].context;
+    } finally {
+      processor.model.dispose();
+      processor.dispose();
+    }
+  }
+  assert.deepEqual(await send({'@path': '/email'}), {email: 'Ada@example.invalid'});
+  assert.deepEqual(await send({path: '/email'}), {email: {path: '/email'}});
+});
