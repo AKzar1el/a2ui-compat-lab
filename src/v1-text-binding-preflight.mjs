@@ -12,7 +12,7 @@ const MAX_FRAMES = 1000;
 const MAX_CANDIDATE_LOCATIONS = 32;
 const INPUT_VALUE_COMPONENTS = ['TextField', 'CheckBox', 'Slider', 'ChoicePicker', 'DateTimeInput'];
 const OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
-const USAGE = 'Usage: node src/v1-text-binding-preflight.mjs --input PRIVATE.jsonl [--strict] [--include-input-values]';
+const USAGE = 'Usage: node src/v1-text-binding-preflight.mjs --input PRIVATE.jsonl [--strict] [--include-input-values] [--include-event-context]';
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -33,13 +33,16 @@ export function possibleLegacyTextDirective(value) {
   return null;
 }
 
-export function inspectV1TextBindings(messages, {includeInputValues = false} = {}) {
+export function inspectV1TextBindings(messages, {includeInputValues = false, includeEventContext = false} = {}) {
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > MAX_FRAMES)
     throw new Error('Unsupported capture event count');
   const counts = {legacyPathLike: 0, legacyCallLike: 0};
   let textComponents = 0;
   let inputValueComponents = 0;
   let inputValueCandidateCount = 0;
+  let buttonEventContexts = 0;
+  let eventContextCandidateCount = 0;
+  const eventContextCandidateKinds = {path: 0, call: 0};
   const inputValueCandidatesByComponent = Object.fromEntries(
     INPUT_VALUE_COMPONENTS.map(component => [component, 0]));
   const candidateLocations = [];
@@ -66,6 +69,28 @@ export function inspectV1TextBindings(messages, {includeInputValues = false} = {
           candidateLocations.push({lineNumber: frameIndex + 1, componentIndex, kind});
         continue;
       }
+      if (includeEventContext && component.component === 'Button') {
+        const context = component.action?.event?.context;
+        if (isRecord(context)) {
+          buttonEventContexts++;
+          // A single direct legacy path object is an advisory. Context keys,
+          // identifiers and values must never enter the public report.
+          const recordedKinds = new Set();
+          for (const value of Object.values(context)) {
+            const kind = possibleLegacyTextDirective(value);
+            if (!kind) continue;
+            eventContextCandidateCount++;
+            eventContextCandidateKinds[kind]++;
+            // Private context keys are not emitted; identical coordinates for
+            // many keys on one Button do not help locate another component.
+            if (recordedKinds.has(kind)) continue;
+            recordedKinds.add(kind);
+            if (candidateLocations.length < MAX_CANDIDATE_LOCATIONS)
+              candidateLocations.push({lineNumber: frameIndex + 1, componentIndex,
+                kind: kind === 'path' ? 'buttonEventContextPath' : 'buttonEventContextCall'});
+          }
+        }
+      }
       if (!includeInputValues || !INPUT_VALUE_COMPONENTS.includes(component.component))
         continue;
       inputValueComponents++;
@@ -79,14 +104,14 @@ export function inspectV1TextBindings(messages, {includeInputValues = false} = {
     }
   }
   const textCandidateCount = counts.legacyPathLike + counts.legacyCallLike;
-  const candidateCount = textCandidateCount + inputValueCandidateCount;
-  const candidateKinds = includeInputValues
-    ? {legacyPathLike: counts.legacyPathLike + inputValueCandidateCount,
-      legacyCallLike: counts.legacyCallLike}
+  const candidateCount = textCandidateCount + inputValueCandidateCount + eventContextCandidateCount;
+  const candidateKinds = includeInputValues || includeEventContext
+    ? {legacyPathLike: counts.legacyPathLike + inputValueCandidateCount + eventContextCandidateKinds.path,
+      legacyCallLike: counts.legacyCallLike + eventContextCandidateKinds.call}
     : counts;
   return {
-    schemaVersion: includeInputValues ? 2 : 1,
-    kind: includeInputValues
+    schemaVersion: includeEventContext ? 3 : includeInputValues ? 2 : 1,
+    kind: includeInputValues || includeEventContext
       ? 'a2ui-v1-binding-migration-preflight'
       : 'a2ui-v1-text-binding-migration-preflight',
     protocol: '1.0',
@@ -101,20 +126,31 @@ export function inspectV1TextBindings(messages, {includeInputValues = false} = {
       inputValueCandidateCount,
       inputValueCandidatesByComponent,
     } : {}),
+    ...(includeEventContext ? {buttonEventContexts, eventContextCandidateCount,
+      eventContextCandidateKinds} : {}),
     candidateLocations,
     candidateLocationsOmitted: candidateCount - candidateLocations.length,
     result: candidateCount
       ? 'review_ambiguous_legacy_shapes'
-      : includeInputValues ? 'no_legacy_binding_shapes_detected' : 'no_legacy_text_shapes_detected',
+      : includeInputValues || includeEventContext
+        ? 'no_legacy_binding_shapes_detected' : 'no_legacy_text_shapes_detected',
     recommendation: candidateCount
-      ? includeInputValues
-        ? 'Review Text path/call and input value path objects. If bindings were intended, migrate to @path/@call; literal objects may be intentional.'
+      ? includeEventContext
+        ? includeInputValues
+          ? 'Review Text, input value and Button event context path/call objects. If bindings were intended, migrate to @path/@call; literal objects may be intentional.'
+          : 'Review Text and Button event context path/call objects. If bindings were intended, migrate to @path/@call; literal objects may be intentional.'
+        : includeInputValues
+          ? 'Review Text path/call and input value path objects. If bindings were intended, migrate to @path/@call; literal objects may be intentional.'
         : 'If a Text value was intended as a binding or call, migrate path/call to @path/@call. Plain objects may be intentional v1 literals.'
-      : includeInputValues
-        ? 'No v0.9-shaped Text or supported input value bindings detected.'
+      : includeEventContext
+        ? 'No v0.9-shaped Text or direct Button event context path/call bindings detected.'
+        : includeInputValues
+          ? 'No v0.9-shaped Text or supported input value bindings detected.'
         : 'No v0.9-shaped Text bindings detected in the inspected messages.',
-    limitations: includeInputValues
-      ? 'Heuristic for Text.text and five named input value slots only; no renderer, two-way writeback, schema conformance, intent or customer certification.'
+    limitations: includeEventContext
+      ? 'Heuristic for Text.text and direct Button.action.event.context values only (plus five input slots if enabled); no nested context scan, browser dispatch, schema conformance, intent or customer certification.'
+      : includeInputValues
+        ? 'Heuristic for Text.text and five named input value slots only; no renderer, two-way writeback, schema conformance, intent or customer certification.'
       : 'Heuristic for Text.text only; no renderer, other component slot, schema conformance, intent or customer compatibility certification.',
   };
 }
@@ -139,6 +175,7 @@ export function parseCapture(raw) {
 function main(args) {
   let strict = false;
   let includeInputValues = false;
+  let includeEventContext = false;
   let input = null;
   if (args.length === 1 && args[0] === '--help') {
     process.stdout.write(USAGE + '\n');
@@ -148,6 +185,8 @@ function main(args) {
     if (args[i] === '--strict' && !strict) strict = true;
     else if (args[i] === '--include-input-values' && !includeInputValues)
       includeInputValues = true;
+    else if (args[i] === '--include-event-context' && !includeEventContext)
+      includeEventContext = true;
     else if (args[i] === '--input' && input === null && args[i + 1] &&
              !args[i + 1].startsWith('--')) input = resolve(args[++i]);
     else throw new Error(USAGE);
@@ -166,7 +205,7 @@ function main(args) {
   // Do not forward their messages into CLI output.
   let report;
   try {
-    report = inspectV1TextBindings(parseCapture(raw), {includeInputValues});
+    report = inspectV1TextBindings(parseCapture(raw), {includeInputValues, includeEventContext});
   } catch {
     throw new Error('Invalid or unsupported v1.0 JSONL surface capture; contents omitted');
   }

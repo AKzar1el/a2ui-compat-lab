@@ -109,3 +109,32 @@ No v1.0 React/Chromium renderer, Python parity, actual external capture,
 customer adoption, or revenue is established by this experiment.
 The pinned root SDK remains 0.15.0; no dependency upgrade or exception
 override is required for the test.
+ 
+## Optional Button event-context migration scan
+
+Add `--include-event-context` to inspect direct values under
+`Button.action.event.context` for direct nonempty legacy `{"path":"..."}` or `{"call":"..."}`
+directive shapes. This catches a different integration failure: the actual
+published v1 `GenericBinder` sends the old `path` or `call` object literally in an
+outbound Button event, whereas `@path` resolves the current data-model value.
+The comparison is exercised by an offline strict-SDK action-dispatch test.
+
+The new opt-in report uses **schemaVersion 3** (with or without
+`--include-input-values`). It includes `buttonEventContexts`,
+`eventContextCandidateCount` and `eventContextCandidateKinds`; `candidateKinds` and the shared maximum of
+32 `candidateLocations` include the event findings. Multiple context keys of the same kind in one
+Button produce one shared structural location; totals still count all candidates.
+Event locations use the
+fixed `buttonEventContextPath` or `buttonEventContextCall` kind and report only JSONL line and component
+index, never event names, context keys, private paths, IDs or values. The
+default Text-only schemaVersion 1 and input-only schemaVersion 2 remain
+unchanged. The `--strict` exit rule applies to this option too.
+
+Scope is only direct context values on Button event actions in createSurface
+and updateComponents. Nested context objects, other action-bearing components,
+renderer-level interactions and live customer systems are untested. A literal
+`path` object may be intentional. Keep these reports private; this is a
+migration advisory, not a security or conformance verdict.
+
+Published protocol guidance:
+https://a2ui.org/concepts/data-binding/ .
