@@ -4,6 +4,14 @@
 
 [![A2UI Compatibility CI](https://github.com/AKzar1el/a2ui-compat-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/AKzar1el/a2ui-compat-lab/actions/workflows/ci.yml)
 
+**v1.0 migration check (experimental):** Inspect a developer-owned v1.0 surface JSONL
+capture for ambiguous old v0.9-shaped Text bindings before interpreting its UI.
+Run `node src/v1-text-binding-preflight.mjs --input PRIVATE.jsonl`;
+add `--strict` only to opt into a nonzero advisory result. A plain object
+with `path` or `call` may be an intentional v1 literal, not an invalid payload.
+This does not render a v1 browser surface or inspect arbitrary component slots.
+See [scope, evidence, and privacy limits](docs/V1_TEXT_BINDING_PREFLIGHT.md).
+
 **DOM-less browser-condition SDK portability:** The installed published 0.15.0
 basic v1 catalog currently imports Lit when resolved with Node's browser
 condition, failing on platforms without `HTMLElement` (reported by an
