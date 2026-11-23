@@ -341,6 +341,12 @@ test('published v1 SDK resolves five input @path values while legacy path remain
     ['DateTimeInput', '2026-11-23'],
   ];
   function resolveInputValue(type, value, dataValue) {
+    // Published basic catalog requires a label for fields/checkboxes, options
+    // for pickers and max for sliders. Keep fixtures valid before testing value.
+    const required = type === 'ChoicePicker'
+      ? {options: [{label: 'Red', value: 'red'}]}
+      : type === 'Slider' ? {max: 100}
+        : type === 'TextField' || type === 'CheckBox' ? {label: 'Input'} : {};
     const processor = new v1.MessageProcessor([v1.basicCatalog], undefined, {
       validationConfig: v1.STRICT_VALIDATION,
     });
@@ -349,7 +355,7 @@ test('published v1 SDK resolves five input @path values while legacy path remain
         surfaceId: 's', catalogId: v1.basicCatalog.id,
         components: [
           {id: 'root', component: 'Column', children: ['input']},
-          {id: 'input', component: type, value},
+          {id: 'input', component: type, value, ...required},
         ],
         dataModel: {value: dataValue},
       }}]);
