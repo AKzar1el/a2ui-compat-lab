@@ -43,7 +43,15 @@ export function inspectInstallation({root = defaultRoot, nodeVersion = process.v
   else if (!lockRoot || typeof lockRoot !== 'object') lockIssues.push('invalid-lock-root');
   else if (lockRoot.version !== manifest.data.version) lockIssues.push('project-version-mismatch');
 
-  const packages = Object.entries(dependencies).map(([name, expected]) => {
+  // An apparently consistent empty manifest is not an A2UI-ready installation.
+  const requiredDeps = ['@a2ui/web_core', 'ajv'];
+  const packageNames = [...new Set([...Object.keys(dependencies), ...requiredDeps])];
+  const packages = packageNames.map(name => {
+    if (!Object.hasOwn(dependencies, name)) return {
+      name, expected: null, locked: null, installed: null, ok: false,
+      issues: ['missing-required-dependency'],
+    };
+    const expected = dependencies[name];
     const issues = [];
     const safeName = /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(name) && !name.split('/').includes('..');
     const pinned = typeof expected === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(expected);
