@@ -220,3 +220,12 @@ test('comparison output protects source reports and prior evidence from overwrit
     rmSync(dir, {recursive: true, force: true});
   }
 });
+
+test('scan comparison rejects empty fixture reports instead of false-green parity', () => {
+  const empty = scan([]);
+  const valid = scan([['stable', true, true]]);
+  assert.throws(() => compareScans(empty, structuredClone(empty)), /at least one fixture/);
+  assert.throws(() => compareScans(empty, valid), /at least one fixture/);
+  assert.throws(() => compareScans(valid, empty), /at least one fixture/);
+  assert.equal(compareScans(valid, structuredClone(valid)).ok, true);
+});

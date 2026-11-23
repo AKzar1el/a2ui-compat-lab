@@ -55,6 +55,8 @@ function validateScan(report, label) {
       !report.implementations || typeof report.implementations.webCore !== 'string' ||
       typeof report.implementations.reference !== 'string')
     throw new Error(label + ' must be a version-1 A2UI scan report with implementation provenance');
+  if (report.rows.length === 0)
+    throw new Error(label + ' scan must include at least one fixture');
   const rows = new Map();
   for (const row of report.rows) {
     if (!row || typeof row.id !== 'string' || !row.id || rows.has(row.id) ||
