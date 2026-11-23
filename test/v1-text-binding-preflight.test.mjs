@@ -408,6 +408,7 @@ test('opt-in Button event context scan is structural, bounded and privacy-preser
     assert.equal(report.kind, 'a2ui-v1-binding-migration-preflight');
     assert.equal(report.buttonEventContexts, 1);
     assert.equal(report.eventContextCandidateCount, 36);
+    assert.doesNotMatch(report.recommendation, /input value/);
     assert.deepEqual(report.eventContextCandidateKinds, {path: 35, call: 1});
     assert.equal(report.candidateCount, 36);
     assert.deepEqual(report.candidateKinds, {legacyPathLike: 35, legacyCallLike: 1});
@@ -423,6 +424,7 @@ test('opt-in Button event context scan is structural, bounded and privacy-preser
     const together = invoke(input, ['--include-input-values', '--include-event-context']);
     assert.equal(together.status, 0, together.stderr);
     assert.equal(JSON.parse(together.stdout).schemaVersion, 3);
+    assert.match(JSON.parse(together.stdout).recommendation, /input value/);
     assert.equal(JSON.parse(together.stdout).eventContextCandidateCount, 36);
     assert.equal(invoke(input, ['--include-event-context', '--include-event-context']).status, 2);
   }));

@@ -136,7 +136,9 @@ export function inspectV1TextBindings(messages, {includeInputValues = false, inc
         ? 'no_legacy_binding_shapes_detected' : 'no_legacy_text_shapes_detected',
     recommendation: candidateCount
       ? includeEventContext
-        ? 'Review Text, input value and Button event context path/call objects. If bindings were intended, migrate to @path/@call; literal objects may be intentional.'
+        ? includeInputValues
+          ? 'Review Text, input value and Button event context path/call objects. If bindings were intended, migrate to @path/@call; literal objects may be intentional.'
+          : 'Review Text and Button event context path/call objects. If bindings were intended, migrate to @path/@call; literal objects may be intentional.'
         : includeInputValues
           ? 'Review Text path/call and input value path objects. If bindings were intended, migrate to @path/@call; literal objects may be intentional.'
         : 'If a Text value was intended as a binding or call, migrate path/call to @path/@call. Plain objects may be intentional v1 literals.'
