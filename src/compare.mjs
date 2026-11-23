@@ -53,7 +53,9 @@ export function compareScans(before, after) {
 function validateScan(report, label) {
   if (!report || report.reportVersion !== 1 || !Array.isArray(report.rows) ||
       !report.implementations || typeof report.implementations.webCore !== 'string' ||
-      typeof report.implementations.reference !== 'string')
+      typeof report.implementations.reference !== 'string' ||
+      !report.implementations.webCore.trim() ||
+      !report.implementations.reference.trim())
     throw new Error(label + ' must be a version-1 A2UI scan report with implementation provenance');
   if (report.rows.length === 0)
     throw new Error(label + ' scan must include at least one fixture');
