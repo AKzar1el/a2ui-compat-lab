@@ -71,6 +71,15 @@ function readComparisonReport(path) {
   }
 }
 
+
+function safeComparisonText(value) {
+  // Comparison input is caller-controlled JSON. Escape control/bidi characters
+  // before emitting human CI logs; leave machine-readable JSON unchanged.
+  const escaped = JSON.stringify(value).slice(1, -1).replace(/[\u007f-\uffff]/g,
+    char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
+  return escaped.length <= 160 ? escaped : escaped.slice(0, 157) + '...';
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.verb === 'help' || args.verb === '--help') return usage();
@@ -131,12 +140,14 @@ async function main() {
   } else if (args.verb === 'compare') {
     console.log('A2UI SDK parity comparison: ' + report.comparedFixtures +
       ' common fixtures; ' + (ok ? 'MATCH' : 'DRIFT'));
-    console.log('  web_core ' + report.before.webCore + ' -> ' + report.after.webCore);
+    console.log('  web_core ' + safeComparisonText(report.before.webCore) + ' -> ' +
+      safeComparisonText(report.after.webCore));
     if (report.referenceImplementationChanged)
       console.log('  reference implementation changed; inspect before/after configuration');
     for (const key of ['resolved', 'newlyObserved', 'directionChanged', 'referenceChanged',
       'decisionChanged', 'addedFixtures', 'removedFixtures']) {
-      if (report[key].length) console.log('  ' + key + ': ' + report[key].join(', '));
+      if (report[key].length) console.log('  ' + key + ': ' +
+        report[key].map(safeComparisonText).join(', '));
     }
     console.log('  persistent discrepancies: ' + report.persistent.length +
       '; stable controls: ' + report.stableControls);
