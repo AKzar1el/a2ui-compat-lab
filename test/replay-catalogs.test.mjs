@@ -88,7 +88,7 @@ test('trusted processor can emit a real Button event through the published binde
     assert.ok(surface);
     assert.deepEqual(registeredCatalogIds, [basicCatalog.id, customId]);
     binder = new GenericBinder(new ComponentContext(surface, 'submit'),
-      makeCatalog().components.get('Button'));
+      makeCatalog().components.get('Button').schema);
     binder.subscribe(() => {});
     assert.equal(typeof binder.snapshot.action, 'function');
     await binder.snapshot.action();
