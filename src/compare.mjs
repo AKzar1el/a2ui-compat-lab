@@ -25,9 +25,10 @@ export function compareScans(before, after) {
   }
 
   const referenceImplementationChanged = before.implementations.reference !== after.implementations.reference;
+  const webCoreImplementationChanged = before.implementations.webCore !== after.implementations.webCore;
   const ok = !resolved.length && !newlyObserved.length && !directionChanged.length &&
     !referenceChanged.length && !decisionChanged.length && !addedFixtures.length && !removedFixtures.length &&
-    !referenceImplementationChanged;
+    !referenceImplementationChanged && !webCoreImplementationChanged;
   return {
     reportVersion: 1,
     kind: 'scan-comparison',
@@ -41,6 +42,7 @@ export function compareScans(before, after) {
     directionChanged,
     referenceChanged,
     referenceImplementationChanged,
+    webCoreImplementationChanged,
     decisionChanged,
     addedFixtures,
     removedFixtures,
