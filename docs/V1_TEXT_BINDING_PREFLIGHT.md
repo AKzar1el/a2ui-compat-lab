@@ -20,9 +20,15 @@ message envelopes are accepted. The scan considers only
 updateComponents.components entries with component: Text and exact legacy-like
 text shapes, not arbitrary component fields or other renderers.
 
-Output is fixed-schema JSON with counts, no original component IDs,
-values, paths, full capture digest, filesystem path, or snippets. It does not
-upload data or make network requests.
+Output is fixed-schema JSON with counts and at most **32** `candidateLocations`
+entries. Each contains only a **1-based JSONL line number**, **0-based
+component array index**, and fixed `path`/`call` kind. Open the private
+capture locally at that line to review the affected Text value. The
+`candidateLocationsOmitted` count reports any additional candidates beyond
+32; the total counts always include them. No original component IDs, values,
+paths, full capture digest, filesystem path, or snippets are emitted. These
+structural positions can reveal capture layout, so keep reports within your
+trusted development workflow. It does not upload data or make network requests.
 
 ## Why this matters
 
