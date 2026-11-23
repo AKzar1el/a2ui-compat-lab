@@ -130,9 +130,19 @@ index, never event names, context keys, private paths, IDs or values. The
 default Text-only schemaVersion 1 and input-only schemaVersion 2 remain
 unchanged. The `--strict` exit rule applies to this option too.
 
-Scope is only direct context values on Button event actions in createSurface
-and updateComponents. Nested context objects, other action-bearing components,
-renderer-level interactions and live customer systems are untested. A literal
+The opt-in scan traverses nested plain context objects and arrays (including
+nested function-call arguments) and counts each candidate occurrence, including
+separate aliases of the same acyclic subtree. To avoid incomplete or unsafe
+reports, it fails closed on cycles, accessor-bearing objects (even hidden
+getters), exotic prototypes, nesting deeper than 12 levels, or more than
+2,048 visited nodes per Button. The exported programmatic inspector enforces
+these bounds too; CLI failures contain no private context data. The shared
+32-location cap still reports only Button structural coordinates, regardless of
+nesting depth. A cap breach never produces a false "no candidates" result.
+
+Scope is bounded Button event actions in createSurface and updateComponents.
+Other action-bearing components, renderer-level interactions and live customer
+systems remain untested. A literal
 `path` object may be intentional. Keep these reports private; this is a
 migration advisory, not a security or conformance verdict.
 
