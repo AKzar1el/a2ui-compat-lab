@@ -22,7 +22,7 @@ export function possibleLegacyTextDirective(value) {
     return null;
   const keys = Object.keys(value);
   if (keys.length === 1 && keys[0] === 'path' &&
-      typeof value.path === 'string' && value.path.startsWith('/'))
+      typeof value.path === 'string' && value.path.length > 0)
     return 'path';
   if (typeof value.call === 'string' && value.call.length > 0 &&
       keys.every(key => ['call', 'args', 'catalogId'].includes(key)) &&

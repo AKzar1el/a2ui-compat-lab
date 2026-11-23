@@ -83,6 +83,28 @@ test('explicit v1 directives and unrelated literal objects pass the advisory pre
   assert.equal(possibleLegacyTextDirective({call: 'fmt', args: {}}), 'call');
 });
 
+test('legacy relative Text paths are candidates without flagging valid ChildList paths', () => {
+  const messages = [surface, {version: '1.0', updateComponents: {
+    surfaceId: 'PRIVATE-SURFACE',
+    components: [
+      {id: 'col', component: 'Column', children: {path: '/guests', componentId: 'row'}},
+      {id: 'row', component: 'Text', text: {path: 'firstName'}},
+      {id: 'absolute', component: 'Text', text: {path: '/label'}},
+      {id: 'valid', component: 'Text', text: {'@path': 'firstName'}},
+      {id: 'empty', component: 'Text', text: {path: ''}},
+    ],
+  }}];
+  const report = inspectV1TextBindings(messages);
+  assert.equal(report.textComponents, 4);
+  assert.equal(report.candidateCount, 2);
+  assert.deepEqual(report.candidateLocations, [
+    {lineNumber: 2, componentIndex: 1, kind: 'path'},
+    {lineNumber: 2, componentIndex: 2, kind: 'path'},
+  ]);
+  assert.equal(possibleLegacyTextDirective({path: 'firstName'}), 'path');
+  assert.equal(possibleLegacyTextDirective({path: ''}), null);
+});
+
 test('inline createSurface Text bindings get private coordinates and a real v1 SDK control', () =>
   inTemp(dir => {
     const inline = {version: '1.0', createSurface: {
@@ -119,13 +141,19 @@ test('inline createSurface Text bindings get private coordinates and a real v1 S
     try {
       processor.processMessages([{version: '1.0', createSurface: {
         surfaceId: 's', catalogId: v1.basicCatalog.id,
-        components: [{id: 'root', component: 'Text', text: {path: '/name'}}],
+        components: [
+          {id: 'root', component: 'Text', text: {path: '/name'}},
+          {id: 'relative', component: 'Text', text: {path: 'name'}},
+        ],
         dataModel: {name: 'Ada'},
       }}]);
       const state = processor.model.getSurface('s');
       const property = state.componentsModel.get('root').properties.text;
       assert.deepEqual(new v1.DataContext(state, '/').resolveDynamicValue(property),
         {path: '/name'});
+      const relative = state.componentsModel.get('relative').properties.text;
+      assert.deepEqual(new v1.DataContext(state, '/').resolveDynamicValue(relative),
+        {path: 'name'});
     } finally {
       processor.model.dispose();
       processor.dispose();

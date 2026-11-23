@@ -31,6 +31,13 @@ paths, full capture digest, filesystem path, or snippets are emitted. These
 structural positions can reveal capture layout, so keep reports within your
 trusted development workflow. It does not upload data or make network requests.
 
+Legacy v0.9 relative data bindings also qualify: `{"path":"firstName"}` inside
+a repeated list row is a valid relative binding, even without a leading slash.
+The advisory now detects that Text.text shape alongside absolute paths. A
+container's `children.path` remains a valid v1 ChildList property and is
+intentionally not flagged; this preflight does not scan TextField.value or
+other component slots.
+
 ## Why this matters
 
 The **installed published** @a2ui/web_core@0.15.0 was independently probed
