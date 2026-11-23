@@ -604,3 +604,40 @@ test('published v1 Button dispatch resolves nested @path/@call but not legacy fo
     processor.dispose();
   }
 });
+
+test('programmatic legacy directive inspection never invokes own or inherited getters', () => {
+  let getterCalls = 0;
+  const accessor = {};
+  Object.defineProperty(accessor, 'call', {
+    enumerable: true,
+    get() { getterCalls++; throw new Error('PRIVATE-GETTER'); },
+  });
+  assert.equal(possibleLegacyTextDirective(accessor), null);
+  const controls = [
+    ['call', {unrelated: 'literal'}, null],
+    ['args', {call: 'formatString'}, 'call'],
+    ['catalogId', {call: 'formatString'}, 'call'],
+  ];
+  for (const [key, value, expected] of controls) {
+    assert.equal(Object.hasOwn(Object.prototype, key), false);
+    Object.defineProperty(Object.prototype, key, {
+      configurable: true,
+      get() { getterCalls++; throw new Error('PRIVATE-INHERITED-GETTER'); },
+    });
+    let result;
+    try {
+      result = possibleLegacyTextDirective(value);
+    } finally {
+      delete Object.prototype[key];
+    }
+    assert.equal(result, expected);
+  }
+  assert.equal(getterCalls, 0);
+  assert.equal(possibleLegacyTextDirective({path: '/PRIVATE-EMAIL'}), 'path');
+  assert.equal(possibleLegacyTextDirective({call: 'formatString', args: {}}), 'call');
+  const report = inspectV1TextBindings([
+    buttonMessage({payload: {recipient: {path: '/PRIVATE-EMAIL'}}}),
+  ], {includeEventContext: true});
+  assert.equal(report.eventContextCandidateCount, 1);
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE-/);
+});

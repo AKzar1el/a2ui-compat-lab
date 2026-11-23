@@ -21,16 +21,27 @@ const isRecord = value => value !== null && typeof value === 'object' && !Array.
 export function possibleLegacyTextDirective(value) {
   if (!isRecord(value) || Object.hasOwn(value, '@path') || Object.hasOwn(value, '@call'))
     return null;
+  // Only read own data descriptors: inherited or accessor-backed properties
+  // must not run application code during programmatic inspection.
+  const descriptors = Object.getOwnPropertyDescriptors(value);
   const keys = Object.keys(value);
+  const ownData = key => {
+    if (!Object.hasOwn(descriptors, key)) return undefined;
+    const descriptor = descriptors[key];
+    return Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined;
+  };
+  const path = ownData('path');
   if (keys.length === 1 && keys[0] === 'path' &&
-      typeof value.path === 'string' && value.path.length > 0)
+      typeof path === 'string' && path.length > 0)
     return 'path';
-  if (typeof value.call === 'string' && value.call.length > 0 &&
+  const call = ownData('call');
+  const args = ownData('args');
+  const catalogId = ownData('catalogId');
+  if (typeof call === 'string' && call.length > 0 &&
       keys.every(key => ['call', 'args', 'catalogId'].includes(key)) &&
-      (value.args === undefined || isRecord(value.args)) &&
-      (value.catalogId === undefined || typeof value.catalogId === 'string'))
+      (args === undefined || isRecord(args)) &&
+      (catalogId === undefined || typeof catalogId === 'string'))
     return 'call';
-  return null;
 }
 
 // The exported inspector also accepts in-memory objects. Reject accessors,
