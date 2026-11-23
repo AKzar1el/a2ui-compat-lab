@@ -7,9 +7,12 @@
 **v1.0 migration check (experimental):** Inspect a developer-owned v1.0 surface JSONL
 capture for ambiguous old v0.9-shaped Text bindings before interpreting its UI.
 Run `node src/v1-text-binding-preflight.mjs --input PRIVATE.jsonl`;
-add `--strict` only to opt into a nonzero advisory result. A plain object
+add `--strict` only to opt into a nonzero advisory result. For the five
+published input `value` slots (TextField, CheckBox, Slider, ChoicePicker,
+DateTimeInput), add `--include-input-values` to request a separate, bounded
+migration advisory without changing default Text-only reports. A plain object
 with `path` or `call` may be an intentional v1 literal, not an invalid payload.
-This does not render a v1 browser surface or inspect arbitrary component slots.
+This does not render a v1 browser surface or test two-way input writeback.
 See [scope, evidence, and privacy limits](docs/V1_TEXT_BINDING_PREFLIGHT.md).
 
 **DOM-less browser-condition SDK portability:** The installed published 0.15.0

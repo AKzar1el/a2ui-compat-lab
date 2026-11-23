@@ -13,6 +13,14 @@ Add --strict only if your migration CI should exit 1 for possible legacy Text
 directives. Ordinary mode exits 0 and returns a **review advisory**, not
 a conformance verdict. Invalid or unsupported input exits 2.
 
+To also inspect five published interactive input `value` slots, opt in with:
+`node src/v1-text-binding-preflight.mjs --input PRIVATE-v1-messages.jsonl --include-input-values`.
+This opt-in retains all existing Text-only behavior without the flag and produces
+an explicit schemaVersion **2** report with separate `textCandidateCount` and
+`inputValueCandidateCount`, fixed counts by input component type, and a unified
+bounded `candidateLocations` list. `--strict` exits 1 for either kind of review
+candidate when opt-in is active. The default report remains schemaVersion 1.
+
 Input must be newline-terminated JSONL, 1 byte to 1 MiB, at most 1,000
 surface messages, each at most 128 KiB, with protocol version exactly 1.0.
 Only createSurface, updateComponents, updateDataModel, and deleteSurface
@@ -35,8 +43,33 @@ Legacy v0.9 relative data bindings also qualify: `{"path":"firstName"}` inside
 a repeated list row is a valid relative binding, even without a leading slash.
 The advisory now detects that Text.text shape alongside absolute paths. A
 container's `children.path` remains a valid v1 ChildList property and is
-intentionally not flagged; this preflight does not scan TextField.value or
-other component slots.
+intentionally not flagged by either mode.
+
+## Optional interactive input migration scan
+
+With `--include-input-values`, the diagnostic also checks the `value` slot
+of exactly **TextField, CheckBox, Slider, ChoicePicker, DateTimeInput** in
+`createSurface.components` and `updateComponents.components`. Only a single,
+nonempty legacy `{"path":"..."}` object is considered; proper v1
+`{"@path":"..."}`, ordinary literals, extended literal objects and unrelated
+fields are not flagged. Relative paths such as `{"path":"firstName"}` qualify.
+
+Input findings have a fixed `inputValuePath` location kind; the 1-based
+line and 0-based component index point to the private capture for review.
+The report exposes counts but **never** original component IDs, values,
+binding paths, data, filesystem paths or snippets. All slots share the same
+32-location cap; `candidateLocationsOmitted` counts the rest. Metadata
+may still be sensitive and must remain within trusted developer workflows.
+
+The released `@a2ui/web_core@0.15.0` strict processor reproduces a
+published-v1 data-resolution distinction for all five: `@path` reads the
+model value, while plain `path` remains a literal object. This tests
+headless resolution, **not** browser input events or two-way writeback.
+The A2UI v1 binding docs describe `@path` for inputs:
+https://a2ui.org/concepts/data-binding/ . A literal object can be intentional:
+these are migration **advisories**, not schema or security errors.
+See issue #184 for the evidence and acceptance scope.
+
 
 ## Why this matters
 
