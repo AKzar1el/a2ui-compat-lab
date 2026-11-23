@@ -96,7 +96,7 @@ test('candidate coordinates are bounded and contain only local structural indice
   assert.deepEqual(report.candidateLocations[31],
     {lineNumber: 2, componentIndex: 31, kind: 'call'});
   const serialized = JSON.stringify(report);
-  assert.doesNotMatch(serialized, /PRIVATE-|\\/PRIVATE-NAME/);
+  assert.equal(serialized.includes('PRIVATE-'), false);
   assert.deepEqual(new Set(report.candidateLocations.map(location =>
     Object.keys(location).join(','))), new Set(['lineNumber,componentIndex,kind']));
 });
