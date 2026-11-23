@@ -9,6 +9,7 @@ import {pathToFileURL} from 'node:url';
 const MAX_CAPTURE_BYTES = 1024 * 1024;
 const MAX_FRAME_BYTES = 128 * 1024;
 const MAX_FRAMES = 1000;
+const MAX_CANDIDATE_LOCATIONS = 32;
 const OPERATIONS = ['createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface'];
 const USAGE = 'Usage: node src/v1-text-binding-preflight.mjs --input PRIVATE.jsonl [--strict]';
 
@@ -21,7 +22,7 @@ export function possibleLegacyTextDirective(value) {
     return null;
   const keys = Object.keys(value);
   if (keys.length === 1 && keys[0] === 'path' &&
-      typeof value.path === 'string' && value.path.startsWith('/'))
+      typeof value.path === 'string' && value.path.length > 0)
     return 'path';
   if (typeof value.call === 'string' && value.call.length > 0 &&
       keys.every(key => ['call', 'args', 'catalogId'].includes(key)) &&
@@ -36,21 +37,28 @@ export function inspectV1TextBindings(messages) {
     throw new Error('Unsupported capture event count');
   const counts = {legacyPathLike: 0, legacyCallLike: 0};
   let textComponents = 0;
-  for (const message of messages) {
+  const candidateLocations = [];
+  for (const [frameIndex, message] of messages.entries()) {
     if (!isRecord(message) || message.version !== '1.0' ||
         OPERATIONS.filter(operation => Object.hasOwn(message, operation)).length !== 1)
       throw new Error('Unsupported v1.0 surface message');
-    if (!Object.hasOwn(message, 'updateComponents')) continue;
-    const components = message.updateComponents?.components;
+    const isUpdate = Object.hasOwn(message, 'updateComponents');
+    const isCreate = Object.hasOwn(message, 'createSurface');
+    if (!isUpdate && !isCreate) continue;
+    const components = (isUpdate ? message.updateComponents : message.createSurface)?.components;
+    // Inline components are optional on createSurface, but required in updates.
+    if (isCreate && components === undefined) continue;
     if (!Array.isArray(components))
-      throw new Error('Unsupported v1.0 component update');
-    for (const component of components) {
+      throw new Error('Unsupported v1.0 component list');
+    for (const [componentIndex, component] of components.entries()) {
       if (!isRecord(component)) throw new Error('Unsupported v1.0 component');
       if (component.component !== 'Text') continue;
       textComponents++;
       const kind = possibleLegacyTextDirective(component.text);
       if (kind === 'path') counts.legacyPathLike++;
       if (kind === 'call') counts.legacyCallLike++;
+      if (kind && candidateLocations.length < MAX_CANDIDATE_LOCATIONS)
+        candidateLocations.push({lineNumber: frameIndex + 1, componentIndex, kind});
     }
   }
   const candidateCount = counts.legacyPathLike + counts.legacyCallLike;
@@ -62,6 +70,8 @@ export function inspectV1TextBindings(messages) {
     textComponents,
     candidateCount,
     candidateKinds: counts,
+    candidateLocations,
+    candidateLocationsOmitted: candidateCount - candidateLocations.length,
     result: candidateCount ? 'review_ambiguous_legacy_shapes' : 'no_legacy_text_shapes_detected',
     recommendation: candidateCount
       ? 'If a Text value was intended as a binding or call, migrate path/call to @path/@call. Plain objects may be intentional v1 literals.'
