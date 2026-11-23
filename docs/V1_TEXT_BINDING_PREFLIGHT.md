@@ -113,17 +113,19 @@ override is required for the test.
 ## Optional Button event-context migration scan
 
 Add `--include-event-context` to inspect direct values under
-`Button.action.event.context` for a single nonempty legacy `{"path":"..."}`
-binding shape. This catches a different integration failure: the actual
-published v1 `GenericBinder` sends the old `path` object literally in an
+`Button.action.event.context` for direct nonempty legacy `{"path":"..."}` or `{"call":"..."}`
+directive shapes. This catches a different integration failure: the actual
+published v1 `GenericBinder` sends the old `path` or `call` object literally in an
 outbound Button event, whereas `@path` resolves the current data-model value.
 The comparison is exercised by an offline strict-SDK action-dispatch test.
 
 The new opt-in report uses **schemaVersion 3** (with or without
-`--include-input-values`). It includes `buttonEventContexts` and
-`eventContextCandidateCount`; `candidateKinds` and the shared maximum of
-32 `candidateLocations` include the event findings. Event locations use the
-fixed `buttonEventContextPath` kind and report only JSONL line and component
+`--include-input-values`). It includes `buttonEventContexts`,
+`eventContextCandidateCount` and `eventContextCandidateKinds`; `candidateKinds` and the shared maximum of
+32 `candidateLocations` include the event findings. Multiple context keys of the same kind in one
+Button produce one shared structural location; totals still count all candidates.
+Event locations use the
+fixed `buttonEventContextPath` or `buttonEventContextCall` kind and report only JSONL line and component
 index, never event names, context keys, private paths, IDs or values. The
 default Text-only schemaVersion 1 and input-only schemaVersion 2 remain
 unchanged. The `--strict` exit rule applies to this option too.

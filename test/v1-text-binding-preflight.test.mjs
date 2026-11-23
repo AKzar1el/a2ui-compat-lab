@@ -380,7 +380,9 @@ test('opt-in Button event context scan is structural, bounded and privacy-preser
     const input = join(dir, 'PRIVATE-ACTION.jsonl');
     const context = Object.fromEntries(Array.from({length: 35}, (_, i) =>
       ['PRIVATE-KEY-' + i, {path: '/PRIVATE-EMAIL-' + i}]));
+    context.call = {call: 'PRIVATE-FORMAT', args: {value: 'PRIVATE'}};
     context.safe = {'@path': '/PRIVATE-EMAIL'};
+    context.safeCall = {'@call': 'PRIVATE-FORMAT', args: {value: 'PRIVATE'}};
     context.literal = {path: '/PRIVATE-EMAIL', literal: true};
     const frame = {version: '1.0', createSurface: {
       surfaceId: 'PRIVATE-SURFACE', catalogId: 'catalog', components: [
@@ -405,20 +407,23 @@ test('opt-in Button event context scan is structural, bounded and privacy-preser
     assert.equal(report.schemaVersion, 3);
     assert.equal(report.kind, 'a2ui-v1-binding-migration-preflight');
     assert.equal(report.buttonEventContexts, 1);
-    assert.equal(report.eventContextCandidateCount, 35);
-    assert.equal(report.candidateCount, 35);
-    assert.deepEqual(report.candidateKinds, {legacyPathLike: 35, legacyCallLike: 0});
-    assert.equal(report.candidateLocations.length, 32);
-    assert.equal(report.candidateLocationsOmitted, 3);
+    assert.equal(report.eventContextCandidateCount, 36);
+    assert.deepEqual(report.eventContextCandidateKinds, {path: 35, call: 1});
+    assert.equal(report.candidateCount, 36);
+    assert.deepEqual(report.candidateKinds, {legacyPathLike: 35, legacyCallLike: 1});
+    assert.equal(report.candidateLocations.length, 2);
+    assert.equal(report.candidateLocationsOmitted, 34);
     assert.deepEqual(report.candidateLocations[0],
       {lineNumber: 1, componentIndex: 0, kind: 'buttonEventContextPath'});
+    assert.deepEqual(report.candidateLocations[1],
+      {lineNumber: 1, componentIndex: 0, kind: 'buttonEventContextCall'});
     assert.deepEqual(new Set(report.candidateLocations.map(x => Object.keys(x).join(','))),
       new Set(['lineNumber,componentIndex,kind']));
     assert.doesNotMatch(run.stdout + run.stderr, /PRIVATE-/);
     const together = invoke(input, ['--include-input-values', '--include-event-context']);
     assert.equal(together.status, 0, together.stderr);
     assert.equal(JSON.parse(together.stdout).schemaVersion, 3);
-    assert.equal(JSON.parse(together.stdout).eventContextCandidateCount, 35);
+    assert.equal(JSON.parse(together.stdout).eventContextCandidateCount, 36);
     assert.equal(invoke(input, ['--include-event-context', '--include-event-context']).status, 2);
   }));
 
@@ -451,4 +456,9 @@ test('published v1 Button action sends resolved @path but literal legacy path co
   }
   assert.deepEqual(await send({'@path': '/email'}), {email: 'Ada@example.invalid'});
   assert.deepEqual(await send({path: '/email'}), {email: {path: '/email'}});
+  const args = {value: 'Hi ' + String.fromCharCode(36) + '{/email}'};
+  assert.deepEqual(await send({'@call': 'formatString', args}),
+    {email: 'Hi Ada@example.invalid'});
+  assert.deepEqual(await send({call: 'formatString', args}),
+    {email: {call: 'formatString', args}});
 });
