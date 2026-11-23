@@ -68,6 +68,20 @@ test('changing the reference validator configuration is not silently treated as 
   assert.equal(result.referenceImplementationChanged, true);
 });
 
+test('scan comparison flags SDK version drift even when every fixture decision agrees', () => {
+  const before = scan([['stable', true, true]]);
+  const after = scan([['stable', true, true]], '0.16.0');
+  const result = compareScans(before, after);
+  assert.equal(result.ok, false);
+  assert.equal(result.webCoreImplementationChanged, true);
+  assert.deepEqual(result.newlyObserved, []);
+  assert.deepEqual(result.resolved, []);
+
+  const unchanged = compareScans(before, structuredClone(before));
+  assert.equal(unchanged.ok, true);
+  assert.equal(unchanged.webCoreImplementationChanged, false);
+});
+
 test('scan baseline fails if SDK installation disagrees with the pinned version', () => {
   const report = evaluate();
   assert.equal(report.implementations.webCore, '0.15.0');
