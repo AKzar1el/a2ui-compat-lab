@@ -142,13 +142,14 @@ test('inline createSurface Text bindings get private coordinates and a real v1 S
       processor.processMessages([{version: '1.0', createSurface: {
         surfaceId: 's', catalogId: v1.basicCatalog.id,
         components: [
-          {id: 'root', component: 'Text', text: {path: '/name'}},
+          {id: 'root', component: 'Column', children: ['absolute', 'relative']},
+          {id: 'absolute', component: 'Text', text: {path: '/name'}},
           {id: 'relative', component: 'Text', text: {path: 'name'}},
         ],
         dataModel: {name: 'Ada'},
       }}]);
       const state = processor.model.getSurface('s');
-      const property = state.componentsModel.get('root').properties.text;
+      const property = state.componentsModel.get('absolute').properties.text;
       assert.deepEqual(new v1.DataContext(state, '/').resolveDynamicValue(property),
         {path: '/name'});
       const relative = state.componentsModel.get('relative').properties.text;
