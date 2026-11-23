@@ -42,6 +42,7 @@ export function possibleLegacyTextDirective(value) {
       (args === undefined || isRecord(args)) &&
       (catalogId === undefined || typeof catalogId === 'string'))
     return 'call';
+  return null;
 }
 
 // The exported inspector also accepts in-memory objects. Reject accessors,
