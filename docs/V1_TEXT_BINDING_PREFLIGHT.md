@@ -16,9 +16,10 @@ a conformance verdict. Invalid or unsupported input exits 2.
 Input must be newline-terminated JSONL, 1 byte to 1 MiB, at most 1,000
 surface messages, each at most 128 KiB, with protocol version exactly 1.0.
 Only createSurface, updateComponents, updateDataModel, and deleteSurface
-message envelopes are accepted. The scan considers only
-updateComponents.components entries with component: Text and exact legacy-like
-text shapes, not arbitrary component fields or other renderers.
+message envelopes are accepted. The scan considers Text entries in both
+createSurface.components (when provided inline at surface creation) and
+updateComponents.components, using the same legacy-like text shapes. It does
+not scan arbitrary other component fields or other renderers.
 
 Output is fixed-schema JSON with counts and at most **32** `candidateLocations`
 entries. Each contains only a **1-based JSONL line number**, **0-based

@@ -42,10 +42,14 @@ export function inspectV1TextBindings(messages) {
     if (!isRecord(message) || message.version !== '1.0' ||
         OPERATIONS.filter(operation => Object.hasOwn(message, operation)).length !== 1)
       throw new Error('Unsupported v1.0 surface message');
-    if (!Object.hasOwn(message, 'updateComponents')) continue;
-    const components = message.updateComponents?.components;
+    const isUpdate = Object.hasOwn(message, 'updateComponents');
+    const isCreate = Object.hasOwn(message, 'createSurface');
+    if (!isUpdate && !isCreate) continue;
+    const components = (isUpdate ? message.updateComponents : message.createSurface)?.components;
+    // Inline components are optional on createSurface, but required in updates.
+    if (isCreate && components === undefined) continue;
     if (!Array.isArray(components))
-      throw new Error('Unsupported v1.0 component update');
+      throw new Error('Unsupported v1.0 component list');
     for (const [componentIndex, component] of components.entries()) {
       if (!isRecord(component)) throw new Error('Unsupported v1.0 component');
       if (component.component !== 'Text') continue;
