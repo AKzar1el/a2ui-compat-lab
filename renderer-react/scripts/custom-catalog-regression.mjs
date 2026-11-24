@@ -154,6 +154,10 @@ async function testConcurrentCustomSurfaces(context, origin) {
   const expectedActions = [];
   const createCustom = async (id, label, choice) => {
     await send({createSurface: {surfaceId: id, catalogId}});
+    assert.deepEqual((await trace(id)).data, {}, 'New surface must start with empty model data');
+    assert.deepEqual((await trace(id)).components, [], 'New surface must start without components');
+    // Seed required-check input before mounting its reactive expression.
+    await send({updateDataModel: {surfaceId: id, path: '/', value: {choice}}});
     await send({updateComponents: {surfaceId: id, components: [
       {id: 'root', component: 'LabConfirm', child: 'label',
         checks: [{condition: {call: 'required', args: {value: {path: '/choice'}}},
@@ -161,7 +165,6 @@ async function testConcurrentCustomSurfaces(context, origin) {
         action: {event: {name: 'confirm-custom', context: {selection: {path: '/choice'}}}}},
       {id: 'label', component: 'Text', text: label},
     ]}});
-    await send({updateDataModel: {surfaceId: id, path: '/', value: {choice}}});
     const button = page.getByRole('button', {name: label, exact: true});
     await button.waitFor({state: 'visible', timeout: 10000});
     assert.equal(await button.getAttribute('data-testid'), 'lab-custom-confirm');

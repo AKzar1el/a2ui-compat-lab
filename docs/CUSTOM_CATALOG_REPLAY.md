@@ -65,3 +65,9 @@ recreation of the same surface ID, surviving button DOM identity, and an
 independent basic-surface update. The new regression is not evidence until
 its exact-head hosted Chromium job passes. It does not exercise multiple
 different custom renderer catalog IDs or establish security isolation.
+
+Seed model data before mounting a checked component: the published 0.14
+resolver emits an expression error when `required` receives an unresolved
+path, whereas an explicitly empty string is an ordinary invalid value.
+The test retains zero-error assertions and verifies a newly created surface
+starts with no model data or components before populating it.
