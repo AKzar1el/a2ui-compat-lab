@@ -128,10 +128,11 @@ export async function testTrustedCustomCatalogBrowserReplay(context, origin) {
     assert.deepEqual(runtimeErrors, []);
     assert.deepEqual(consoleErrors, []);
     const surfaceIsolation = await testConcurrentCustomSurfaces(context, origin);
+    const functionIsolation = await testDistinctFunctionCatalogs(context, origin);
     return {unregisteredCatalogRejected: true, customDomRendered: true,
       physicalClicks: 2, keyboardActivations: 2, disabledInputAttempts: 2,
       selections: ['alpha', 'beta', 'gamma', 'delta'], customSurfaceDeleted: true,
-      basicCatalogStillRendered: true, surfaceIsolation};
+      basicCatalogStillRendered: true, surfaceIsolation, functionIsolation};
   } finally {
     await page.close();
   }
@@ -253,6 +254,86 @@ async function testConcurrentCustomSurfaces(context, origin) {
     return {sameCatalogConcurrentSurfaces: 2, physicalClicks: 5,
       disabledPointerSuppressed: true, survivingDomIdentityPreserved: true,
       deletedSurfaceIdRecreated: true, basicControlUpdated: true};
+  } finally {
+    await page.close();
+  }
+}
+
+async function testDistinctFunctionCatalogs(context, origin) {
+  const page = await context.newPage();
+  const runtimeErrors = [];
+  const consoleErrors = [];
+  page.on('pageerror', error => runtimeErrors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  const send = message => page.evaluate(message => window.__a2uiLab.applyMessage(message),
+    {version: 'v0.9', ...message});
+  const trace = id => page.evaluate(id => window.__a2uiLab.trace(id), id);
+  const a = 'function-a', b = 'function-b', basic = 'function-basic';
+  const catalog = prefix => 'https://example.invalid/a2ui/lab-function-' + prefix + '/v0_9';
+  const expression = {call: 'labScopedLabel', args: {value: {path: '/choice'}}};
+  const setText = (surfaceId, text) => send({updateComponents: {surfaceId, components: [
+    {id: 'root', component: 'Text', text},
+  ]}});
+  const seed = (surfaceId, choice) => send({updateDataModel: {surfaceId, path: '/', value: {choice}}});
+  const visible = text => page.getByText(text, {exact: true}).waitFor({state: 'visible', timeout: 10000});
+  const create = async (surfaceId, prefix, choice) => {
+    await send({createSurface: {surfaceId, catalogId: catalog(prefix)}});
+    await seed(surfaceId, choice);
+    await setText(surfaceId, expression);
+    await visible(prefix.toUpperCase() + ':' + choice);
+  };
+  try {
+    await page.goto(origin + '/?capture=1&trusted-custom-catalog=1', {waitUntil: 'domcontentloaded'});
+    await page.waitForFunction(() => Boolean(window.__a2uiLab?.applyMessage), null, {timeout: 10000});
+    await create(a, 'a', 'alpha');
+    await create(b, 'b', 'beta');
+    await send({createSurface: {surfaceId: basic, catalogId: '__BASIC_CATALOG__'}});
+    await seed(basic, 'negative');
+    await setText(basic, 'Basic function control');
+    await visible('Basic function control');
+    const surviving = page.getByText('B:beta', {exact: true});
+    const previous = await surviving.elementHandle({timeout: 10000});
+    assert.ok(previous);
+    try {
+      await seed(a, 'gamma');
+      await visible('A:gamma');
+      assert.equal(await page.getByText('A:alpha', {exact: true}).count(), 0);
+      assert.deepEqual((await trace(b)).data, {choice: 'beta'});
+      await visible('B:beta');
+      await send({deleteSurface: {surfaceId: a}});
+      await page.getByText('A:gamma', {exact: true}).waitFor({state: 'detached', timeout: 10000});
+      await create(a, 'a', 'delta');
+      assert.equal(await surviving.evaluate((element, before) => element === before, previous), true);
+      assert.deepEqual((await trace(b)).data, {choice: 'beta'});
+      assert.deepEqual((await trace(a)).surfaceIds, [a, b, basic].sort());
+      assert.deepEqual((await trace(a)).actions, []);
+      assert.deepEqual((await trace(a)).errors, []);
+      assert.deepEqual(runtimeErrors, []);
+      assert.deepEqual(consoleErrors, []);
+
+      // Expected rejection is tested separately from the zero-error positive path.
+      // Basic has neither custom implementation, even while both are live.
+      await setText(basic, expression);
+      await page.waitForFunction(id => window.__a2uiLab.trace(id).errors.length > 0,
+        basic, {timeout: 10000});
+      assert.equal(await page.getByText('A:negative', {exact: true}).count(), 0);
+      assert.equal(await page.getByText('B:negative', {exact: true}).count(), 0);
+      const rejectionErrors = (await trace(basic)).errors;
+      await setText(basic, 'Basic function recovered');
+      await visible('Basic function recovered');
+      await visible('A:delta');
+      await visible('B:beta');
+      assert.equal(await surviving.evaluate((element, before) => element === before, previous), true);
+      assert.deepEqual((await trace(basic)).errors, rejectionErrors);
+      assert.deepEqual((await trace(basic)).actions, []);
+      assert.deepEqual(runtimeErrors, []);
+    } finally {
+      await previous.dispose();
+    }
+    return {distinctFunctionCatalogs: 2, reactiveText: true, survivingDomIdentityPreserved: true,
+      basicFunctionRejected: true, basicSurfaceRecovered: true};
   } finally {
     await page.close();
   }
