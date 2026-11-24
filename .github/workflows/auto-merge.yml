@@ -2,6 +2,11 @@ name: A2UI Guarded PR Integration
 on:
   schedule:
     - cron: '17,37,57 * * * *'
+  # A successful PR CI run is a wake signal, never merge authorization.
+  # Only the default-branch guard code evaluates GitHub's live PR state.
+  workflow_run:
+    workflows: ['A2UI Compatibility CI']
+    types: [completed]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -18,12 +23,19 @@ concurrency:
   cancel-in-progress: false
 jobs:
   integrate:
-    if: github.repository == 'AKzar1el/a2ui-compat-lab'
+    if: >-
+      github.repository == 'AKzar1el/a2ui-compat-lab' &&
+      (github.event_name != 'workflow_run' ||
+        (github.event.workflow_run.event == 'pull_request' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         startsWith(github.event.workflow_run.head_branch, 'revshot/') &&
+         github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: main # never execute or import code from the originating PR
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
