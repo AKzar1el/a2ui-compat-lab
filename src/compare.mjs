@@ -25,9 +25,10 @@ export function compareScans(before, after) {
   }
 
   const referenceImplementationChanged = before.implementations.reference !== after.implementations.reference;
+  const webCoreImplementationChanged = before.implementations.webCore !== after.implementations.webCore;
   const ok = !resolved.length && !newlyObserved.length && !directionChanged.length &&
     !referenceChanged.length && !decisionChanged.length && !addedFixtures.length && !removedFixtures.length &&
-    !referenceImplementationChanged;
+    !referenceImplementationChanged && !webCoreImplementationChanged;
   return {
     reportVersion: 1,
     kind: 'scan-comparison',
@@ -41,6 +42,7 @@ export function compareScans(before, after) {
     directionChanged,
     referenceChanged,
     referenceImplementationChanged,
+    webCoreImplementationChanged,
     decisionChanged,
     addedFixtures,
     removedFixtures,
@@ -51,8 +53,12 @@ export function compareScans(before, after) {
 function validateScan(report, label) {
   if (!report || report.reportVersion !== 1 || !Array.isArray(report.rows) ||
       !report.implementations || typeof report.implementations.webCore !== 'string' ||
-      typeof report.implementations.reference !== 'string')
+      typeof report.implementations.reference !== 'string' ||
+      !report.implementations.webCore.trim() ||
+      !report.implementations.reference.trim())
     throw new Error(label + ' must be a version-1 A2UI scan report with implementation provenance');
+  if (report.rows.length === 0)
+    throw new Error(label + ' scan must include at least one fixture');
   const rows = new Map();
   for (const row of report.rows) {
     if (!row || typeof row.id !== 'string' || !row.id || rows.has(row.id) ||

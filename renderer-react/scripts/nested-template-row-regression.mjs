@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {testTrustedCustomCatalogBrowserReplay} from './custom-catalog-regression.mjs';
 
 // Verify two levels of published v0.9 template expansion in real Chromium,
 // not merely direct GenericBinder actions from a headless processor.
@@ -97,7 +98,10 @@ export async function testNestedTemplateRowBrowserReplay(context, origin) {
     assert.deepEqual(runtimeErrors, [], 'Nested template replay must not throw');
     assert.deepEqual(consoleErrors, [], 'Nested template replay must not log browser errors');
     assert.deepEqual((await trace()).errors, [], 'Nested surface must report no SDK errors');
-    return {zeroGroupButtons: 0, maxRenderedButtons: 3, physicalClicks: 5,
+    // Keep the custom-catalog check in the existing CI entry point without
+    // modifying the browser runner currently under separate security review.
+    const trustedCustomCatalog = await testTrustedCustomCatalogBrowserReplay(context, origin);
+    return {trustedCustomCatalog, zeroGroupButtons: 0, maxRenderedButtons: 3, physicalClicks: 5,
       selections: ['beta', 'gamma', 'gamma', 'beta', 'alpha'],
       nestedGroupDeletionAndReorderChecked: true, runtimeErrors: 0, consoleErrors: 0};
   } finally {

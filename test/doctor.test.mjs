@@ -4,13 +4,24 @@ import {inspectInstallation} from '../src/doctor.mjs';
 
 function fixture({nodeVersion = '22.22.2', nodeEngine = '>=22', installed = '0.15.0', locked = '0.15.0',
   lockRootPin = '0.15.0', lockRootVersion = '0.1.0', malformedLock = false,
-  dependencyName = '@a2ui/web_core', absentInstall = false} = {}) {
+  dependencyName = '@a2ui/web_core', absentInstall = false, omitDependencies = []} = {}) {
   const files = new Map([
     ['package.json', {name: 'a2ui-compat-lab', version: '0.1.0', engines: {node: nodeEngine}, dependencies: {[dependencyName]: '0.15.0'}}],
     ['package-lock.json', {packages: {'': {version: lockRootVersion, dependencies: {[dependencyName]: lockRootPin}},
       ['node_modules/' + dependencyName]: {version: locked}}}],
     ['node_modules/' + dependencyName + '/package.json', {name: dependencyName, version: installed}],
   ]);
+  // Keep the normal fixture a complete, internally consistent A2UI Lab install.
+  files.get('package.json').dependencies.ajv = '8.20.0';
+  files.get('package-lock.json').packages[''].dependencies.ajv = '8.20.0';
+  files.get('package-lock.json').packages['node_modules/ajv'] = {version: '8.20.0'};
+  files.set('node_modules/ajv/package.json', {name: 'ajv', version: '8.20.0'});
+  for (const missing of omitDependencies) {
+    delete files.get('package.json').dependencies[missing];
+    delete files.get('package-lock.json').packages[''].dependencies[missing];
+    delete files.get('package-lock.json').packages['node_modules/' + missing];
+    files.delete('node_modules/' + missing + '/package.json');
+  }
   if (absentInstall) files.delete('node_modules/' + dependencyName + '/package.json');
   return inspectInstallation({root: '/virtual', nodeVersion, loadJson(path) {
     const key = path.replaceAll('\\', '/').replace(/^\/virtual\//, '');
@@ -26,6 +37,24 @@ test('doctor validates exact installed, locked and manifest versions without net
   assert.equal(report.node.ok, true);
   assert.equal(report.packages[0].name, '@a2ui/web_core');
   assert.deepEqual(report.packages[0].issues, []);
+});
+
+test('doctor rejects missing core SDK or Ajv even with consistent manifest and lock', () => {
+  for (const missing of [
+    ['@a2ui/web_core'], ['ajv'], ['@a2ui/web_core', 'ajv'],
+  ]) {
+    const report = fixture({omitDependencies: missing});
+    assert.equal(report.node.ok, true);
+    assert.equal(report.lockfile.ok, true);
+    assert.equal(report.ok, false, 'missing: ' + missing.join(', '));
+    for (const name of missing) {
+      const entry = report.packages.find(item => item.name === name);
+      assert.deepEqual(entry, {
+        name, expected: null, locked: null, installed: null, ok: false,
+        issues: ['missing-required-dependency'],
+      });
+    }
+  }
 });
 
 test('doctor respects three-part Node engine minimums including patch floors', () => {
