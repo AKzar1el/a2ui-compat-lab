@@ -155,6 +155,19 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
       ...before, indexedData, ...after, indexedEnd,
     ]);
     const validIndexed = indexedImage([palette]);
+    const insertBeforeIdat = type => Buffer.concat([
+      png.subarray(0, 33), makeChunk(type, Buffer.from([1, 2, 3])),
+      png.subarray(33),
+    ]);
+    const unknownCritical = insertBeforeIdat('ABCD');
+    const unknownAncillary = insertBeforeIdat('aBCD');
+    const invalidChunkName = insertBeforeIdat('9BCD');
+    const invalidHighBitChunkName = insertBeforeIdat(String.fromCharCode(0xe1) + 'BCD');
+    const iendOffset = 33 + 12 + png.readUInt32BE(33);
+    const criticalAfterIdat = Buffer.concat([
+      png.subarray(0, iendOffset), makeChunk('ABCD', Buffer.from([1])),
+      png.subarray(iendOffset),
+    ]);
     const indexedMissingPalette = indexedImage();
     const indexedShortPalette = indexedImage([makeChunk('PLTE', Buffer.from([0, 0]))]);
     const indexedDuplicatePalette = indexedImage([palette, palette]);
@@ -171,6 +184,14 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
         {...valid, screenshotSha256: digestFor(badCrc)}, /valid PNG/],
       ['trailing-bytes', trailing,
         {...valid, screenshotSha256: digestFor(trailing)}, /valid PNG/],
+      ['unknown-critical-before-idat', unknownCritical,
+        {...valid, screenshotSha256: digestFor(unknownCritical)}, /valid PNG/],
+      ['unknown-critical-after-idat', criticalAfterIdat,
+        {...valid, screenshotSha256: digestFor(criticalAfterIdat)}, /valid PNG/],
+      ['nonalphabetic-chunk-name', invalidChunkName,
+        {...valid, screenshotSha256: digestFor(invalidChunkName)}, /valid PNG/],
+      ['high-bit-chunk-name', invalidHighBitChunkName,
+        {...valid, screenshotSha256: digestFor(invalidHighBitChunkName)}, /valid PNG/],
       ['invalid-idat-zlib-with-valid-crc', invalidZlib,
         {...valid, screenshotSha256: digestFor(invalidZlib)}, /valid PNG/],
       ['invalid-row-filter-with-valid-crc', invalidFilter,
@@ -207,6 +228,12 @@ test('PNG and digest preflight refuses invalid evidence without creating output 
     const indexedPublished = publishBrowserEvidence(join(root, 'indexed-valid'),
       validIndexed, validIndexedReport);
     assert.deepEqual(readFileSync(indexedPublished.screenshotPath), validIndexed);
+
+    const ancillaryReport = {...valid,
+      screenshotSha256: digestFor(unknownAncillary)};
+    const ancillaryPublished = publishBrowserEvidence(join(root, 'ancillary-valid'),
+      unknownAncillary, ancillaryReport);
+    assert.deepEqual(readFileSync(ancillaryPublished.screenshotPath), unknownAncillary);
 
     const upper = {...valid, screenshotSha256: digest.toUpperCase()};
     const created = publishBrowserEvidence(join(root, 'uppercase-digest'), png, upper);

@@ -31,7 +31,7 @@ function validateCaptureReport(report, label) {
         typeof snapshot.exists !== 'boolean' ||
         !Object.hasOwn(snapshot, 'data') || snapshot.data === undefined ||
         !Array.isArray(snapshot.components) ||
-        snapshot.components.some(id => typeof id !== 'string' || !id) ||
+        snapshot.components.findIndex(id => typeof id !== 'string' || !id) !== -1 ||
         new Set(snapshot.components).size !== snapshot.components.length ||
         !Number.isSafeInteger(snapshot.actionCount) ||
         snapshot.actionCount < previousActions || snapshot.actionCount > replay.actionCount)

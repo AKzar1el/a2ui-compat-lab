@@ -4,6 +4,28 @@
 
 [![A2UI Compatibility CI](https://github.com/AKzar1el/a2ui-compat-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/AKzar1el/a2ui-compat-lab/actions/workflows/ci.yml)
 
+**v1.0 migration check (experimental):** Inspect a developer-owned v1.0 surface JSONL
+capture for ambiguous old v0.9-shaped Text bindings before interpreting its UI.
+Run `node src/v1-text-binding-preflight.mjs --input PRIVATE.jsonl`;
+add `--strict` only to opt into a nonzero advisory result. For the five
+published input `value` slots (TextField, CheckBox, Slider, ChoicePicker,
+DateTimeInput), add `--include-input-values` to request a separate, bounded
+migration advisory without changing default Text-only reports. A plain object
+with `path` or `call` may be an intentional v1 literal, not an invalid payload.
+This does not render a v1 browser surface or test two-way input writeback.
+See [scope, evidence, and privacy limits](docs/V1_TEXT_BINDING_PREFLIGHT.md).
+Optional `--include-event-context` also flags direct and **bounded nested** legacy Button event context path/call shapes, including objects and arrays, using published v1 action-dispatch evidence. It fails closed on cycles, accessors, depth over 12 or more than 2,048 visited nodes per Button; reports retain structural-only private coordinates.
+
+**DOM-less browser-condition SDK portability:** The installed published 0.15.0
+basic v1 catalog currently imports Lit when resolved with Node's browser
+condition, failing on platforms without `HTMLElement` (reported by an
+actual React Native integrator). A proposed Lit-free API export remains
+unpublished; the probe distinguishes missing API exports from DOM-only imports. Run `node src/domless-browser-import-preflight.mjs`
+to see a bounded JSON import diagnostic, or append `--strict` to flag the
+known incompatibility in CI. Opt into `--project-root /path/to/your/app` to
+probe a trusted consumer's directly installed SDK instead of the Lab pin. This tests Node's browser condition, **not**
+React Native/Metro/Hermes. [Diagnostic and limitations](docs/DOMLESS_IMPORT_PREFLIGHT.md).
+
 ## Replay saved Go A2UI WebSocket server frames (opt-in)
 
 The independent [Go/React A2UI producer](https://github.com/nigma888/a2ui-go-react)
@@ -690,7 +712,7 @@ The project also exercises the actual published A2UI v0.9 MessageProcessor with 
 
 ## Headless component action replay
 
-Run `npm run replay:actions` to produce `out/action-replay.json`. Unlike the state-only lifecycle example, this fixture uses the actual published `MessageProcessor`, `ComponentContext`, and `GenericBinder` to invoke a catalog-defined Button action, capture the emitted agent event, apply an agent data-model response, and repeat the action against the new state. The report includes stable action context, per-step state snapshots, installed core SDK version, fixture digest, and equivalence checks over 1/7/57-character JSONL chunk boundaries. Tests reject taps on missing, deleted, or non-Button components.
+Run `npm run replay:actions` to produce `out/action-replay.json`. Unlike the state-only lifecycle example, this fixture uses the actual published `MessageProcessor`, `ComponentContext`, and `GenericBinder` to invoke a catalog-defined Button action, capture the emitted agent event, apply an agent data-model response, and repeat the action against the new state. The report includes stable action context, per-step state snapshots, installed core SDK version, fixture digest, and equivalence checks over 1/7/57-character JSONL chunk boundaries **and** 1/2/3/7/57/full-length UTF-8 byte boundaries. Its `unicodeFixtureSha256`, `byteChunkTrials`, and `unicodeTrace` fields verify that real published-SDK Button events keep non-ASCII data-model context (`Čebelica 🌍`, `こんにちは 👋`) when transport chunks split multibyte characters. These are headless core actions, not browser clicks or mobile-runtime certification. Tests reject taps on missing, deleted, or non-Button components.
 
 **Scope:** this verifies the actual SDK's headless action binding and event dispatch, **not** a real pointer/keyboard interaction, React render, DOM update, screenshot, or upstream-unknown defect. Browser-level interaction and recovery remain open in [issue #2](https://github.com/AKzar1el/a2ui-compat-lab/issues/2).
 

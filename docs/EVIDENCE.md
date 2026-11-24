@@ -808,3 +808,82 @@ The public CopilotKit Python A2UI helper returns a JSON object with `a2ui_operat
 - Before this candidate, the lab's real Chromium JSONL replay explicitly refused `v0.9.1` on input, even though the published core SDK accepted the public example. The scoped `--accept-v091` option proposes direct JSONL `v0.9` / `v0.9.1` replay with the original wire version preserved and a default strict `v0.9` refusal. CopilotKit envelope support remains separately strict `v0.9`; `v1.0` remains refused. The report's `protocol: "v0.9"` is a renderer-lane label, not proof the producer emitted exactly `v0.9`.
 - Public fixture `fixtures/external-go-react-notes-v091.jsonl` is adapted from the original Apache-2.0 example. Provenance and retained Apache license are documented beside the fixture. Regression tests must assert the default failure, opt-in **real** React/Chromium Button action, strict envelope/unsupported-version rejection and no private component fields in report output.
 - **Validation pending** until both GitHub Actions final-head push and PR jobs pass `sdk-parity`, `react-browser` and `dependency-audit`. Do not claim real Chromium success, an upstream SDK defect, external application execution, customer demand, or revenue before the appropriate evidence exists.
+
+## PNG screenshot-evidence unknown-critical-chunk preflight (2026-11-22)
+
+- Follow-up #170 exact-head review caught a high-bit character alias: Node's `Buffer.toString('ascii')` strips bit 7, so byte `0xe1` could masquerade as lowercase `a` in an otherwise CRC-valid ancillary chunk type. Decode chunk type as `latin1` before enforcing the ASCII-letter grammar; the regression includes an invalid high-bit type with recomputed CRC and matching report SHA. This is a Lab-owned preflight hardening, not an upstream SDK vulnerability. Final new-head hosted CI must be independently reverified.
+
+- At protected main `cee6d165d9aef3a2075397d960c8fa990b254a52`, the Lab's browser-evidence checker accepted a crafted PNG containing an unrecognized **critical** `ABCD` chunk placed after IHDR, despite valid CRCs, valid IDAT scanline content, and a matching screenshot SHA-256. A read-only test of the actual GitHub main source returned `true` for this forged input. This is a **Lab-owned evidence integrity gap**, not a vulnerability claim against the upstream A2UI SDK.
+- The fix rejects unrecognized critical chunk types and nonalphabetic PNG chunk names, while preserving valid unknown **ancillary** chunks (lowercase first letter). Deterministic offline tests exercise unknown critical chunks before and after IDAT, malformed names, and a permitted ancillary control. W3C PNG 3 section 13.1 requires unknown critical chunks to be fatal for image extraction, while unknown ancillary chunks may be ignored: https://www.w3.org/TR/png-3/ .
+- Verification: remote GitHub PR exact-final-head `sdk-parity`, real Chromium `react-browser`, and `dependency-audit` jobs are required; they were **not yet run** at the time of this branch receipt. No local checkout, protected main, security draft, deployment or scheduled workflow was modified.
+
+
+## P1 action replay — UTF-8 transport splits (PR #171; verification pending)
+
+- The existing `src/replay-action-report.mjs` checked JavaScript *string* JSONL chunk boundaries for the pinned published `@a2ui/web_core` v0.9 action sequence, whereas `replay-report.mjs` separately exercised UTF-8 byte chunks for non-action lifecycle state. This left a distinct gap in **reported** action/context replay evidence, not a confirmed upstream SDK bug.
+- [PR #171](https://github.com/AKzar1el/a2ui-compat-lab/pull/171), branch `revshot/a2ui-action-utf8-byte-replay-20261122`, adds non-ASCII data-model selections (`Čebelica 🌍`, `こんにちは 👋`) and byte chunk sizes 1, 2, 3, 7, 57 and full-length, testing real `MessageProcessor`/`GenericBinder` action/context output, not merely JSON parse success. Report fields `unicodeFixtureSha256`, `byteChunkTrials`, and `unicodeTrace` make the evidence inspectable; `allMatch` now includes both trial families.
+- Added offline published-SDK regression and report CLI assertions in `test/replay-actions.test.mjs`. **Do not claim tests passed yet**: exact-final-head GitHub sdk-parity, real React/Chromium and dependency-audit are required. The Windows historical checkout lacks the current byte-parser export; no complete local npm/Python/browser suite ran.
+- This is a developer-facing compatibility/replay workflow capability, not real React Native, physical browser interaction, customer adoption or revenue. Keep `main` and protected security drafts untouched; issue one exact-final-SHA merger handoff only if all three hosted gates pass.
+
+## Root-reachable Button replay integrity (2026-11-22, pending PR CI)
+
+The published `@a2ui/web_core@0.15.0` v0.9 processor retains a Button model even when the root Column omits that Button from its child tree. A direct `GenericBinder` call on the detached component emits an action, but a renderer could not expose it as a root-reachable Button. The Lab's headless `replayV09Actions` had checked only existence/type; the scoped fix also traverses the actual published SDK `surface.rootId` and component `properties.child/children` references, with visited-node cycle protection, before simulating a tap. Offline cases reject unreferenced and detached-subtree Buttons and preserve a rooted Button action. This is a Lab headless-replay evidence guard, not a claim of an upstream SDK defect, DOM/CSS visibility semantics, a physical click or external adoption. Exact-PR-head hosted sdk-parity, real React/Chromium and dependency-audit remain pending at this entry.
+
+Independent follow-up published-SDK control: after initially rooting `submit`, a later v0.9 `updateComponents` changing only the root Column to `children:['status']` leaves the old `submit` ComponentModel registered. Direct `GenericBinder` invocation still emits `stale-event`. The guard therefore also rejects a simulated tap **after reparent/detach**, not just a Button orphaned at initial creation; added one deterministic regression. This is a headless harness safety condition, not a real DOM click test.
+
+Basic Catalog slot coverage independently checked against published `@a2ui/web_core@0.15.0` ComponentModels: Card `child`, Tabs `tabs[].child`, and Modal `trigger`/`content` preserve structural reachability in addition to Row/Column/List `children[]`. These are structural references, not proof that a tab is selected, modal is open or CSS makes an element clickable. Dynamic `children:{componentId,path}` templates require data-dependent rendering and are intentionally not advertised as simulated headless taps by this guard.
+
+## v0.9 Button validation-check replay guard (2026-11-22; PR #172 follow-up, CI pending)
+
+Read-only Node 22 execution against published `@a2ui/web_core@0.15.0` confirmed the v0.9 Basic Catalog Button accepts `checks` and `GenericBinder.snapshot.isValid` becomes `false` when a `required` check for `/terms` receives an absent or empty value. Nevertheless, directly invoking `snapshot.action()` produced one outbound event in both cases; when the condition passed, `isValid` was `true` and the binder also produced one event. This is the Lab's **headless replay** gap, not a flaw in the SDK's browser Button renderer: simulated taps should not bypass the renderer's disabled control. The same #172 branch now rejects only an explicit `isValid === false` before action invocation, with offline tests for disabled, enabled and subsequently invalidated Buttons. The pinned package was checked read-only in the historical checkout, but **the complete updated remote branch has not been run locally**; hosted final-head sdk-parity, actual React/Chromium and dependency-audit must be verified before restoring the SHA-bound merger handoff. No CSS visibility or actual click assertion, new security issue, adoption or revenue claim.
+
+Final-head CI correction: the initial strict `isValid !== true` guard rejected ordinary Buttons that omitted `checks`, because the published binder leaves `isValid` undefined when checks are absent (and returns true for an explicit empty list). GitHub Actions `sdk-parity` failed on 21 existing action tests at provisional head `ba3c02ffe80f17452565e2197fc06252b50236e3` (PR run #45021236676). The correction blocks only explicit `isValid === false`, adds regression positives for missing and empty checks, and requires fresh final-head all-green CI before a merger handoff. This is a bounded test-driven fix, not a claim that the earlier failed CI was successful.
+
+## Closed Modal action-replay integrity (2026-11-22; PR #172, CI pending)
+
+Installed published `@a2ui/web_core@0.15.0` initializes Modal `isOpen=false` and renders `props.content` only when open. Read-only Node 22 execution with an actual v0.9 `MessageProcessor` rooted at Modal confirmed a content Button still emitted one `closed-modal-event` when `GenericBinder.snapshot.action()` was invoked directly. The Lab's purely structural root traversal had thus treated unrendered modal content as tappable. Since headless replay has no modal-open interaction, the scoped guard stops at Modal.trigger rather than descending into Modal.content; regression covers root and nested closed Modals while retaining a positive trigger test. This is a model-level conservative restriction, NOT a physical Chromium click, complete visibility proof, published SDK bug, adoption, or revenue. Fresh exact-head sdk-parity, React/Chromium, and dependency-audit are PENDING; no merger handoff before all pass.
+
+
+## Inactive Tabs action-replay integrity (2026-11-22; PR #172, CI pending)
+
+Published `@a2ui/web_core@0.15.0` v0.9 Tabs initializes activeIndex=0 and renders only `tabs[0].child` until a tab-header click. An independent Node 22 `MessageProcessor` + `GenericBinder` probe with a root Tabs whose second tab contained a Button emitted one `hidden-action` event from that inactive Button. Lab headless `isRootReachable` traversed all Tabs children and falsely presented it as a user tap. This continuation limits headless Tabs traversal to the first tab; offline regressions cover inactive root/nested Tabs, initially visible Button, and a later update hiding that Button. It is intentionally conservative: no simulated tab-header click, no physical browser visibility proof, no upstream security claim, and no user/revenue evidence. Existing #172 head `2e6a2e9132d62307b858ba8b80fa2ff659e248ff` was green before this change; **new final-head hosted CI remains required**, with merger handoff withdrawn pending verification.
+
+## P1 headless template-instance Button replay (2026-11-22)
+
+The pinned published v0.9 MessageProcessor and GenericBinder resolve a templated
+Column/Row/List child reference into current `{id,basePath}` row instances.
+`replayV09Actions` now accepts an explicit `tap.basePath` for one of those
+currently materialized instances; it refuses ID-only template taps, missing or
+deleted rows, malformed paths and detached child lists. Relative event context
+resolves against the chosen current row; a reorder changes which record occupies
+a numeric index. This is **headless published-SDK evidence**, not a physical DOM
+click or a stable record identity. Existing closed Modal, inactive Tabs and
+disabled Button guards still apply. A real browser template click and third-party
+adoption are separate unverified milestones.
+
+## Real Chromium templated Button row replay — proposed regression (2026-11-22)
+
+The browser harness on the published React/core 0.14.0 pair now includes a separate capture-mode 0/1/2-row test for templated Column children. Its Playwright pointer clicks target actual rendered Button instances, asserting distinct relative action contexts, removal after deletion, and current-index semantics after a reorder. This is independent of PR #173's published core 0.15 headless replay. The added regression is **unverified until exact-head hosted React/Chromium CI passes**; do not infer upstream renderer defects, native renderer parity, durable record IDs, customer adoption or revenue from this proposed test alone.
+
+## Real Chromium two-level template membership regression (2026-11-22; CI pending)
+
+The published React/core 0.14 browser harness now includes a separate, deterministic
+two-level `Column -> grouped Column -> Button` template test. The outer
+`/groups` expansion and inner relative `items` expansion reuse the same Button
+component ID but should select distinct current nested data-model contexts.
+The test starts with zero groups, clicks individual instances across one and two
+groups, deletes the original group, reindexes, and verifies event selections after
+repopulation. It asserts detached buttons cannot remain visible and checks browser,
+console and SDK-surface error channels.
+
+This test is scoped to the existing offline/loopback Playwright harness and is
+**not yet browser-verified**: no local source-checkout write or full Windows
+test occurred. Exact-head GitHub Actions `react-browser`, `sdk-parity`, and
+`dependency-audit` must pass before any merger handoff. It does not establish
+native renderer parity, durable row IDs, security remediation, adoption or revenue.
+
+## Fail-closed headless Button tap envelope validation (2026-11-23; hosted CI pending)
+
+The Lab's v0.9 `replayV09Actions` input allows `tap` with exactly `surfaceId`, `componentId`, and optional `basePath`. Prior to this proposed regression, unknown keys such as a misspelled `basePth` were silently discarded. For a live static Button, that silently converted a developer's intended instance selector to an ID-only tap and could emit an action rather than signal invalid input. The new strict envelope check rejects unknown properties and non-object shapes before invoking the SDK binder; deterministic tests preserve a valid static tap and reject a typo, surplus property, and array. This is a **Lab-owned replay input integrity guard**, not an upstream A2UI SDK bug, a physical browser interaction, a production security finding, or evidence of customer adoption.
+
+Validation is **PENDING** until exact-final-head GitHub Actions `sdk-parity`, `react-browser` and `dependency-audit` all pass. The source checkout on historical Windows branch and pre-existing untracked `renderer-react/` remain untouched; no local full-suite execution is claimed.

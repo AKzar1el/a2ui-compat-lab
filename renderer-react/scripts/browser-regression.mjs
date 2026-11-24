@@ -14,6 +14,8 @@ import {compareBrowserCaptureSummaries} from '../../src/browser-capture-summary-
 import {testDirectBrowserCaptureBaseline} from './browser-capture-baseline-regression.mjs';
 import {testConsumerCiStarter} from './consumer-ci-regression.mjs';
 import {testMessageOnlyHistoryReplay} from './message-history-regression.mjs';
+import {testTemplateRowBrowserReplay} from './template-row-regression.mjs';
+import {testNestedTemplateRowBrowserReplay} from './nested-template-row-regression.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = resolveBrowserEvidenceDir(root, process.argv.slice(2));
@@ -133,6 +135,10 @@ try {
   // Independent second-page lifecycle: real two-way input, action, and stored-agent-message rebuild.
   checkpoints.push({step: 'message-only-history-replay',
     ...await testMessageOnlyHistoryReplay(context, origin)});
+  checkpoints.push({step: 'real-templated-row-pointer-replay',
+    ...await testTemplateRowBrowserReplay(context, origin)});
+  checkpoints.push({step: 'real-nested-template-row-pointer-replay',
+    ...await testNestedTemplateRowBrowserReplay(context, origin)});
   const button = page.getByRole('button', {name: 'Confirm'});
   await button.waitFor({state: 'visible'});
   await page.getByText('alpha', {exact: true}).waitFor({state: 'visible'});

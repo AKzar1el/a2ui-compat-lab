@@ -59,6 +59,20 @@ test('malformed, contradictory and duplicate reports fail closed', () => {
   assert.throws(() => compareScans({...valid, reportVersion: 2}, valid), /version-1/);
 });
 
+test('scan comparison rejects empty implementation provenance rather than false-green parity', () => {
+  const valid = scan([['stable', true, true]]);
+  for (const field of ['webCore', 'reference']) {
+    for (const value of ['', '   ']) {
+      const missing = structuredClone(valid);
+      missing.implementations[field] = value;
+      assert.throws(() => compareScans(missing, valid), /implementation provenance/);
+      assert.throws(() => compareScans(valid, missing), /implementation provenance/);
+      assert.throws(() => compareScans(missing, missing), /implementation provenance/);
+    }
+  }
+  assert.equal(compareScans(valid, structuredClone(valid)).ok, true);
+});
+
 test('changing the reference validator configuration is not silently treated as parity', () => {
   const before = scan([['a', true, true]]);
   const after = structuredClone(before);
@@ -66,6 +80,20 @@ test('changing the reference validator configuration is not silently treated as 
   const result = compareScans(before, after);
   assert.equal(result.ok, false);
   assert.equal(result.referenceImplementationChanged, true);
+});
+
+test('scan comparison flags SDK version drift even when every fixture decision agrees', () => {
+  const before = scan([['stable', true, true]]);
+  const after = scan([['stable', true, true]], '0.16.0');
+  const result = compareScans(before, after);
+  assert.equal(result.ok, false);
+  assert.equal(result.webCoreImplementationChanged, true);
+  assert.deepEqual(result.newlyObserved, []);
+  assert.deepEqual(result.resolved, []);
+
+  const unchanged = compareScans(before, structuredClone(before));
+  assert.equal(unchanged.ok, true);
+  assert.equal(unchanged.webCoreImplementationChanged, false);
 });
 
 test('scan baseline fails if SDK installation disagrees with the pinned version', () => {
@@ -205,4 +233,13 @@ test('comparison output protects source reports and prior evidence from overwrit
   } finally {
     rmSync(dir, {recursive: true, force: true});
   }
+});
+
+test('scan comparison rejects empty fixture reports instead of false-green parity', () => {
+  const empty = scan([]);
+  const valid = scan([['stable', true, true]]);
+  assert.throws(() => compareScans(empty, structuredClone(empty)), /at least one fixture/);
+  assert.throws(() => compareScans(empty, valid), /at least one fixture/);
+  assert.throws(() => compareScans(valid, empty), /at least one fixture/);
+  assert.equal(compareScans(valid, structuredClone(valid)).ok, true);
 });
