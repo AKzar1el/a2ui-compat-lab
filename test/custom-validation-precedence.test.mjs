@@ -25,7 +25,8 @@ test('pinned core 0.15.0 chooses explicit rule message for structured custom val
     resolver = new NodeResolver(surface);
     send({updateComponents: {surfaceId, components: [
       {id: 'root', component: 'Button', child: 'label',
-        checks: [{condition: {call: 'labCheck', args: {value: {path: '/choice'}}}, message: 'rule message'}]},
+        checks: [{condition: {call: 'labCheck', args: {value: {path: '/choice'}}}, message: 'rule message'}],
+        action: {event: {name: 'submit-validation', context: {choice: {path: '/choice'}}}}},
       {id: 'label', component: 'Text', text: 'Submit validation'},
     ]}});
     const root = peekValue(resolver.rootNode);
