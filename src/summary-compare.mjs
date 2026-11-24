@@ -41,6 +41,7 @@ function validateSummary(report) {
         !OPERATIONS.has(step.operation) ||
         typeof step.surfacePresent !== 'boolean' ||
         !nonnegativeInteger(step.componentCount) ||
+        (!step.surfacePresent && step.componentCount !== 0) ||
         !nonnegativeInteger(step.actionCount) ||
         !nonnegativeInteger(step.actionsEmitted) ||
         step.actionCount < previousActionCount ||
