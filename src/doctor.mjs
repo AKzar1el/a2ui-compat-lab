@@ -25,12 +25,16 @@ export function inspectInstallation({root = defaultRoot, nodeVersion = process.v
     throw new Error('Project dependencies must be an object');
   }
   const required = manifest.data.engines?.node ?? null;
-  const supportedEngine = typeof required === 'string' ? /^>=(\d+)(?:\.(\d+))?$/.exec(required.trim()) : null;
-  const installedNode = /^(\d+)\.(\d+)\./.exec(nodeVersion);
-  const nodeOk = Boolean(supportedEngine && installedNode &&
-    (Number(installedNode[1]) > Number(supportedEngine[1]) ||
-      (Number(installedNode[1]) === Number(supportedEngine[1]) &&
-       Number(installedNode[2]) >= Number(supportedEngine[2] ?? 0))));
+  const supportedEngine = typeof required === 'string' ?
+    /^>=(\d+)(?:\.(\d+)(?:\.(\d+))?)?$/.exec(required.trim()) : null;
+  const installedNode = /^(\d+)\.(\d+)\.(\d+)/.exec(nodeVersion);
+  const minimum = supportedEngine?.slice(1).map(part => Number(part ?? 0));
+  const actual = installedNode?.slice(1).map(Number);
+  const nodeOk = Boolean(minimum && actual &&
+    (actual[0] > minimum[0] ||
+      (actual[0] === minimum[0] &&
+       (actual[1] > minimum[1] ||
+        (actual[1] === minimum[1] && actual[2] >= minimum[2])))));
 
   const lock = loadJson(join(root, 'package-lock.json'));
   const lockRoot = lock.data?.packages?.[''];
@@ -39,7 +43,15 @@ export function inspectInstallation({root = defaultRoot, nodeVersion = process.v
   else if (!lockRoot || typeof lockRoot !== 'object') lockIssues.push('invalid-lock-root');
   else if (lockRoot.version !== manifest.data.version) lockIssues.push('project-version-mismatch');
 
-  const packages = Object.entries(dependencies).map(([name, expected]) => {
+  // An apparently consistent empty manifest is not an A2UI-ready installation.
+  const requiredDeps = ['@a2ui/web_core', 'ajv'];
+  const packageNames = [...new Set([...Object.keys(dependencies), ...requiredDeps])];
+  const packages = packageNames.map(name => {
+    if (!Object.hasOwn(dependencies, name)) return {
+      name, expected: null, locked: null, installed: null, ok: false,
+      issues: ['missing-required-dependency'],
+    };
+    const expected = dependencies[name];
     const issues = [];
     const safeName = /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(name) && !name.split('/').includes('..');
     const pinned = typeof expected === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(expected);

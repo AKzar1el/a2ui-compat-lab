@@ -4,10 +4,17 @@ import {A2uiSurface} from '@a2ui/react/v0_9';
 import {MessageProcessor} from '@a2ui/web_core/v0_9';
 import {basicCatalog} from '@a2ui/web_core/v0_9/basic_catalog';
 import steps from './fixture.json';
+import {createLabReactCatalog, createLabFunctionCatalogs} from './trusted-example-catalog.jsx';
 
 const emitted = [];
 const errors = [];
-const processor = new MessageProcessor([basicCatalog], action => {
+const params = new URLSearchParams(window.location.search);
+const captureMode = params.get('capture') === '1';
+const customCatalogEnabled = captureMode && params.get('trusted-custom-catalog') === '1';
+const catalogs = customCatalogEnabled
+  ? [basicCatalog, createLabReactCatalog(), ...createLabFunctionCatalogs()]
+  : [basicCatalog];
+const processor = new MessageProcessor(catalogs, action => {
   const {timestamp, ...stable} = action;
   emitted.push(structuredClone(stable));
 });
@@ -36,7 +43,6 @@ function applyMessage(source) {
     }
   }
 }
-const captureMode = new URLSearchParams(window.location.search).get('capture') === '1';
 const surfaceErrorProbe = captureMode &&
   new URLSearchParams(window.location.search).get('surface-error-probe') === '1';
 if (!captureMode) for (const step of steps.slice(0, 3)) applyMessage(step.message);
