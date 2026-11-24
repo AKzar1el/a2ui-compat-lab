@@ -69,6 +69,58 @@ export async function testTrustedCustomCatalogBrowserReplay(context, origin) {
       name: 'confirm-custom', surfaceId, sourceComponentId: 'root', selection,
     })));
     assert.deepEqual(errors, []);
+    // Use a second component update so the original unconstrained pointer
+    // controls remain intact. Subsequent model-only updates must change validity.
+    await send({updateComponents: {surfaceId, components: [
+      {id: 'root', component: 'LabConfirm', child: 'label',
+        checks: [{condition: {call: 'required', args: {value: {path: '/choice'}}},
+          message: 'Choice required'}],
+        action: {event: {name: 'confirm-custom', context: {selection: {path: '/choice'}}}}},
+    ]}});
+    const waitDisabled = disabled => page.waitForFunction(
+      disabled => document.querySelector('[data-testid="lab-custom-confirm"]')?.disabled === disabled,
+      disabled, {timeout: 10000});
+    const expectSelections = async selections => {
+      assert.deepEqual((await trace()).actions, selections.map(selection => ({
+        name: 'confirm-custom', surfaceId, sourceComponentId: 'root', context: {selection},
+      })));
+    };
+    const tryDisabledInput = async selections => {
+      await waitDisabled(true);
+      const bounds = await button.boundingBox();
+      assert.ok(bounds, 'Disabled custom button must remain visible');
+      // A locator click waits for enabled state; use actual pointer coordinates.
+      await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      assert.equal(await button.evaluate(element => {
+        element.focus();
+        return document.activeElement === element;
+      }), false, 'Native disabled custom button must reject focus');
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('Space');
+      await expectSelections(selections);
+    };
+    await send({updateDataModel: {surfaceId, path: '/choice', value: ''}});
+    await tryDisabledInput(['alpha', 'beta']);
+    await send({updateDataModel: {surfaceId, path: '/choice', value: 'gamma'}});
+    await waitDisabled(false);
+    await expectSelections(['alpha', 'beta']);
+    await button.focus();
+    assert.equal(await button.evaluate(element => document.activeElement === element), true);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(id => window.__a2uiLab.trace(id).actions.length === 3,
+      surfaceId, {timeout: 10000});
+    await expectSelections(['alpha', 'beta', 'gamma']);
+    await send({updateDataModel: {surfaceId, path: '/choice', value: 'delta'}});
+    await waitDisabled(false);
+    await expectSelections(['alpha', 'beta', 'gamma']);
+    await button.focus();
+    await page.keyboard.press('Space');
+    await page.waitForFunction(id => window.__a2uiLab.trace(id).actions.length === 4,
+      surfaceId, {timeout: 10000});
+    await expectSelections(['alpha', 'beta', 'gamma', 'delta']);
+    await send({updateDataModel: {surfaceId, path: '/choice', value: ''}});
+    await tryDisabledInput(['alpha', 'beta', 'gamma', 'delta']);
+    assert.deepEqual((await trace()).errors, []);
     await send({deleteSurface: {surfaceId}});
     await button.waitFor({state: 'detached', timeout: 10000});
     assert.equal((await trace()).surfaceIds.includes(surfaceId), false);
@@ -76,7 +128,8 @@ export async function testTrustedCustomCatalogBrowserReplay(context, origin) {
     assert.deepEqual(runtimeErrors, []);
     assert.deepEqual(consoleErrors, []);
     return {unregisteredCatalogRejected: true, customDomRendered: true,
-      physicalClicks: 2, selections: ['alpha', 'beta'], customSurfaceDeleted: true,
+      physicalClicks: 2, keyboardActivations: 2, disabledInputAttempts: 2,
+      selections: ['alpha', 'beta', 'gamma', 'delta'], customSurfaceDeleted: true,
       basicCatalogStillRendered: true};
   } finally {
     await page.close();

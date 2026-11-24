@@ -36,7 +36,7 @@ See issue #191 for the real-world public custom-catalog pattern, upstream
 version boundary, and synthetic published-SDK test evidence. This does not
 establish adoption, customer demand, sales, or an upstream SDK security bug.
 
-## Separate pinned React example (proposed, pending hosted CI)
+## Separate pinned React example
 
 The browser harness also has an opt-in, bundled synthetic `LabConfirm`
 component using the published React/core 0.14.0 pair. Open capture mode
@@ -48,6 +48,9 @@ messages never import code, fetch catalogs, or register executable objects.
 The Chromium regression checks rejection when registration is absent,
 real custom React DOM, two pointer clicks with changed data-bound action
 context, surface deletion and an independent basic-catalog control.
+The regression also exercises a required check on the custom component:
+empty/nonempty/empty model updates, native disabled pointer and keyboard
+suppression, and focused Enter/Space with exact current action context.
 This is a bundled example, not arbitrary custom-renderer loading or a
 claim of Handsontable compatibility. Verification requires the exact-head
 hosted browser job; no local browser execution is claimed.
