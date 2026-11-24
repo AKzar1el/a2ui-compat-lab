@@ -129,10 +129,11 @@ export async function testTrustedCustomCatalogBrowserReplay(context, origin) {
     assert.deepEqual(consoleErrors, []);
     const surfaceIsolation = await testConcurrentCustomSurfaces(context, origin);
     const functionIsolation = await testDistinctFunctionCatalogs(context, origin);
+    const functionActions = await testFunctionActionContexts(context, origin);
     return {unregisteredCatalogRejected: true, customDomRendered: true,
       physicalClicks: 2, keyboardActivations: 2, disabledInputAttempts: 2,
       selections: ['alpha', 'beta', 'gamma', 'delta'], customSurfaceDeleted: true,
-      basicCatalogStillRendered: true, surfaceIsolation, functionIsolation};
+      basicCatalogStillRendered: true, surfaceIsolation, functionIsolation, functionActions};
   } finally {
     await page.close();
   }
@@ -334,6 +335,90 @@ async function testDistinctFunctionCatalogs(context, origin) {
     }
     return {distinctFunctionCatalogs: 2, reactiveText: true, survivingDomIdentityPreserved: true,
       basicFunctionRejected: true, basicSurfaceRecovered: true};
+  } finally {
+    await page.close();
+  }
+}
+
+async function testFunctionActionContexts(context, origin) {
+  const page = await context.newPage();
+  const runtimeErrors = [];
+  const consoleErrors = [];
+  page.on('pageerror', error => runtimeErrors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  const send = message => page.evaluate(message => window.__a2uiLab.applyMessage(message),
+    {version: 'v0.9', ...message});
+  const trace = () => page.evaluate(() => window.__a2uiLab.trace());
+  const a = 'function-action-a', b = 'function-action-b', basic = 'function-action-basic';
+  const catalog = prefix => 'https://example.invalid/a2ui/lab-function-' + prefix + '/v0_9';
+  const expression = {call: 'labScopedLabel', args: {value: {path: '/choice'}}};
+  const setButton = (surfaceId, label, value) => send({updateComponents: {surfaceId, components: [
+    {id: 'root', component: 'Button', child: 'label', variant: 'primary',
+      action: {event: {name: 'submit', context: {value, control: 'safe'}}}},
+    {id: 'label', component: 'Text', text: label},
+  ]}});
+  const button = label => page.getByRole('button', {name: label, exact: true});
+  const create = async (surfaceId, catalogId, label, choice, value) => {
+    await send({createSurface: {surfaceId, catalogId}});
+    await send({updateDataModel: {surfaceId, path: '/', value: {choice}}});
+    await setButton(surfaceId, label, value);
+    await button(label).waitFor({state: 'visible', timeout: 10000});
+  };
+  const expected = [];
+  const click = async (label, surfaceId, context) => {
+    await button(label).click();
+    expected.push({name: 'submit', surfaceId, sourceComponentId: 'root', context});
+    await page.waitForFunction(count => window.__a2uiLab.trace().actions.length === count,
+      expected.length, {timeout: 10000});
+    // Compare the serialized envelope consumers actually receive. An undefined
+    // expression result can exist in memory but is omitted from JSON.
+    const {actions} = await trace();
+    assert.deepEqual(JSON.parse(JSON.stringify(actions)), expected);
+  };
+  try {
+    await page.goto(origin + '/?capture=1&trusted-custom-catalog=1',
+      {waitUntil: 'domcontentloaded'});
+    await page.waitForFunction(() => Boolean(window.__a2uiLab?.applyMessage),
+      null, {timeout: 10000});
+    await create(a, catalog('a'), 'Submit catalog A', 'alpha', expression);
+    await create(b, catalog('b'), 'Submit catalog B', 'beta', expression);
+    await create(basic, '__BASIC_CATALOG__', 'Submit basic negative', 'negative', expression);
+    assert.deepEqual((await trace()).actions, []);
+    assert.deepEqual((await trace()).errors, [], 'Action expressions must not fail before activation');
+    await click('Submit catalog A', a, {value: 'A:alpha', control: 'safe'});
+    await click('Submit catalog B', b, {value: 'B:beta', control: 'safe'});
+    await send({updateDataModel: {surfaceId: a, path: '/choice', value: 'gamma'}});
+    assert.deepEqual((await trace()).actions, expected);
+    await click('Submit catalog A', a, {value: 'A:gamma', control: 'safe'});
+    await click('Submit catalog B', b, {value: 'B:beta', control: 'safe'});
+    assert.deepEqual((await trace()).errors, []);
+    assert.deepEqual(runtimeErrors, []);
+    assert.deepEqual(consoleErrors, []);
+
+    // Published core reports an expression failure but dispatches the action
+    // with an incomplete context. Do not mistake this for action suppression.
+    await click('Submit basic negative', basic, {control: 'safe'});
+    await page.waitForFunction(() => window.__a2uiLab.trace().errors.length > 0,
+      null, {timeout: 10000});
+    const negative = await trace();
+    assert.equal(negative.actions[4].context.value, undefined);
+    assert.deepEqual(negative.errors, ['surface-error']);
+    assert.deepEqual(runtimeErrors, []);
+    const rejectedConsoleErrors = [...consoleErrors];
+    await setButton(basic, 'Submit basic recovered', {path: '/choice'});
+    await button('Submit basic recovered').waitFor({state: 'visible', timeout: 10000});
+    await click('Submit basic recovered', basic, {value: 'negative', control: 'safe'});
+    // Both trusted catalogs must continue producing their own action contexts.
+    await click('Submit catalog A', a, {value: 'A:gamma', control: 'safe'});
+    await click('Submit catalog B', b, {value: 'B:beta', control: 'safe'});
+    assert.deepEqual((await trace()).errors, negative.errors);
+    assert.deepEqual(runtimeErrors, []);
+    assert.deepEqual(consoleErrors, rejectedConsoleErrors);
+    return {physicalClicks: expected.length, distinctActionCatalogs: 2,
+      dispatchTimeModelUpdate: true, incompleteBasicPayloadDetected: true,
+      basicActionRecovered: true};
   } finally {
     await page.close();
   }
