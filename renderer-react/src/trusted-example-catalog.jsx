@@ -20,9 +20,27 @@ export function createLabReactCatalog() {
       </button>;
     },
   );
+  const validation = createComponentImplementation(
+    {name: 'LabValidation', schema: buttonApi.schema},
+    function LabValidation({props, buildChild}) {
+      return <div>
+        <button type="button" data-testid="lab-validation-button"
+          disabled={props.isValid === false} onClick={() => {
+            if (props.isValid !== false) props.action?.();
+          }}>
+          {typeof props.child === 'string' ? buildChild(props.child) :
+            props.child ? buildChild(props.child.id, props.child.basePath) : null}
+        </button>
+        <output data-testid="lab-validation-message">{(props.validationErrors ?? []).join('; ')}</output>
+      </div>;
+    },
+  );
+  const check = createFunctionImplementation({
+    ...basicCatalog.functions.get('required'), name: 'labCheck',
+  }, ({value}) => ({valid: value === 'pass', message: 'function message', severity: 'error', code: 'LAB'}));
   return new Catalog(LAB_CATALOG_ID, '0.9',
-    [...basicCatalog.components.values(), confirm],
-    [...basicCatalog.functions.values()], basicCatalog.themeSchema);
+    [...basicCatalog.components.values(), confirm, validation],
+    [...basicCatalog.functions.values(), check], basicCatalog.themeSchema);
 }
 
 export const LAB_FUNCTION_CATALOG_IDS = Object.freeze({

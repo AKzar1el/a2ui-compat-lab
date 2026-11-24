@@ -130,10 +130,12 @@ export async function testTrustedCustomCatalogBrowserReplay(context, origin) {
     const surfaceIsolation = await testConcurrentCustomSurfaces(context, origin);
     const functionIsolation = await testDistinctFunctionCatalogs(context, origin);
     const functionActions = await testFunctionActionContexts(context, origin);
+    const validationPrecedence = await testValidationMessagePrecedence(context, origin);
     return {unregisteredCatalogRejected: true, customDomRendered: true,
       physicalClicks: 2, keyboardActivations: 2, disabledInputAttempts: 2,
       selections: ['alpha', 'beta', 'gamma', 'delta'], customSurfaceDeleted: true,
-      basicCatalogStillRendered: true, surfaceIsolation, functionIsolation, functionActions};
+      basicCatalogStillRendered: true, surfaceIsolation, functionIsolation, functionActions,
+      validationPrecedence};
   } finally {
     await page.close();
   }
@@ -419,6 +421,78 @@ async function testFunctionActionContexts(context, origin) {
     return {physicalClicks: expected.length, distinctActionCatalogs: 2,
       dispatchTimeModelUpdate: true, incompleteBasicPayloadDetected: true,
       basicActionRecovered: true};
+  } finally {
+    await page.close();
+  }
+}
+
+async function testValidationMessagePrecedence(context, origin) {
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  const surfaceId = 'validation-precedence';
+  const send = message => page.evaluate(message => window.__a2uiLab.applyMessage(message),
+    {version: 'v0.9', ...message});
+  const trace = () => page.evaluate(id => window.__a2uiLab.trace(id), surfaceId);
+  const button = page.getByTestId('lab-validation-button');
+  const output = page.getByTestId('lab-validation-message');
+  const update = choice => send({updateDataModel: {surfaceId, path: '/choice', value: choice}});
+  const expectState = async (disabled, message) => {
+    await page.waitForFunction(({disabled, message}) =>
+      document.querySelector('[data-testid="lab-validation-button"]')?.disabled === disabled &&
+      document.querySelector('[data-testid="lab-validation-message"]')?.textContent === message,
+      {disabled, message}, {timeout: 10000});
+    assert.equal(await output.textContent(), message);
+  };
+  try {
+    await page.goto(origin + '/?capture=1&trusted-custom-catalog=1', {waitUntil: 'domcontentloaded'});
+    await page.waitForFunction(() => Boolean(window.__a2uiLab?.applyMessage), null, {timeout: 10000});
+    await send({createSurface: {surfaceId, catalogId}});
+    await send({updateDataModel: {surfaceId, path: '/', value: {choice: 'fail'}}});
+    await send({updateComponents: {surfaceId, components: [
+      {id: 'root', component: 'LabValidation', child: 'label',
+        checks: [{condition: {call: 'labCheck', args: {value: {path: '/choice'}}}, message: 'rule message'}],
+        action: {event: {name: 'submit-validation', context: {choice: {path: '/choice'}}}}},
+      {id: 'label', component: 'Text', text: 'Submit validation'},
+    ]}});
+    await button.waitFor({state: 'visible', timeout: 10000});
+    // The pinned React/core 0.14 pair selects the function's message; the
+    // separate headless 0.15 test records the opposite precedence.
+    await expectState(true, 'function message');
+    const element = await button.elementHandle();
+    assert.ok(element);
+    try {
+      const clickDisabled = async () => {
+        const bounds = await button.boundingBox();
+        assert.ok(bounds);
+        await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      };
+      await clickDisabled();
+      assert.deepEqual((await trace()).actions, []);
+      await update('pass');
+      await expectState(false, '');
+      assert.equal(await button.evaluate((current, old) => current === old, element), true);
+      await button.click();
+      await page.waitForFunction(id => window.__a2uiLab.trace(id).actions.length === 1,
+        surfaceId, {timeout: 10000});
+      const expected = [{name: 'submit-validation', surfaceId, sourceComponentId: 'root',
+        context: {choice: 'pass'}}];
+      assert.deepEqual((await trace()).actions, expected);
+      await update('fail');
+      await expectState(true, 'function message');
+      assert.equal(await button.evaluate((current, old) => current === old, element), true);
+      await clickDisabled();
+      assert.deepEqual((await trace()).actions, expected);
+      assert.deepEqual((await trace()).errors, []);
+      assert.deepEqual(errors, []);
+    } finally {
+      await element.dispose();
+    }
+    return {coreVersion: '0.14.0', invalidMessage: 'function message', validMessage: '',
+      reactiveRecovery: true, stableButton: true, physicalClicks: 3, emittedActions: 1};
   } finally {
     await page.close();
   }
