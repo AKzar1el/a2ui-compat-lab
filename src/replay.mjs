@@ -72,6 +72,15 @@ export function parseJsonLinesBytes(chunks, {maxLineBytes = 262144, maxMessages 
   return messages;
 }
 
+/** The published 0.15 core processor.dispose() releases RPC, not live surfaces. */
+function disposeReplayProcessor(processor) {
+  try {
+    processor.model.dispose();
+  } finally {
+    processor.dispose();
+  }
+}
+
 /** Exercise the real v0.9 A2UI MessageProcessor; intentionally NOT a browser renderer. */
 export function replayV09(messages) {
   const actions = [];
@@ -97,7 +106,7 @@ export function replayV09(messages) {
     }
     return {protocol: 'v0.9', snapshots, actionCount: actions.length};
   } finally {
-    processor.dispose();
+    disposeReplayProcessor(processor);
   }
 }
 
@@ -247,7 +256,7 @@ export async function replayV09Actions(steps) {
     }
     return {protocol: 'v0.9', snapshots, actions};
   } finally {
-    processor.dispose();
+    disposeReplayProcessor(processor);
   }
 }
 
@@ -325,6 +334,6 @@ export function replayV09Recoverable(messages) {
       safeToContinue: !unsafeRecovery, halted: unsafeRecovery,
     };
   } finally {
-    processor.dispose();
+    disposeReplayProcessor(processor);
   }
 }

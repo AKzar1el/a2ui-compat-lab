@@ -1,6 +1,6 @@
 import React from 'react';
 import {createComponentImplementation} from '@a2ui/react/v0_9';
-import {Catalog} from '@a2ui/web_core/v0_9';
+import {Catalog, createFunctionImplementation} from '@a2ui/web_core/v0_9';
 import {basicCatalog} from '@a2ui/web_core/v0_9/basic_catalog';
 
 export const LAB_CATALOG_ID = 'https://example.invalid/a2ui/lab-react/v0_9';
@@ -23,4 +23,21 @@ export function createLabReactCatalog() {
   return new Catalog(LAB_CATALOG_ID, '0.9',
     [...basicCatalog.components.values(), confirm],
     [...basicCatalog.functions.values()], basicCatalog.themeSchema);
+}
+
+export const LAB_FUNCTION_CATALOG_IDS = Object.freeze({
+  A: 'https://example.invalid/a2ui/lab-function-a/v0_9',
+  B: 'https://example.invalid/a2ui/lab-function-b/v0_9',
+});
+
+// The same function name deliberately resolves differently in each fixed catalog.
+export function createLabFunctionCatalogs() {
+  const schema = basicCatalog.functions.get('required').schema;
+  return Object.entries(LAB_FUNCTION_CATALOG_IDS).map(([prefix, id]) => {
+    const label = createFunctionImplementation({
+      name: 'labScopedLabel', returnType: 'string', schema,
+    }, ({value}) => prefix + ':' + String(value));
+    return new Catalog(id, '0.9', [...basicCatalog.components.values()],
+      [...basicCatalog.functions.values(), label], basicCatalog.themeSchema);
+  });
 }
