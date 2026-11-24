@@ -71,3 +71,16 @@ resolver emits an expression error when `required` receives an unresolved
 path, whereas an explicitly empty string is an ordinary invalid value.
 The test retains zero-error assertions and verifies a newly created surface
 starts with no model data or components before populating it.
+
+### Distinct trusted function catalogs
+
+The same opt-in registers two fixed synthetic function catalogs:
+`https://example.invalid/a2ui/lab-function-a/v0_9` and
+`https://example.invalid/a2ui/lab-function-b/v0_9`. Both define
+`labScopedLabel`, but return different prefixes for the same bound input.
+The hosted Chromium regression checks simultaneous actual Text rendering,
+surface-local reactive updates, deletion and recreation, preserved surviving
+DOM identity, and a basic-catalog negative control with recovery. Expected
+negative-control SDK errors are distinct from the zero-error positive path.
+No arbitrary functions are loaded from captures. This is a regression
+example, not security isolation certification. Exact-head CI is required.

@@ -4,14 +4,16 @@ import {A2uiSurface} from '@a2ui/react/v0_9';
 import {MessageProcessor} from '@a2ui/web_core/v0_9';
 import {basicCatalog} from '@a2ui/web_core/v0_9/basic_catalog';
 import steps from './fixture.json';
-import {createLabReactCatalog} from './trusted-example-catalog.jsx';
+import {createLabReactCatalog, createLabFunctionCatalogs} from './trusted-example-catalog.jsx';
 
 const emitted = [];
 const errors = [];
 const params = new URLSearchParams(window.location.search);
 const captureMode = params.get('capture') === '1';
 const customCatalogEnabled = captureMode && params.get('trusted-custom-catalog') === '1';
-const catalogs = customCatalogEnabled ? [basicCatalog, createLabReactCatalog()] : [basicCatalog];
+const catalogs = customCatalogEnabled
+  ? [basicCatalog, createLabReactCatalog(), ...createLabFunctionCatalogs()]
+  : [basicCatalog];
 const processor = new MessageProcessor(catalogs, action => {
   const {timestamp, ...stable} = action;
   emitted.push(structuredClone(stable));
