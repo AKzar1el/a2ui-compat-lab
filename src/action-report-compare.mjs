@@ -25,6 +25,11 @@ function validated(report, label) {
       report.allMatch !== true || !Array.isArray(report.chunkTrials) ||
       !report.chunkTrials.length || report.chunkTrials.some(x => !isObject(x) || x.matches !== true))
     refuse('incomplete or inconsistent action evidence');
+  // Legacy reports predate byte trials; when present, they must agree with allMatch.
+  if (Object.hasOwn(report, 'byteChunkTrials') &&
+      (!Array.isArray(report.byteChunkTrials) || !report.byteChunkTrials.length ||
+        report.byteChunkTrials.findIndex(x => !isObject(x) || x.matches !== true) !== -1))
+    refuse('incomplete or inconsistent action evidence');
   let count = 0;
   for (const [i, s] of t.snapshots.entries()) {
     if (!isObject(s) || s.index !== i || !['message','tap'].includes(s.kind) ||
