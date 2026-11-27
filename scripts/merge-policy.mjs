@@ -35,9 +35,36 @@ export function preliminary(pr){
  return null;
 }
 
+// GitHub limits a check-run page to 100 and can cap check-suite history.
+// Accept at most 999 distinct runs, never infer success from a truncated scan.
+export const MAX_CHECK_RUNS = 999;
+const CHECK_PAGE_SIZE = 100;
+export async function completeCheckRuns(fetchPage) {
+ const seen=new Set();
+ const all=[];
+ let count;
+ for(let page=1;page<=Math.ceil(MAX_CHECK_RUNS/CHECK_PAGE_SIZE);page++){
+  const result=await fetchPage(page);
+  if(!Number.isSafeInteger(result?.total_count)||result.total_count<0||
+     result.total_count>MAX_CHECK_RUNS||!Array.isArray(result.check_runs))
+   throw Error('Incomplete or oversized check-run evidence');
+  if(count===undefined)count=result.total_count;
+  if(result.total_count!==count||result.check_runs.length!==Math.min(CHECK_PAGE_SIZE,count-all.length))
+   throw Error('Check-run pagination changed or incomplete');
+  for(const check of result.check_runs){
+   if(!Number.isSafeInteger(check?.id)||check.id<1||seen.has(check.id))
+    throw Error('Duplicate or invalid check-run identity');
+   seen.add(check.id);
+   all.push(check);
+  }
+  if(all.length===count)return {total_count:count,check_runs:all};
+ }
+ throw Error('Check-run pagination exceeded reviewed limit');
+}
+
 export function checksGreen(result, required) {
  if(!Array.isArray(result?.check_runs) || !Number.isSafeInteger(result.total_count) ||
-    result.total_count >= 100 || result.check_runs.length !== result.total_count) return false;
+    result.total_count < 0 || result.total_count > MAX_CHECK_RUNS || result.check_runs.length !== result.total_count) return false;
  // Source-PR head checks have no self-integration exemption: the currently
  // executing merger runs on main, not on the PR head. All other checks gate.
  const relevant = result.check_runs;
@@ -74,7 +101,7 @@ export function latestMainCiRun(result, mainSha) {
 export function mainChecksGreen(checks, jobs, required, activeIntegrationRunId) {
  if(!Number.isSafeInteger(activeIntegrationRunId)||activeIntegrationRunId<1)return false;
  if(!Array.isArray(checks?.check_runs)||!Number.isSafeInteger(checks.total_count)||
-    checks.total_count>=100||checks.check_runs.length!==checks.total_count||
+    checks.total_count<0||checks.total_count>MAX_CHECK_RUNS||checks.check_runs.length!==checks.total_count||
     !Array.isArray(jobs?.jobs)||!Number.isSafeInteger(jobs.total_count)||
     jobs.total_count>=100||jobs.jobs.length!==jobs.total_count)return false;
  // Only the currently executing integration job may remain in progress.
