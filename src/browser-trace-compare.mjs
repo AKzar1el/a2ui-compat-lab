@@ -48,7 +48,8 @@ function checkTrace(trace, label) {
         (typeof trace.screenshotSha256 !== 'string' ||
           !/^[a-f0-9]{64}$/i.test(trace.screenshotSha256))) ||
       !validVersions(trace.versions) || typeof trace.passed !== 'boolean' ||
-      FIELDS.some(field => !Array.isArray(trace[field])) ||
+      FIELDS.some(field => !Array.isArray(trace[field]) ||
+        trace[field].findIndex((_, index) => !Object.hasOwn(trace[field], index)) !== -1) ||
       trace.checkpoints.length === 0 ||
       trace.actions.some(item => !isRecord(item) ||
         typeof item.name !== 'string' || item.name.length === 0 ||
