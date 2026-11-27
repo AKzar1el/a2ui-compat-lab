@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {preliminary,permittedPath,repo,checksGreen,latestMainCiRun,mainChecksGreen} from '../scripts/merge-policy.mjs';
+import {preliminary,permittedPath,repo,checksGreen,latestMainCiRun,mainChecksGreen,completeCheckRuns} from '../scripts/merge-policy.mjs';
 const sha='a'.repeat(40);
 const good={draft:false,state:'open',mergeable:true,mergeable_state:'clean',
  base:{ref:'main',repo:{full_name:repo}},head:{sha,ref:'revshot/safe-change',repo:{full_name:repo}},
@@ -171,4 +171,63 @@ test('guarded bug-pipeline branches require exact bug identity and the same exis
  assert.equal(preliminary({...candidate,draft:true}),'draft PR');
  assert.equal(permittedPath('scripts/merge-policy.mjs'),false);
  assert.equal(permittedPath('.github/workflows/auto-merge.yml'),false);
+});
+
+test('complete 100+ check-run evidence passes only when all applicable checks are green',()=>{
+ const required=['sdk-parity','react-browser','dependency-audit'];
+ const ok=(id,name)=>({id,name,app:{slug:'github-actions'},status:'completed',conclusion:'success'});
+ const rows=[...required.map((name,i)=>ok(i+1,name)),
+  ...Array.from({length:98},(_,i)=>ok(i+4,'unrelated-'+i))];
+ const report={total_count:rows.length,check_runs:rows};
+ const jobs={total_count:3,jobs:required.map(name=>({name,status:'completed',conclusion:'success'}))};
+ assert.equal(checksGreen(report,required),true);
+ assert.equal(mainChecksGreen(report,jobs,required,42),true);
+ const failed=structuredClone(report);
+ failed.check_runs[100].conclusion='failure';
+ assert.equal(checksGreen(failed,required),false);
+ assert.equal(mainChecksGreen(failed,jobs,required,42),false);
+ assert.equal(checksGreen({...report,check_runs:rows.slice(0,100)},required),false);
+});
+
+test('check-run pagination handles 0, 99, 100, 101 and 201 complete records',async()=>{
+ for(const count of [0,99,100,101,201,999]){
+  const rows=Array.from({length:count},(_,i)=>({id:i+1,status:'completed',conclusion:'success'}));
+  const pages=[];
+  const result=await completeCheckRuns(async page=>{
+   pages.push(page);
+   return {total_count:count,check_runs:rows.slice((page-1)*100,page*100)};
+  });
+  assert.deepEqual(result,{total_count:count,check_runs:rows});
+  assert.equal(pages.length,Math.max(1,Math.ceil(count/100)));
+ }
+});
+test('check-run pagination fails closed on missing, duplicated, changed, malformed or capped evidence',async()=>{
+ const rows=Array.from({length:101},(_,i)=>({id:i+1,status:'completed',conclusion:'success'}));
+ const first={total_count:101,check_runs:rows.slice(0,100)};
+ for(const second of [
+  {total_count:102,check_runs:rows.slice(100)},
+  {total_count:101,check_runs:[]},
+  {total_count:101,check_runs:[rows[0]]},
+  {total_count:101,check_runs:[{id:0}]},
+  {total_count:101,check_runs:[{id:'101'}]},
+  {check_runs:rows.slice(100)},
+ ]){
+  await assert.rejects(completeCheckRuns(async page=>page===1?first:second));
+ }
+ await assert.rejects(completeCheckRuns(async()=>({total_count:1000,check_runs:rows.slice(0,100)})));
+ await assert.rejects(completeCheckRuns(async()=>({total_count:101,check_runs:rows.slice(0,99)})));
+ await assert.rejects(completeCheckRuns(async page=>{
+  if(page===2)throw Error('network failure');
+  return first;
+ }));
+});
+test('collected second-page security failures still reject both head and main',async()=>{
+ const required=['sdk-parity','react-browser','dependency-audit'];
+ const rows=Array.from({length:101},(_,i)=>({id:i+1,name:required[i]??'other-'+i,
+   app:{slug:'github-actions'},status:'completed',conclusion:'success'}));
+ rows[100]={id:101,name:'Socket Security',app:{slug:'socket-security'},status:'completed',conclusion:'failure'};
+ const report=await completeCheckRuns(async page=>({total_count:rows.length,check_runs:rows.slice((page-1)*100,page*100)}));
+ const jobs={total_count:3,jobs:required.map(name=>({name,status:'completed',conclusion:'success'}))};
+ assert.equal(checksGreen(report,required),false);
+ assert.equal(mainChecksGreen(report,jobs,required,42),false);
 });

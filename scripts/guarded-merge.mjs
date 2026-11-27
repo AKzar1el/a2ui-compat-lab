@@ -1,4 +1,4 @@
-import {preliminary,permittedPath,repo,checksGreen,latestMainCiRun,mainChecksGreen} from './merge-policy.mjs';
+import {preliminary,permittedPath,repo,checksGreen,latestMainCiRun,mainChecksGreen,completeCheckRuns} from './merge-policy.mjs';
 const token=process.env.GITHUB_TOKEN;
 const dry=process.env.A2UI_AUTO_MERGE_DRY_RUN==='true';
 if(process.env.GITHUB_REPOSITORY!==repo||!token)throw Error('Exact repo binding and GITHUB_TOKEN required');
@@ -12,6 +12,7 @@ async function api(endpoint,method='GET',payload){
  return r.status===204?null:r.json();
 }
 const root='/repos/'+repo;
+const checkRuns=endpoint=>completeCheckRuns(page=>api(endpoint+'&page='+page));
 async function threadsClear(number){
  const query='query($number:Int!){repository(owner:"AKzar1el",name:"a2ui-compat-lab"){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved}pageInfo{hasNextPage}}}}}';
  const r=await api('/graphql','POST',{query,variables:{number}});
@@ -29,7 +30,7 @@ async function run(){
   console.log('SKIP: latest exact-main CI workflow has not succeeded');return;
  }
  const mainJobs=await api(root+'/actions/runs/'+latest.id+'/jobs?per_page=100');
- if(!mainChecksGreen(await api(root+'/commits/'+main+'/check-runs?per_page=100'),mainJobs,required,Number(process.env.GITHUB_RUN_ID))){
+ if(!mainChecksGreen(await checkRuns(root+'/commits/'+main+'/check-runs?per_page=100'),mainJobs,required,Number(process.env.GITHUB_RUN_ID))){
   console.log('SKIP: exact-main CI jobs or unrelated security checks not green');return;
  }
  const prs=await api(root+'/pulls?state=open&per_page=100&sort=created&direction=asc');
@@ -49,7 +50,7 @@ async function run(){
   if(reviews.length>=100||reviews.some(x=>x.state==='CHANGES_REQUESTED')||!await threadsClear(pr.number)){
    console.log('SKIP #'+pr.number+': review hold');continue;
   }
-  if(!checksGreen(await api(root+'/commits/'+pr.head.sha+'/check-runs?per_page=100'),required)){
+  if(!checksGreen(await checkRuns(root+'/commits/'+pr.head.sha+'/check-runs?per_page=100'),required)){
    console.log('SKIP #'+pr.number+': exact-head CI not green');continue;
   }
   const status=await api(root+'/commits/'+pr.head.sha+'/status');
@@ -73,7 +74,7 @@ async function run(){
      !await threadsClear(pr.number)){
    console.log('SKIP #'+pr.number+': final review gate changed');continue;
   }
-  if(!checksGreen(await api(root+'/commits/'+pr.head.sha+'/check-runs?per_page=100'),required)){
+  if(!checksGreen(await checkRuns(root+'/commits/'+pr.head.sha+'/check-runs?per_page=100'),required)){
    console.log('SKIP #'+pr.number+': final exact-head checks changed');continue;
   }
   const freshStatus=await api(root+'/commits/'+pr.head.sha+'/status');
