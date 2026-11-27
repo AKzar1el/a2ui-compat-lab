@@ -14,7 +14,17 @@ export function preliminary(pr){
  if(pr.draft)return 'draft PR';
  if(pr.state!=='open')return 'closed';
  if(pr.base?.ref!=='main'||pr.base?.repo?.full_name!==repo)return 'unexpected base';
- if(pr.head?.repo?.full_name!==repo||!pr.head?.ref?.startsWith('revshot/'))return 'unexpected source branch';
+ if(pr.head?.repo?.full_name!==repo)return 'unexpected source branch';
+ const branch=pr.head?.ref;
+ if(typeof branch!=='string')return 'unexpected source branch';
+ if(!branch.startsWith('revshot/')){
+  const bug=/^rs-bugfix\/([0-9a-f]{12})$/.exec(branch);
+  if(!bug)return 'unexpected source branch';
+  const markers=(pr.body||'').split(/\r?\n/).map(x=>x.trim())
+   .filter(x=>x.startsWith('<!-- rs-bugfix:v1 bug_id='));
+  if(markers.length!==1||markers[0]!=='<!-- rs-bugfix:v1 bug_id='+bug[1]+' -->')
+   return 'missing or mismatched bug identity';
+ }
  if(pr.user?.login!=='AKzar1el')return 'not owner authored';
  if(pr.mergeable!==true||pr.mergeable_state!=='clean')return 'unresolved mergeability';
  if(pr.requested_reviewers?.length||pr.requested_teams?.length)return 'human review requested';

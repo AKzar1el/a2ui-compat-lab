@@ -4,7 +4,7 @@ This repository integrates safe, explicitly handed-off worker PRs using its own 
 
 - Runs at minutes 17, 37 and 57 UTC and can be started manually in dry-run mode.
 - Performs exactly one SHA-pinned merge commit at most per run.
-- Only AKzar1el-authored, non-draft, clean PRs from revshot/* to the current main are considered.
+- Only AKzar1el-authored, non-draft, clean PRs from revshot/* or rs-bugfix/<12 lowercase hex digits> to current main are considered. The rs-bugfix branch must carry exactly one matching bug-identity marker (<!-- rs-bugfix:v1 bug_id=<id> -->). Both routes require the existing exact-SHA handoff and every independent gate. The scheduled/manual guard can evaluate either route; the existing CI-completion wake remains restricted to revshot/*.
 - A PR must contain a single exact body line: MERGER_HANDOFF: AKzar1el/a2ui-compat-lab@<full HEAD SHA>. Comments do not count as a handoff.
 - Source/testing/documentation changes are narrowly allowed. Changes to GitHub Actions, packages, dependency lockfiles, project/worker policies and merge/security controls require separate owner review and manual integration.
 - Requires no unresolved human review threads, no requested reviewers, no hold labels, clean branch ancestry, successful exact-head sdk-parity, react-browser and dependency-audit jobs, and green CI on current main.
