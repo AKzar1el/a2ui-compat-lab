@@ -154,3 +154,21 @@ test('guard revalidates live security, branch and reviews before privileged merg
  }
  assert.match(gate,/if\(!checksGreen\(/);
 });
+
+test('guarded bug-pipeline branches require exact bug identity and the same existing gates',()=>{
+ const id='823a0dec7b6e';
+ const marker='<!-- rs-bugfix:v1 bug_id='+id+' -->';
+ const candidate={...good,head:{...good.head,ref:'rs-bugfix/'+id},body:marker+'\n'+good.body};
+ assert.equal(preliminary(candidate),null);
+ for(const ref of ['rs-bugfix/','rs-bugfix/823a0dec7b6','rs-bugfix/823a0dec7b6e-extra','rs-bugfix/823A0DEC7B6E','fix/'+id])
+  assert.match(preliminary({...candidate,head:{...candidate.head,ref}}),/unexpected source branch/);
+ for(const body of [good.body,marker.replace(id,'111111111111')+'\n'+good.body,marker+'\n'+marker+'\n'+good.body])
+  assert.match(preliminary({...candidate,body}),/bug identity/);
+ assert.match(preliminary({...candidate,body:marker+'\nMERGER_HANDOFF: '+repo+'@'+'b'.repeat(40)}),/stale/);
+ assert.match(preliminary({...candidate,head:{...candidate.head,repo:{full_name:'other/fork'}}}),/unexpected/);
+ assert.match(preliminary({...candidate,labels:[{name:'needs-owner-review'}]}),/hold/);
+ assert.match(preliminary({...candidate,requested_reviewers:[{login:'reviewer'}]}),/human review/);
+ assert.equal(preliminary({...candidate,draft:true}),'draft PR');
+ assert.equal(permittedPath('scripts/merge-policy.mjs'),false);
+ assert.equal(permittedPath('.github/workflows/auto-merge.yml'),false);
+});
